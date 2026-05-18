@@ -1,0 +1,5 @@
+{
+  "name": "@repo/eslint-config",
+  "version": "1.0.0",
+  "main": "eslint/base.js"
+}

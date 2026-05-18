@@ -1,0 +1,45 @@
+{
+  "name": "web",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@repo/api": "workspace:*",
+    "@repo/domain": "workspace:*",
+    "@repo/infrastructure": "workspace:*",
+    "@tanstack/react-query": "^5.100.10",
+    "@trpc/client": "^11.17.0",
+    "@trpc/next": "^11.17.0",
+    "@trpc/react-query": "^11.17.0",
+    "@trpc/server": "^10.45.4",
+    "immer": "^11.1.8",
+    "lucide-react": "^1.14.0",
+    "next": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "sonner": "^2.0.7",
+    "superjson": "^2.2.6",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
+    "@tailwindcss/postcss": "^4.2.4",
+    "@types/jest": "^30.0.0",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "autoprefixer": "^10.5.0",
+    "eslint-plugin-boundaries": "^6.0.2",
+    "postcss": "^8.5.12",
+    "tailwindcss": "^4.2.4",
+    "typescript": "latest",
+    "vitest": "^4.1.6"
+  }
+}
