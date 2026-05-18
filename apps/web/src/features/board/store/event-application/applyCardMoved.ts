@@ -71,15 +71,12 @@ export function applyCardMoved(
    * Immutable entity update.
    * --------------------------------------------------------------
    */
-  // در فایل applyCardMoved.ts حدود خط 82
   const updatedCard = {
     ...existingCard,
-    listId: toListId,
-    position: newPosition,
-
-    // 🌟 فیکس ارور version:
-    revision: (event as any).version || (event as any).eventVersion || 0,
-
+    listId:      toListId,
+    position:    newPosition,
+    // ✅ event.version is typed on DomainEvent base — no cast needed
+    revision:    event.version,
     isOptimistic: envelope.optimistic ?? existingCard.isOptimistic ?? false,
   };
 

@@ -43,8 +43,7 @@ export const boardApi = {
     newPosition: string;
     mutationId: string;
   }) =>
-    // moveList is a stub on the backend; this will be wired once the route exists
-    trpc.v1.public.board.moveCard.mutate(payload as any),
+    trpc.v1.public.board.moveList.mutate(payload),
 
   updateCard: (payload: {
     id: string;
@@ -73,16 +72,16 @@ export const boardApi = {
 
   updateList: (payload: {
     listId: string;
+    boardId: string;
     title: string;
     mutationId: string;
   }) =>
-    // updateList handler is registered in trpc.ts as {} as any — will be a runtime
-    // crash until the handler is implemented. The mutation hook checks result.success.
-    (trpc.v1.public as any).list.update.mutate(payload),
+    trpc.v1.public.list.update.mutate(payload),
 
   deleteList: (payload: {
     listId: string;
+    boardId: string;
     mutationId: string;
   }) =>
-    (trpc.v1.public as any).list.delete.mutate(payload),
+    trpc.v1.public.list.delete.mutate(payload),
 };
