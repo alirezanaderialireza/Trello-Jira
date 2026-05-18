@@ -1,0 +1,13 @@
+/* وارد کردن کل موتور تیلویند نسخه ۴ با یک خط! */
+@import "tailwindcss";
+
+/* استایل‌های اختصاصی خودمان (مثل مخفی کردن اسکرول‌بار) */
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar {
+      display: none;
+  }
+  .scrollbar-hide {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+  }
+}

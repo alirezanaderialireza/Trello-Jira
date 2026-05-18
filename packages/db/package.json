@@ -1,0 +1,26 @@
+{
+  "name": "@repo/db",
+  "version": "1.0.0",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "generate": "drizzle-kit generate",
+    "migrate": "drizzle-kit migrate",
+    "push": "drizzle-kit push",
+    "studio": "drizzle-kit studio",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@repo/domain": "workspace:*",
+    "drizzle-orm": "latest",
+    "pg": "^8.20.0",
+    "postgres": "latest"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
+    "@types/node": "^25.6.0",
+    "dotenv": "latest",
+    "drizzle-kit": "latest",
+    "typescript": "latest"
+  }
+}

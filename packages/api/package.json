@@ -1,0 +1,22 @@
+{
+  "name": "@repo/api",
+  "version": "1.0.0",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@repo/db": "workspace:*",
+    "@repo/domain": "workspace:*",
+    "@repo/infrastructure": "workspace:*",
+    "@trpc/server": "^10.45.0",
+    "drizzle-orm": "^0.45.2",
+    "superjson": "^2.2.6",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "typescript": "latest"
+  }
+}
