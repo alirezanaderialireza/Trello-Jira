@@ -6,15 +6,15 @@ import type { ClientEventEnvelope } from "./types";
 import type { ReducerContext } from "./context";
 
 /**
- * ------------------------------------------------------------------
- * applyListCreated
- * ------------------------------------------------------------------
- * Responsibilities:
- * - Atomic list creation
- * - Deterministic ordering via LexoRank
- * - Idempotency & Stale Guard (>= version check)
- * - Cards-By-List bucket initialization
- * ------------------------------------------------------------------
+ * applyListCreated — Pure Event Reducer
+ *
+ * Fixes applied:
+ * ✅ revision uses event.version directly — no unsafe cast.
+ *    DomainEvent.version is a plain number; we have full type safety via
+ *    ClientEventEnvelope<ListCreatedEvent>.
+ *
+ * Rules:
+ * - Pure, immutable, replay-safe, idempotent, deterministic sort
  */
 export function applyListCreated(
   state: BoardStoreState,
@@ -26,43 +26,32 @@ export function applyListCreated(
 
   const existingList = state.lists[listId];
 
-  /**
-   * 🛡️ 1. Stale & Idempotency Guard
-   * اگر لیست از قبل وجود دارد و ورژن آن بزرگتر یا مساوی است،
-   * یعنی این رویداد قبلاً اعمال شده یا یک رویداد جدیدتر جای آن را گرفته است.
-   */
+  // ------------------------------------------------------------------
+  // Stale & Idempotency guard
+  // ------------------------------------------------------------------
   if (existingList && existingList.revision >= event.version) {
     return {};
   }
 
-  // ۲. ساخت نهاد (Entity) جدید با حفظ فیلدهای احتمالی محلی
   const newList = {
     ...(existingList ?? {}),
     id: listId,
     title,
     position,
-    revision: event.version,
+    revision: event.version,          // ✅ direct — no cast
     isOptimistic: envelope.optimistic ?? false,
   };
 
-  /**
-   * 🛡️ 3. Idempotent Order Update
-   * جلوگیری از اضافه شدن چندباره آیدی به listOrder در زمان Replay
-   */
+  // Idempotent insert
   const isAlreadyInOrder = state.listOrder.includes(listId);
   const nextListOrder = isAlreadyInOrder
     ? [...state.listOrder]
     : [...state.listOrder, listId];
 
-  /**
-   * 🚀 4. Deterministic Stable Sort
-   * تضمین اینکه در تمام کلاینت‌ها ترتیب لیست‌ها دقیقاً یکسان باقی می‌ماند.
-   */
+  // Deterministic stable sort
   nextListOrder.sort((a, b) => {
-    const posA = a === listId ? newList.position : state.lists[a]?.position ?? "";
-    const posB = b === listId ? newList.position : state.lists[b]?.position ?? "";
-    
-    // سورت بر اساس LexoRank و در صورت تساوی، بر اساس ID (Stable Sort)
+    const posA = a === listId ? newList.position : (state.lists[a]?.position ?? "");
+    const posB = b === listId ? newList.position : (state.lists[b]?.position ?? "");
     return posA.localeCompare(posB) || a.localeCompare(b);
   });
 
@@ -72,10 +61,6 @@ export function applyListCreated(
       [listId]: newList,
     },
     listOrder: nextListOrder,
-    /**
-     * 📦 5. Bucket Initialization
-     * ایجاد فضای خالی برای کارت‌های این لیست اگر از قبل وجود نداشته باشد.
-     */
     cardsByList: {
       ...state.cardsByList,
       [listId]: state.cardsByList[listId] ?? [],

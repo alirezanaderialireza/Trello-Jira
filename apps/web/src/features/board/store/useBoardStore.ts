@@ -316,21 +316,22 @@ export const useBoardStore = create<BoardState>()((set) => ({
     const nextCardsByList = { ...state.cardsByList };
 
     if (snapshot.cards) {
-    Object.entries(snapshot.cards).forEach(([id, snapCard]) => {
-      const currentCard = state.cards[id];
-      
-      if (currentCard && currentCard.revision > snapCard.revision) {
-        // 🌟 محل قرارگیری سنسور: رول‌بک به ورژن قدیمی‌تر انجام نشد
-        telemetry.log(
-          "SNAPSHOT_MANAGER",
-          "ROLLBACK_SKIPPED",
-          { entityId: id, currentRevision: currentCard.revision, snapshotRevision: snapCard.revision, reason: "stale_protection" }
-        );
-        return; // از این مورد عبور کن
-      }
-      // در غیر این صورت رول‌بک انجام شود...
-    });
-  }
+      Object.entries(snapshot.cards).forEach(([id, snapCard]) => {
+        const currentCard = state.cards[id];
+
+        if (currentCard && currentCard.revision > snapCard.revision) {
+          // 🌟 محل قرارگیری سنسور: رول‌بک به ورژن قدیمی‌تر انجام نشد
+          telemetry.log(
+            "SNAPSHOT_MANAGER",
+            "ROLLBACK_SKIPPED",
+            { entityId: id, currentRevision: currentCard.revision, snapshotRevision: snapCard.revision, reason: "stale_protection" }
+          );
+          return; // از این مورد عبور کن
+        }
+        // ✅ Bug Fix 1: nextCards را آپدیت می‌کنیم (قبلاً فقط return می‌شد)
+        nextCards[id] = snapCard;
+      });
+    }
 
     if (snapshot.lists) {
       Object.entries(snapshot.lists).forEach(([id, snapList]) => {
@@ -407,6 +408,8 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
           payload: {
             cardId: card.id,
+            // ✅ Bug Fix 2: boardId required است در CardCreatedPayload
+            boardId: card.boardId ?? "",
             listId: card.listId,
             title: card.title,
             position: card.position,

@@ -1,11 +1,17 @@
 // apps/web/src/app/board/[boardId]/page.tsx
+//
+// Fixes applied:
+// ✅ #16: Pass `boardSequence` from the SSR fetch result through to BoardView
+//         so the Zustand reconciler is aligned from the very first render.
+//         Previously the cast `(raw.lists as unknown) as FullBoardDto["lists"]`
+//         discarded `boardSequence` and BoardView hardcoded sequence "0",
+//         causing every WebSocket event to look like a gap.
 
 export const dynamic = "force-dynamic";
 
 import { Suspense } from "react";
 import { getBoardData } from "../../../features/board/actions/board.actions";
-import BoardView from "../../../features/board/components/BoardView";
-import type { FullBoardDto } from "../../../features/board/components/BoardView";
+import BoardView, { type FullBoardDto } from "../../../features/board/components/BoardView";
 
 interface BoardPageProps {
   params: Promise<{ boardId: string }>;
@@ -34,12 +40,13 @@ export default async function BoardPage({ params }: BoardPageProps) {
       );
     }
 
-    // \u2705 fix: getFullBoard \u062d\u0627\u0644\u0627 { id, title, lists[] } \u0628\u0631\u0645\u06cc\u200c\u06af\u0631\u062f\u0627\u0646\u062f
-    // mapping \u0642\u062f\u06cc\u0645\u06cc \u062d\u0630\u0641 \u0634\u062f \u2014 \u0641\u0642\u0637 lists \u0631\u0627 cast \u0645\u06cc\u200c\u06a9\u0646\u06cc\u0645 \u0686\u0648\u0646 Drizzle any \u0628\u0631\u0645\u06cc\u200c\u06af\u0631\u062f\u0627\u0646\u062f
+    // ✅ #16: boardSequence from SSR is forwarded into FullBoardDto so BoardView
+    //         passes the real sequence to initBoard — not the hardcoded "0".
     const boardData: FullBoardDto = {
-      id: raw.id,
-      title: raw.title,
-      lists: (raw.lists as unknown) as FullBoardDto["lists"],
+      id:             raw.id,
+      title:          raw.title,
+      lists:          raw.lists as unknown as FullBoardDto["lists"],
+      boardSequence:  raw.boardSequence ?? 0,   // ✅ real sequence
     };
 
     return (
@@ -51,7 +58,9 @@ export default async function BoardPage({ params }: BoardPageProps) {
         </header>
 
         <Suspense
-          fallback={<div className="p-4 text-white font-medium">Loading Board View...</div>}
+          fallback={
+            <div className="p-4 text-white font-medium">Loading Board View…</div>
+          }
         >
           <div className="flex-1 min-h-0">
             <BoardView data={boardData} boardId={boardId} />
@@ -77,7 +86,9 @@ export default async function BoardPage({ params }: BoardPageProps) {
               <div>
                 <p className="text-zinc-400 text-sm mb-1">Error</p>
                 <pre className="bg-zinc-900 p-4 rounded-lg text-red-300 text-xs overflow-auto border border-zinc-800 whitespace-pre-wrap">
-                  {error instanceof Error ? error.stack : JSON.stringify(error, null, 2)}
+                  {error instanceof Error
+                    ? error.stack
+                    : JSON.stringify(error, null, 2)}
                 </pre>
               </div>
             )}
