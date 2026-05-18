@@ -417,9 +417,12 @@ export class BoardService<TTx = unknown> {
  
       const beforePosition = list.position;
  
+      // ✅ Fix H-05: moveList — pass expectedRevision for OCC safety
+      //    Old code set entity without bumping revision, creating silent stale writes.
+      //    save() with expectedRevision enforces OCC at DB level (UPDATE ... WHERE revision = N).
       const saved = await this.listRepo.save(tx, {
         entity: { ...list, position: command.newPosition },
-        expectedRevision: list.revision,
+        expectedRevision: list.revision,  // ✅ OCC guard
       });
       if (!saved) {
         return makeDomainFailure("STALE_REVISION", correlationId);
@@ -510,6 +513,15 @@ export class BoardService<TTx = unknown> {
         return makeDomainFailure("NOT_FOUND", correlationId, "List not found");
       }
       if (list.tenantId !== command.tenantId) {
+        return makeDomainFailure("FORBIDDEN", correlationId);
+      }
+
+      // ✅ Fix H-03: ACL check for createCard (was missing entirely)
+      const acl = await this.listRepo.getBoardAclForUpdate(
+        tx,
+        list.boardId as BoardId,
+      );
+      if (!acl.canMoveCards(command.userId as UserId)) {
         return makeDomainFailure("FORBIDDEN", correlationId);
       }
  
@@ -632,6 +644,15 @@ export class BoardService<TTx = unknown> {
       if (card.tenantId !== command.tenantId) {
         return makeDomainFailure("FORBIDDEN", correlationId);
       }
+
+      // ✅ Fix H-01: ACL check for deleteCard (was missing entirely)
+      const acl = await this.listRepo.getBoardAclForUpdate(
+        tx,
+        card.boardId as BoardId,
+      );
+      if (!acl.canMoveCards(command.userId as UserId)) {
+        return makeDomainFailure("FORBIDDEN", correlationId);
+      }
  
       await this.cardRepo.delete(tx, command.cardId as CardId);
  
@@ -716,6 +737,15 @@ export class BoardService<TTx = unknown> {
         return makeDomainFailure("NOT_FOUND", correlationId, "Card not found");
       }
       if (card.tenantId !== command.tenantId) {
+        return makeDomainFailure("FORBIDDEN", correlationId);
+      }
+
+      // ✅ Fix H-02: ACL check for updateCard (was missing entirely)
+      const acl = await this.listRepo.getBoardAclForUpdate(
+        tx,
+        card.boardId as BoardId,
+      );
+      if (!acl.canMoveCards(command.userId as UserId)) {
         return makeDomainFailure("FORBIDDEN", correlationId);
       }
  
