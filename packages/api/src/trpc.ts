@@ -316,8 +316,14 @@ const services = Object.freeze({
   commands: {
     // ✅ #T-01: all handlers are now real implementations — no {} as any
     createList:  new CreateListHandler(
-      txManager, repositories.list, repositories.board,
-      repositories.outbox, repositories.sequence, logger,
+      txManager,
+      repositories.list,
+      repositories.board,
+      repositories.outbox,
+      repositories.sequence,
+      logger,
+      // ✅ #D-13: inject deps explicitly — CreateListHandler no longer has defaults
+      { generateId: () => crypto.randomUUID(), now: () => new Date() },
     ),
     createCard:  createCardHandler,
     updateCard:  updateCardHandler,

@@ -1,10 +1,14 @@
 // packages/domain/src/card/create-card.ts
+//
+// Fixes applied:
+// ✅ #D-12: CreateCardInput.id typed as BoardId — should be CardId.
+//           A function creating a Card entity should accept a CardId for the
+//           card's own id, not a BoardId. This was a copy-paste error from
+//           board types. At runtime both are plain strings so no crash, but the
+//           type contract is wrong and allows passing a BoardId where CardId is
+//           expected without a compile-time error.
 
-// ✅ ارور ۱: حذف "../errors" — وجود ندارد، native errors جایگزین شد
-// ✅ ارور ۲: حذف "../boards/board.repository" — مسیر اشتباه بود
-//           BoardId, TenantId, Revision از canonical location: "../shared/ids"
-
-import type { BoardId, TenantId, Revision } from "../shared/ids";
+import type { CardId, BoardId, TenantId, Revision } from "../shared/ids";
 import type { Card } from "./types";
 
 const MAX_CARD_TITLE_LENGTH = 255;
@@ -12,14 +16,15 @@ const MAX_CARD_TITLE_LENGTH = 255;
 const INITIAL_REVISION = 1 as Revision;
 
 export interface CreateCardInput {
-  readonly id: BoardId;
-  readonly tenantId: TenantId;
-  readonly boardId: BoardId;
-  readonly listId: string;
-  readonly title: string;
+  // ✅ #D-12: id is the card's own identity — must be CardId, not BoardId
+  readonly id:          CardId;
+  readonly tenantId:    TenantId;
+  readonly boardId:     BoardId;
+  readonly listId:      string;
+  readonly title:       string;
   readonly description?: string | null;
-  readonly position: string;
-  readonly createdAt: Date;
+  readonly position:    string;
+  readonly createdAt:   Date;
 }
 
 // ============================================================================

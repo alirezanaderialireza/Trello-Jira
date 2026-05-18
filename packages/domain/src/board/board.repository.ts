@@ -1,44 +1,39 @@
+// packages/domain/src/board/board.repository.ts
+//
+// Fixes applied:
+// ✅ #D-01: Branded types (BoardId, TenantId, UserId, Revision, MutationId)
+//           were re-declared here, diverging from shared/ids.ts.
+//           Two definitions of the same branded type are structurally identical
+//           but create TWO distinct opaque types — TypeScript treats them as
+//           incompatible. Any code importing BoardId from shared/ids.ts cannot
+//           pass the value where board.repository.ts's BoardId is expected.
+//           Fix: re-export from shared/ids.ts instead of re-declaring.
+//
+// ✅ #D-02: BoardRepository interface signature uses bespoke query/mutation
+//           objects (FindBoardByIdQuery, CreateBoardMutation, etc.) that are
+//           incompatible with the generic port contract in ports/index.ts.
+//           DrizzleBoardRepository implements ports/index.ts BoardRepository<TTx>
+//           not this interface — so this interface is orphaned / never used.
+//           Fix: align interface with ports/index.ts contract so it is actually
+//           implemented and can be type-checked against the implementation.
+
 import type { Board } from "./types";
 
-// ============================================================================
-// Branded Primitive Types
-// ============================================================================
-
-export type BoardId = string & {
-  readonly __brand: "BoardId";
-};
-
-export type TenantId = string & {
-  readonly __brand: "TenantId";
-};
-
-export type UserId = string & {
-  readonly __brand: "UserId";
-};
-
-export type Cursor = string & {
-  readonly __brand: "Cursor";
-};
-
-export type Revision = number & {
-  readonly __brand: "Revision";
-};
-
-export type MutationId = string & {
-  readonly __brand: "MutationId";
-};
+// ✅ #D-01: re-export from canonical location — no duplicate branded types
+export type {
+  BoardId,
+  TenantId,
+  UserId,
+  Revision,
+  MutationId,
+  CorrelationId,
+} from "../shared/ids";
 
 // ============================================================================
-// Transaction Contract
+// Pagination helpers (kept for create-board.ts use)
 // ============================================================================
 
-export interface RepositoryTransaction {
-  readonly __brand: "RepositoryTransaction";
-}
-
-// ============================================================================
-// Shared Pagination Contracts
-// ============================================================================
+export type Cursor = string & { readonly __brand: "Cursor" };
 
 export interface PaginationQuery {
   readonly cursor?: Cursor;
@@ -51,102 +46,7 @@ export interface PaginatedResult<T> {
 }
 
 // ============================================================================
-// Query Contracts
-// ============================================================================
-
-export interface FindBoardByIdQuery {
-  readonly boardId: BoardId;
-
-  readonly tenantId: TenantId;
-
-  readonly includeArchived?: boolean;
-
-  readonly includeDeleted?: boolean;
-
-  readonly tx?: RepositoryTransaction;
-
-  readonly lock?:
-    | {
-        readonly mode: "FOR_UPDATE";
-      }
-    | {
-        readonly mode: "NONE";
-      };
-}
-
-export interface FindBoardsQuery
-  extends PaginationQuery {
-  readonly tenantId: TenantId;
-
-  readonly includeArchived?: boolean;
-
-  readonly includeDeleted?: boolean;
-
-  readonly tx?: RepositoryTransaction;
-}
-
-export interface FindBoardByTitleQuery {
-  readonly tenantId: TenantId;
-
-  readonly title: string;
-
-  readonly includeArchived?: boolean;
-
-  readonly includeDeleted?: boolean;
-
-  readonly tx?: RepositoryTransaction;
-}
-
-// ============================================================================
-// Mutation Contracts
-// ============================================================================
-
-export interface CreateBoardMutation {
-  readonly board: Board;
-
-  readonly mutationId: MutationId;
-
-  readonly tx?: RepositoryTransaction;
-}
-
-export interface UpdateBoardMutation {
-  readonly board: Board;
-
-  /**
-   * OCC boundary.
-   * Update MUST affect exactly one row.
-   */
-  readonly expectedRevision: Revision;
-
-  readonly mutationId: MutationId;
-
-  readonly tx?: RepositoryTransaction;
-}
-
-export interface DeleteBoardMutation {
-  readonly boardId: BoardId;
-
-  readonly tenantId: TenantId;
-
-  readonly expectedRevision: Revision;
-
-  readonly deletedAt: Date;
-
-  readonly mutationId: MutationId;
-
-  readonly strategy:
-    | {
-        readonly mode: "SOFT_DELETE";
-      }
-    | {
-        readonly mode: "HARD_DELETE";
-      };
-
-  readonly tx?: RepositoryTransaction;
-}
-
-// ============================================================================
-// Persistence Result Contracts
+// Persistence Result (kept for create-board.ts)
 // ============================================================================
 
 export interface RepositoryMutationResult {
@@ -154,39 +54,23 @@ export interface RepositoryMutationResult {
 }
 
 // ============================================================================
-// Repository Contract
+// ✅ #D-02: BoardRepository now aligns with ports/index.ts contract.
+//    DrizzleBoardRepository implements BoardRepository<TTx> from ports/index.ts.
+//    This local interface is kept only for create-board.ts which uses the
+//    more detailed mutation-object style. It extends the port contract so
+//    both are satisfied by the same implementation.
 // ============================================================================
 
-export interface BoardRepository {
-  // ==========================================================================
-  // Queries
-  // ==========================================================================
+import type { BoardRepository as PortBoardRepository } from "../ports";
+import type { BoardId, TenantId, Revision, MutationId } from "../shared/ids";
 
-  findById(
-    query: FindBoardByIdQuery
-  ): Promise<Board | null>;
+export interface CreateBoardMutation {
+  readonly board: Board;
+  readonly mutationId: MutationId;
+  readonly tx?: unknown;
+}
 
-  findByTitle(
-    query: FindBoardByTitleQuery
-  ): Promise<Board | null>;
-
-  findMany(
-    query: FindBoardsQuery
-  ): Promise<PaginatedResult<Board>>;
-
-  // ==========================================================================
-  // Mutations
-  // ==========================================================================
-
-  create(
-    mutation: CreateBoardMutation
-  ): Promise<RepositoryMutationResult>;
-
-  update(
-    mutation: UpdateBoardMutation
-  ): Promise<RepositoryMutationResult>;
-
-  delete(
-    mutation: DeleteBoardMutation
-  ): Promise<RepositoryMutationResult>;
+export interface BoardRepository extends PortBoardRepository<unknown> {
+  // Extra method used by create-board.ts use-case
+  create(mutation: CreateBoardMutation): Promise<RepositoryMutationResult>;
 }
