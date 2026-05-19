@@ -1,4 +1,27 @@
 // apps/web/src/features/board/store/event-application/dispatcher.ts
+//
+// Architecture boundary:
+//   ┌─────────────────────────────────────────────────┐
+//   │  dispatcher.ts  ←  ORCHESTRATION BOUNDARY       │
+//   │  ─────────────────────────────────────────────  │
+//   │  • Resolves event type → handler                │
+//   │  • Handles unknown-event forward-compat         │
+//   │  • Catches reducer crashes (isolation boundary) │
+//   │  • Fires telemetry observer (side-effect layer) │
+//   │                                                 │
+//   │  reducers (applyCard*, applyList*)              │
+//   │  ─────────────────────────────────────────────  │
+//   │  • 100% pure — no imports outside domain/store  │
+//   │  • zero telemetry, zero side effects            │
+//   │  • (state, envelope, context) → Partial<State>  │
+//   └─────────────────────────────────────────────────┘
+//
+// Task #2 fix: telemetry was already ONLY in this orchestration layer, never
+// inside individual reducers. This refactor makes the boundary explicit by:
+//   1. Wrapping telemetry calls in a narrow DispatchObserver type
+//   2. Making the observer injectable (default = telemetry, testable = no-op)
+//   3. Removing the `telemetry` import from the dispatch hot-path into the
+//      observer so tests can run without the devtools store mounting
 
 import type {
   AppDomainEvent,
@@ -13,36 +36,101 @@ import type {
 } from "@repo/domain";
 
 import type { BoardStoreState } from "../useBoardStore";
-import { telemetry } from "../../devtools/logEvent";
-
 import type { ClientEventEnvelope } from "./types";
 import type { ReducerContext } from "./context";
 
 // ============================================================================
-// 🛡️ Pure Reducers
+// 🛡️ Pure Reducers (zero side effects, zero telemetry)
 // ============================================================================
 
-import { applyCardMoved } from "./applyCardMoved";
-import { applyCardCreated } from "./applyCardCreated";
-import { applyCardUpdated } from "./applyCardUpdated";
-import { applyCardDeleted } from "./applyCardDeleted";
+import { applyCardMoved }    from "./applyCardMoved";
+import { applyCardCreated }  from "./applyCardCreated";
+import { applyCardUpdated }  from "./applyCardUpdated";
+import { applyCardDeleted }  from "./applyCardDeleted";
+import { applyListMoved }    from "./applyListMoved";
+import { applyListCreated }  from "./applyListCreated";
+import { applyListUpdated }  from "./applyListUpdated";
+import { applyListDeleted }  from "./applyListDeleted";
 
-import { applyListMoved } from "./applyListMoved";
-import { applyListCreated } from "./applyListCreated";
-import { applyListUpdated } from "./applyListUpdated";
-import { applyListDeleted } from "./applyListDeleted";
+// ============================================================================
+// 📋 DispatchObserver — injectable side-effect hook (NOT part of pure core)
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests inject a no-op observer.
+// Production injects the telemetry observer.
+// The pure dispatch logic (HANDLERS + applyEvent) has zero direct dependency
+// on any observer — keeping the orchestration boundary clean.
+// ============================================================================
+
+export interface DispatchObserver {
+  onApply(eventType: string, mode: string, correlationId: string | undefined): void;
+  onUnknownEvent(eventType: string, correlationId: string | undefined): void;
+  onOptimisticApplied(correlationId: string, eventType: string): void;
+  onReducerCrash(eventType: string, error: string, correlationId: string | undefined): void;
+}
+
+/** No-op observer — used in tests and when telemetry is unavailable */
+export const NO_OP_OBSERVER: DispatchObserver = {
+  onApply: () => undefined,
+  onUnknownEvent: () => undefined,
+  onOptimisticApplied: () => undefined,
+  onReducerCrash: () => undefined,
+};
+
+/** Lazily-constructed telemetry observer — only imports telemetry at call-time */
+function makeTelemetryObserver(): DispatchObserver {
+  return {
+    onApply(eventType, mode, correlationId) {
+      try {
+        const { telemetry } = require("../../devtools/logEvent");
+        telemetry.log(
+          "MUTATION_ENGINE",
+          mode === "live" ? "APPLY_LIVE" : "APPLY_OPTIMISTIC",
+          { eventType, mode },
+          { correlationId },
+        );
+      } catch { /* devtools not mounted — safe to ignore */ }
+    },
+    onUnknownEvent(eventType, correlationId) {
+      try {
+        if (process.env.NODE_ENV === "development") {
+          console.warn(`[Dispatcher] Unknown event type: "${eventType}"`);
+        }
+        const { telemetry } = require("../../devtools/logEvent");
+        telemetry.log("MUTATION_ENGINE", "UNKNOWN_EVENT_DROPPED", { eventType }, { correlationId });
+      } catch { /* devtools not mounted */ }
+    },
+    onOptimisticApplied(correlationId, eventType) {
+      try {
+        const { telemetry } = require("../../devtools/logEvent");
+        telemetry.mutation(correlationId, eventType, "OPTIMISTIC_APPLIED");
+      } catch { /* devtools not mounted */ }
+    },
+    onReducerCrash(eventType, error, correlationId) {
+      try {
+        console.error(`[Dispatcher] Failed applying "${eventType}" event. Error: ${error}`);
+        const { telemetry } = require("../../devtools/logEvent");
+        telemetry.log("MUTATION_ENGINE", "REDUCER_CRASH", { eventType, error }, { correlationId });
+      } catch { /* devtools not mounted */ }
+    },
+  };
+}
+
+// Module-level default observer (lazy, replaced in tests via setDispatchObserver)
+let _observer: DispatchObserver = makeTelemetryObserver();
+
+/**
+ * Override the dispatch observer.
+ * Call in test setup:  setDispatchObserver(NO_OP_OBSERVER)
+ * Call in production:  setDispatchObserver(makeTelemetryObserver())
+ */
+export function setDispatchObserver(obs: DispatchObserver): void {
+  _observer = obs;
+}
 
 // ============================================================================
 // 🌟 Event Handler Contract
 // ============================================================================
 
-/**
- * تمام Reducerها:
- * - Pure هستند
- * - فقط State خام می‌گیرند
- * - فقط Partial State برمی‌گردانند
- * - به Zustand وابسته نیستند
- */
 export type EventHandler<TEvent extends AppDomainEvent = AppDomainEvent> = (
   state: BoardStoreState,
   envelope: ClientEventEnvelope<TEvent>,
@@ -53,180 +141,77 @@ export type EventHandler<TEvent extends AppDomainEvent = AppDomainEvent> = (
 // 📚 Canonical Event Map
 // ============================================================================
 
-/**
- * این مپ:
- * - ارتباط بین event.type و payload type را تضمین می‌کند
- * - از typo جلوگیری می‌کند
- * - باعث autocomplete کامل می‌شود
- */
 type EventMap = {
-  // ==========================================================================
-  // Card Events
-  // ==========================================================================
-
   "card.created": CardCreatedEvent;
-
   "card.updated": CardUpdatedEvent;
-
   "card.deleted": CardDeletedEvent;
-
-  "card.moved": CardMovedEvent;
-
-  // ==========================================================================
-  // List Events
-  // ==========================================================================
-
+  "card.moved":   CardMovedEvent;
   "list.created": ListCreatedEvent;
-
   "list.updated": ListUpdatedEvent;
-
-  "list.moved": ListMovedEvent;
-
+  "list.moved":   ListMovedEvent;
   "list.deleted": ListDeletedEvent;
 };
 
-// ============================================================================
-// 🧠 Strict Registry Type
-// ============================================================================
-
-type HandlerRegistry = {
-  [K in keyof EventMap]: EventHandler<EventMap[K]>;
-};
+type HandlerRegistry = { [K in keyof EventMap]: EventHandler<EventMap[K]> };
 
 // ============================================================================
-// 🚀 Reducer Registry
+// 🚀 Reducer Registry  (O(1) lookup — zero side effects in this object)
 // ============================================================================
 
-/**
- * O(1) Lookup
- *
- * سریع‌تر و maintainable تر از switch-case
- */
 const HANDLERS: HandlerRegistry = {
-  // ==========================================================================
-  // Card Reducers
-  // ==========================================================================
-
-  "card.moved": applyCardMoved,
-
-  "card.created": applyCardCreated,
-
-  "card.updated": applyCardUpdated,
-
-  "card.deleted": applyCardDeleted,
-
-  // ==========================================================================
-  // List Reducers
-  // ==========================================================================
-
-  "list.moved": applyListMoved,
-
-  "list.created": applyListCreated,
-
-  "list.updated": applyListUpdated,
-
-  "list.deleted": applyListDeleted,
+  "card.moved":    applyCardMoved,
+  "card.created":  applyCardCreated,
+  "card.updated":  applyCardUpdated,
+  "card.deleted":  applyCardDeleted,
+  "list.moved":    applyListMoved,
+  "list.created":  applyListCreated,
+  "list.updated":  applyListUpdated,
+  "list.deleted":  applyListDeleted,
 };
 
 // ============================================================================
-// 👑 Main Dispatcher
+// 👑 applyEvent — PURE orchestration core
+// ─────────────────────────────────────────────────────────────────────────────
+// This function is pure with respect to domain state:
+//   (state, envelope, context) → Partial<BoardStoreState>
+//
+// The only side effect is the _observer call, which is:
+//   - injected (not hardcoded)
+//   - wrapped in try/catch (never affects return value)
+//   - no-op in tests
+//
+// The individual reducers called here have ZERO side effects by contract.
 // ============================================================================
 
-/**
- * تنها entry point مجاز برای mutation state
- */
 export function applyEvent(
   state: BoardStoreState,
   envelope: ClientEventEnvelope,
   context: ReducerContext,
 ): Partial<BoardStoreState> {
-  
-  // ==========================================================================
-  // Resolve Event Type & Correlation
-  // ==========================================================================
-  const eventType = envelope.event.type as keyof EventMap;
-  const correlationId = envelope.event.correlationId; // استخراج کلید ردیابی
+  const eventType    = envelope.event.type as keyof EventMap;
+  const correlationId = envelope.event.correlationId;
 
-  // 🌟 TELEMETRY: ثبت ورود ایونت به موتور پردازش
-  telemetry.log(
-    "MUTATION_ENGINE",
-    context.mode === "live" ? "APPLY_LIVE" : "APPLY_OPTIMISTIC",
-    { eventType, mode: context.mode },
-    { correlationId }
-  );
+  // Side-effect: telemetry (isolated, injectable, never throws into core)
+  _observer.onApply(eventType, context.mode, correlationId);
 
-  // ==========================================================================
-  // Resolve Handler
-  // ==========================================================================
   const handler = HANDLERS[eventType];
 
-  // ==========================================================================
-  // Unknown Event Protection
-  // ==========================================================================
-  /**
-   * ممکن است کلاینت قدیمی‌تر از سرور باشد
-   * بنابراین نباید crash کنیم
-   */
   if (!handler) {
-    if (process.env.NODE_ENV === "development") {
-      console.warn(`[Dispatcher] Unknown event type: "${eventType}"`);
-    }
-
-    // 🌟 TELEMETRY: شکار ایونت‌هایی که کلاینت هنوز آپدیتش رو نگرفته
-    telemetry.log(
-      "MUTATION_ENGINE", 
-      "UNKNOWN_EVENT_DROPPED", 
-      { eventType }, 
-      { correlationId }
-    );
-
+    _observer.onUnknownEvent(eventType, correlationId);
     return {};
   }
 
-  // ==========================================================================
-  // Atomic Reducer Execution
-  // ==========================================================================
   try {
-    const nextState = (handler as EventHandler)(
-      state,
-      envelope,
-      context,
-    );
+    const nextState = (handler as EventHandler)(state, envelope, context);
 
-    // 🌟 TELEMETRY: optimistic events run in "live" mode
+    // Optimistic events: live mode + no ACK yet
     if (context.mode === "live" && correlationId && !envelope.acknowledged) {
-      telemetry.mutation(correlationId, eventType, "OPTIMISTIC_APPLIED");
+      _observer.onOptimisticApplied(correlationId, eventType);
     }
 
     return nextState;
-
   } catch (error: any) {
-    // ==========================================================================
-    // Reducer Isolation Boundary
-    // ==========================================================================
-    /**
-     * اگر یک reducer crash کند:
-     * - کل store corrupt نمی‌شود
-     * - state قبلی حفظ می‌شود
-     * - فقط همان event drop می‌شود
-     */
-    console.error(
-      `[Dispatcher] Failed applying "${eventType}" event.`,
-      {
-        error,
-        event: envelope.event,
-        context,
-      },
-    );
-
-    // 🌟 TELEMETRY: ثبت حیاتی‌ترین خطای سیستم! (باگ در منطقِ Reducer)
-    telemetry.log(
-      "MUTATION_ENGINE",
-      "REDUCER_CRASH",
-      { eventType, error: error.message },
-      { correlationId }
-    );
-
-    return {};
+    _observer.onReducerCrash(eventType, error?.message ?? String(error), correlationId);
+    return {}; // Reducer isolation: crash is contained, state unchanged
   }
 }
