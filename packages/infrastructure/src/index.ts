@@ -6,6 +6,28 @@ import type {
   AggregateLockManager 
 } from "@repo/domain";
 
+// Re-export auth, cache, audit, ws modules
+export { TokenService, TokenError } from "./auth/tokenService";
+export type { TokenPair, AccessTokenClaims, TokenServiceConfig } from "./auth/tokenService";
+
+export { AclEngine, roleAtLeast, hasPermission } from "./auth/aclEngine";
+export type { BoardRole, BoardPermission, AclCheckResult } from "./auth/aclEngine";
+
+export { MembershipCache } from "./redis/membershipCache";
+export type { MembershipEntry } from "./redis/membershipCache";
+
+export { AuditLogger } from "./audit/auditLogger";
+export type { AuditEntry } from "./audit/auditLogger";
+
+export {
+  WsSessionManager,
+  WsAuthHandler,
+  WsEventEmitter,
+  WsAuthError,
+  buildWorkerSession,
+} from "./ws/wsServer";
+export type { WsConnection, WsOutboundEvent, WsInboundMessage, WorkerSession } from "./ws/wsServer";
+
 // ============================================================================
 // 📝 1. Structured JSON Logger
 // ============================================================================
@@ -74,16 +96,36 @@ export class RedisManager {
 }
 
 // ============================================================================
-// 🚦 5. Redis Rate Limiter
+// 🚦 5. Redis Rate Limiter (atomic Lua script — no TOCTOU race)
 // ============================================================================
+// Previous bug: INCR + PEXPIRE were two separate commands.
+// If the process died between them, the key had no TTL → permanent key.
+// Fix: atomic Lua script that sets TTL only on first increment.
+// ============================================================================
+
+const RATE_LIMIT_LUA = `
+local key = KEYS[1]
+local max = tonumber(ARGV[1])
+local windowMs = tonumber(ARGV[2])
+local current = redis.call('INCR', key)
+if current == 1 then
+  redis.call('PEXPIRE', key, windowMs)
+end
+return current
+`;
+
 export class RedisRateLimiter {
   constructor(private readonly redis: Redis) {}
 
   async consume(opts: { key: string; windowMs: number; max: number }): Promise<boolean> {
-    const current = await this.redis.incr(opts.key);
-    if (current === 1) {
-      await this.redis.pexpire(opts.key, opts.windowMs);
-    }
+    // ✅ FIX: atomic Lua script — INCR + PEXPIRE in one round-trip
+    const current = await this.redis.eval(
+      RATE_LIMIT_LUA,
+      1,
+      opts.key,
+      String(opts.max),
+      String(opts.windowMs),
+    ) as number;
     return current <= opts.max;
   }
 }

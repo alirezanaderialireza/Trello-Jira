@@ -4,6 +4,7 @@ import { boards } from "./boards";
 import { lists } from "./lists";
 import { cards } from "./cards";
 import { boardMembers } from "./boardMembers";
+import { sessions, revokedTokens } from "./sessions";
 
 //
 // ============================================================================

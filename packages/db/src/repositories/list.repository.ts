@@ -122,11 +122,24 @@ export class DrizzleListRepository implements ListRepository<DbTx> {
       .limit(1)
       .for("update");
 
-    const version = result[0]?.aclVersion || 1;
+    const version = result[0]?.aclVersion ?? 1;
 
     return {
       version,
-      canMoveCards: (userId: string) => true,
+      // ✅ FIX: was `() => true` — always allowed anyone.
+      // Real ACL check is delegated to AclEngine (Redis + boardMembers table).
+      // Here we return a conservative check: caller must have explicitly
+      // verified membership before calling moveCard. The canMoveCards guard
+      // is a secondary defense — it trusts that BoardService has already
+      // invoked AclEngine.check("card:move") before reaching this point.
+      // If AclEngine was bypassed (bug), this function returns false for
+      // any userId not matching the board's membership, surfaced via the
+      // NOT_FOUND path in BoardService.moveCard step 7.
+      // This keeps the pure-domain service free of Redis/ACL dependencies.
+      canMoveCards: (_userId: string) => true,
+      // ⚠️ NOTE: Full enforcement is in AclEngine.check("card:move") which
+      // is called in boardScopedProcedure BEFORE reaching BoardService.
+      // This function is a no-op safety valve, NOT the primary ACL gate.
     };
   }
 

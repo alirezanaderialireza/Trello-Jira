@@ -100,10 +100,14 @@ export class BoardReadModels {
       },
     });
 
-    // اعمال pagination ساده
-    const paginatedLists = Object.values(params.listPagination || {}).flatMap(
-      (lp) => allLists.slice(0, lp.limit || 50)
-    );
+    // ✅ FIX: when listPagination is undefined/empty, return ALL lists.
+    // Previous bug: Object.values({}) returns [] → flatMap returns [] → empty board.
+    const paginatedLists =
+      params.listPagination && Object.keys(params.listPagination).length > 0
+        ? Object.values(params.listPagination).flatMap(
+            (lp) => allLists.slice(0, lp.limit ?? 50),
+          )
+        : allLists;
 
     return {
       data: paginatedLists,

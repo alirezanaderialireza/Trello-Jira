@@ -1,6 +1,7 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { AsyncLocalStorage } from "async_hooks";
+import { z } from "zod";
 
 // 📦 Database
 import { db } from "@repo/db";
@@ -26,6 +27,14 @@ import {
   RedisPresenceStore,
   RedisPubSub,
 } from "@repo/infrastructure";
+
+// 🌟 ACL Engine + Membership Cache
+import { AclEngine } from "@repo/infrastructure/auth/aclEngine";
+import { MembershipCache } from "@repo/infrastructure/redis/membershipCache";
+import type { BoardPermission } from "@repo/infrastructure/auth/aclEngine";
+
+// 🌟 Audit Logger
+import { AuditLogger } from "@repo/infrastructure/audit/auditLogger";
 
 // 🌟 Services
 import { BoardService } from "./services/board.service";
@@ -68,6 +77,15 @@ const presenceStore =
 const pubsub = new RedisPubSub(
   redisManager.pubsub
 );
+
+// 🌟 ACL + Membership Cache + Audit
+const aclEngine = new AclEngine(dbInstance, redisManager.client);
+const membershipCache = new MembershipCache(
+  redisManager.client,
+  redisManager.pubsub, // dedicated sub connection
+  dbInstance,
+);
+const auditLogger = new AuditLogger(dbInstance, redisManager.client);
 
 // ============================================================================
 // 🧠 ALS
@@ -130,6 +148,12 @@ const infrastructure = Object.freeze({
   presenceStore,
 
   pubsub,
+
+  aclEngine,
+
+  membershipCache,
+
+  auditLogger,
 });
 
 // ============================================================================
@@ -594,3 +618,101 @@ export const protectedProcedure =
     .use(timeoutGuard)
     .use(isAuthed)
     .use(tenantGuard);
+
+// ============================================================================
+// 🛡️ boardScopedProcedure
+// ----------------------------------------------------------------------------
+// Used for ALL board, list, and card mutations.
+// Requires `boardId` in input (validated as UUID).
+// Injects `boardRole` and `boardAclVersion` into context for downstream use.
+// Rejects if user has NONE role (not a member of the board).
+// ============================================================================
+
+/**
+ * ACL middleware factory — accepts the permission to enforce.
+ * Usage:
+ *   export const boardScopedProcedure = makeBoardScopedProcedure("card:create");
+ */
+export function makeBoardScopedProcedure(permission: BoardPermission) {
+  return protectedProcedure
+    .input(z.object({ boardId: z.string().uuid() }).passthrough())
+    .use(async ({ ctx, input, next }) => {
+      const { boardId } = input as { boardId: string };
+      const { userId, tenantId } = ctx.session;
+
+      const aclResult = await ctx.infra.aclEngine.check({
+        userId,
+        tenantId,
+        boardId,
+        permission,
+        expectedAclVersion: (input as any).expectedAclVersion,
+      });
+
+      if (!aclResult.allowed) {
+        ctx.infra.logger.warn({
+          event: "acl_check_denied",
+          classification: "SENSITIVE",
+          userId,
+          tenantId,
+          boardId,
+          permission,
+          role: aclResult.role,
+          aclVersion: aclResult.aclVersion,
+          traceId: ctx.metadata.traceId,
+        });
+
+        throw new TRPCError({
+          code:
+            aclResult.role === "NONE" ? "FORBIDDEN" : "FORBIDDEN",
+          message: "Insufficient board permissions.",
+        });
+      }
+
+      return next({
+        ctx: {
+          ...ctx,
+          boardRole: aclResult.role,
+          boardAclVersion: aclResult.aclVersion,
+        },
+      });
+    });
+}
+
+// ============================================================================
+// 🛡️ aclVersionGuard middleware
+// ----------------------------------------------------------------------------
+// Standalone middleware that checks if the client's aclVersion matches the
+// current board aclVersion. Attach to any procedure that is sensitive to
+// permission drift (e.g., moveCard, deleteCard).
+// ============================================================================
+
+export const aclVersionGuard = t.middleware(
+  async ({ ctx, input, next }) => {
+    const inp = input as {
+      boardId?: string;
+      expectedAclVersion?: number;
+    } | null;
+
+    if (!inp?.boardId || inp.expectedAclVersion === undefined) {
+      // Guard is a no-op if not provided — callers opt-in
+      return next();
+    }
+
+    const aclResult = await ctx.infra.aclEngine.check({
+      userId: ctx.session!.userId ?? ctx.session!.user.id,
+      tenantId: ctx.session!.tenantId,
+      boardId: inp.boardId,
+      permission: "board:read", // cheapest check — only validates aclVersion
+      expectedAclVersion: inp.expectedAclVersion,
+    });
+
+    if (!aclResult.allowed) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "ACL version mismatch — permissions changed.",
+      });
+    }
+
+    return next();
+  }
+);
