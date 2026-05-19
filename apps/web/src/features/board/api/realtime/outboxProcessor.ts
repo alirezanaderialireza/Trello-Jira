@@ -124,6 +124,10 @@ export class OutboxProcessor {
   /** Update retryCount on a mutation */
   private readonly incrementRetry: (correlationId: string) => void;
 
+  // GAP 1 FIX: onDlqEntry callback — called synchronously when an entry is
+  // added to the DLQ so observers receive the event without polling.
+  private readonly _onDlqEntry: ((entry: DeadLetterEntry) => void) | undefined;
+
   /** Mutations currently being retried (in-flight guard) */
   private readonly inFlight = new Set<string>();
 
@@ -140,13 +144,16 @@ export class OutboxProcessor {
       getStore:       () => Record<string, PendingMutation>;
       markFailed:     (correlationId: string) => void;
       incrementRetry: (correlationId: string) => void;
+      /** GAP 1 FIX: called when a new DLQ entry is added */
+      onDlqEntry?:    (entry: DeadLetterEntry) => void;
     },
   ) {
-    this.cfg         = { ...DEFAULT_OUTBOX_CONFIG, ...cfg };
-    this.retryFn     = retryFn;
-    this.getStore    = storeAccessors.getStore;
-    this.markFailed  = storeAccessors.markFailed;
+    this.cfg            = { ...DEFAULT_OUTBOX_CONFIG, ...cfg };
+    this.retryFn        = retryFn;
+    this.getStore       = storeAccessors.getStore;
+    this.markFailed     = storeAccessors.markFailed;
     this.incrementRetry = storeAccessors.incrementRetry;
+    this._onDlqEntry    = storeAccessors.onDlqEntry;
   }
 
   // ==========================================================================
@@ -318,6 +325,15 @@ export class OutboxProcessor {
       reason,
       retryCount:    mutation.retryCount,
     });
+
+    // GAP 1 FIX: notify observer synchronously so boardRealtimeClient can
+    // emit dlq_entry_added without any polling loop.
+    try {
+      this._onDlqEntry?.(entry);
+    } catch (err) {
+      // Never crash the processor because of an observer error.
+      telemetry.log("OUTBOX", "DLQ_OBSERVER_THREW", { error: String(err) });
+    }
   }
 
   // ==========================================================================

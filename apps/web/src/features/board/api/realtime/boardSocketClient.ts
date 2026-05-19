@@ -86,6 +86,26 @@ const PONG_TIMEOUT_MS = 8_000;
  */
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 
+// GAP 5 — Event batching constants
+//
+// Under high-frequency bursts (e.g. 50 domain events in 100 ms) we must not
+// call applyWebsocketEvent() synchronously in the onmessage callback for each
+// one — that blocks the main thread for the full burst duration.
+//
+// Solution: accumulate incoming EVENT messages in a microbatch queue and flush
+// them together via requestAnimationFrame (≈ 16 ms cadence).  Non-EVENT
+// messages (SYSTEM, HEARTBEAT, RESYNC_REQUIRED) are processed immediately
+// because they are low-frequency and time-sensitive.
+//
+// Flush strategy:
+//   • rAF fires at most once per frame (~60 fps)
+//   • All queued events are applied in one Zustand transaction per frame
+//   • BATCH_MAX_SIZE is a safety valve: if the queue grows beyond this before
+//     the next rAF, we flush synchronously to prevent memory growth.
+//
+/** Maximum events to hold before flushing synchronously (backpressure valve) */
+const BATCH_MAX_SIZE = 64;
+
 // ============================================================================
 // 🔌 BoardSocketClient
 // ============================================================================
@@ -131,6 +151,12 @@ class BoardSocketClient {
   // Handshake timeout
   // --------------------------------------------------------------------------
   private handshakeTimerId: ReturnType<typeof setTimeout> | null = null;
+
+  // --------------------------------------------------------------------------
+  // GAP 5 — Event batch queue for rAF-based flush
+  // --------------------------------------------------------------------------
+  private _eventBatch: WsEvent[] = [];
+  private _rafHandle: number | null = null;
 
   // --------------------------------------------------------------------------
   // Observer registry
@@ -258,7 +284,17 @@ class BoardSocketClient {
 
   private _openSocket(): void {
     this._transition("connecting");
-    useBoardStore.setState({ syncStatus: "reconnecting" });
+
+    // GAP 7 FIX: boardSocketClient no longer writes syncStatus directly.
+    // boardRealtimeClient owns syncStatus as the single writer, deriving it
+    // from the FSM observer.  Direct writes here created a dual-write race
+    // where _openSocket() could override the FSM's derived value on fast
+    // state changes (e.g. connect → handshake → connected all within one
+    // microtask batch).
+    //
+    // The transport state_changed observer in boardRealtimeClient will call
+    // clientSyncFsm.send("transport_dropped") which maps to "reconnecting"
+    // via _toLegacy(), and then useBoardStore.setState({ syncStatus }) once.
 
     telemetry.log("WS_INGRESS", "CONNECTING", {
       url:     this.url,
@@ -340,7 +376,7 @@ class BoardSocketClient {
 
     switch (message.type) {
 
-      // ── Domain event ───────────────────────────────────────────────────────
+      // ── Domain event — GAP 5 FIX: enqueue for rAF batch flush ────────────
       case "EVENT": {
         if (!message.sequence || !message.payload) {
           telemetry.log("WS_INGRESS", "MALFORMED_EVENT", { message });
@@ -363,7 +399,25 @@ class BoardSocketClient {
           payload:  message.payload,
         };
 
-        useBoardStore.getState().applyWebsocketEvent(wsEvent);
+        // Add to microbatch queue
+        this._eventBatch.push(wsEvent);
+
+        // Safety valve: if queue exceeds BATCH_MAX_SIZE flush synchronously
+        // to prevent unbounded memory growth under extreme burst.
+        if (this._eventBatch.length >= BATCH_MAX_SIZE) {
+          this._cancelRaf();
+          this._flushBatch();
+          return;
+        }
+
+        // Schedule a rAF flush if one is not already pending.
+        // All events arriving before the next frame share one flush call.
+        if (this._rafHandle === null) {
+          this._rafHandle = requestAnimationFrame(() => {
+            this._rafHandle = null;
+            this._flushBatch();
+          });
+        }
         break;
       }
 
@@ -374,7 +428,8 @@ class BoardSocketClient {
 
           this._clearHandshakeTimer();
           this._transition("connected");
-          useBoardStore.setState({ syncStatus: "healthy" });
+          // GAP 7 FIX: syncStatus written only via boardRealtimeClient FSM observer.
+          // Removed: useBoardStore.setState({ syncStatus: "healthy" });
           this._startHeartbeat();
 
           telemetry.log("WS_INGRESS", "SUBSCRIBED_ACK", {
@@ -415,7 +470,8 @@ class BoardSocketClient {
           epoch: myEpoch,
         });
 
-        useBoardStore.setState({ syncStatus: "desynced" });
+        // GAP 7 FIX: syncStatus written only via boardRealtimeClient FSM observer.
+        // Removed: useBoardStore.setState({ syncStatus: "desynced" });
         this._emit({ type: "resync_required", reason });
 
         // Keep the transport alive — the UI layer decides whether to reload.
@@ -465,6 +521,44 @@ class BoardSocketClient {
       type:  (event as ErrorEvent)?.type ?? "unknown",
     });
     // onclose will fire next and handle reconnect scheduling.
+  }
+
+  // ==========================================================================
+  // 📦 GAP 5 — Event batch flush
+  // ==========================================================================
+
+  /**
+   * Drain the batch queue into the store in one pass.
+   *
+   * Each event is applied via applyWebsocketEvent() which calls
+   * reconcileIncomingEvent().  The events are already ordered by the WS
+   * server; we apply them in arrival order.
+   *
+   * Called either from requestAnimationFrame (normal path) or synchronously
+   * when BATCH_MAX_SIZE is exceeded (backpressure path).
+   */
+  private _flushBatch(): void {
+    if (this._eventBatch.length === 0) return;
+
+    const batch = this._eventBatch;
+    this._eventBatch = [];
+
+    telemetry.log("WS_INGRESS", "BATCH_FLUSH", {
+      batchSize: batch.length,
+      epoch:     this.epoch,
+    });
+
+    const store = useBoardStore.getState();
+    for (const wsEvent of batch) {
+      store.applyWebsocketEvent(wsEvent);
+    }
+  }
+
+  private _cancelRaf(): void {
+    if (this._rafHandle !== null) {
+      cancelAnimationFrame(this._rafHandle);
+      this._rafHandle = null;
+    }
   }
 
   // ==========================================================================
@@ -541,7 +635,8 @@ class BoardSocketClient {
         attempts: this.reconnectAttempts,
       });
       this._transition("terminal");
-      useBoardStore.setState({ syncStatus: "desynced" });
+      // GAP 7 FIX: removed direct useBoardStore.setState({ syncStatus: "desynced" })
+      // boardRealtimeClient owns syncStatus as the single writer via FSM observer.
       this._emit({ type: "reconnect_failed", attempts: this.reconnectAttempts });
       return;
     }
@@ -576,6 +671,10 @@ class BoardSocketClient {
   private _hardDisconnect(intentional: boolean): void {
     this._clearHeartbeat();
     this._clearHandshakeTimer();
+    // GAP 5 FIX: cancel any pending rAF flush and drain the batch queue so
+    // events from a dead socket are not applied after disconnect.
+    this._cancelRaf();
+    this._eventBatch = [];
 
     if (this.reconnectTimerId !== null) {
       clearTimeout(this.reconnectTimerId);
@@ -610,70 +709,6 @@ class BoardSocketClient {
       });
     }
   }
-
-  // ==========================================================================
-  // ⏱️ Handshake timeout helpers
-  // ==========================================================================
-
-  private _clearHandshakeTimer(): void {
-    if (this.handshakeTimerId !== null) {
-      clearTimeout(this.handshakeTimerId);
-      this.handshakeTimerId = null;
-    }
-  }
-
-  // ==========================================================================
-  // 📤 Outbound Send (backpressure guard)
-  // ==========================================================================
-
-  /**
-   * Send a message to the server.
-   *
-   * Backpressure policy:
-   *   If the socket is not in OPEN state the message is silently dropped
-   *   and logged via telemetry.  We intentionally do NOT queue messages
-   *   here — the reconciliation layer handles catch-up via lastSequence on
-   *   reconnect.  Queuing outbound mutations would create a DLQ concern
-   *   that belongs in the Outbox Processor, not the transport layer.
-   */
-  private _send(payload: RealtimeRequest): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      telemetry.log("WS_INGRESS", "SEND_DROPPED_NOT_OPEN", {
-        action: payload.action,
-        state:  this._state,
-      });
-      return;
-    }
-
-    try {
-      this.ws.send(JSON.stringify(payload));
-    } catch (err: any) {
-      telemetry.log("WS_INGRESS", "SEND_ERROR", {
-        action: payload.action,
-        error:  err?.message ?? String(err),
-      });
-    }
-  }
-
-  // ==========================================================================
-  // 📣 Observer helpers
-  // ==========================================================================
-
-  private _emit(event: ConnectionEvent): void {
-    this.observers.forEach((cb) => {
-      try {
-        cb(event);
-      } catch (err) {
-        // Never let an observer crash the transport.
-        console.error("[BoardSocketClient] Observer threw:", err);
-      }
-    });
-  }
-
-  private _emitMetrics(): void {
-    this._emit({ type: "metrics_updated", metrics: this.metrics });
-  }
-}
 
 // ============================================================================
 // 🌍 Singleton Instance

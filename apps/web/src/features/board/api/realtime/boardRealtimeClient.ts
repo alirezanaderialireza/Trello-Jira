@@ -9,11 +9,42 @@
 // This class is the single surface area that BoardPage (and any future
 // component) touches for all realtime concerns.  It composes:
 //
-//   BoardSocketClient   transport FSM, heartbeat, epoch, backoff
+//   BoardSocketClient   transport FSM, heartbeat, epoch, backoff, event batching
 //   ClientSyncFSM       data-sync state machine
 //   OutboxProcessor     mutation retry queue + DLQ
 //
 // and drives them as a cohesive unit.
+//
+// Gaps fixed in this revision:
+// ─────────────────────────────
+//
+// GAP 1 — DLQ observer bridge was broken.
+//   _buildOutbox() now passes an onDlqEntry callback to OutboxProcessor so
+//   dlq_entry_added is emitted synchronously when _moveToDlq() fires.
+//   No polling loop needed.
+//
+// GAP 2 — Zustand store subscription leak.
+//   _wireSubscriptions() now saves the unsubscribe fn returned by
+//   useBoardStore.subscribe() and calls it in _unwireSubscriptions().
+//   Previously the fn was discarded → subscriptions accumulated on
+//   each disconnect()+connect() cycle.
+//
+// GAP 3 — connect() sent wrong FSM trigger on first call.
+//   clientSyncFsm.send("transport_dropped") was called unconditionally,
+//   moving the FSM idle→reconnecting before board_hydrated even fires.
+//   Fixed: only send "transport_dropped" when the FSM is NOT idle
+//   (i.e. a reconnect, not a first connect).
+//
+// GAP 7 — Dual-write conflict on store syncStatus.
+//   boardSocketClient previously wrote syncStatus directly in _openSocket(),
+//   _scheduleReconnect(), and SYSTEM/RESYNC_REQUIRED handlers.
+//   boardRealtimeClient is now the SINGLE WRITER via the FSM observer.
+//   All direct writes removed from boardSocketClient.
+//
+// GAP 8 — CATCH_UP_MAX_EVENTS buffer overflow left FSM stuck in "resyncing".
+//   boardRealtimeClient now fires an "auto_resync" observer event when the
+//   FSM enters "resyncing", giving BoardPage a hook to trigger a full reload.
+//   An optional onResyncRequired callback in configure() handles this.
 //
 // What this class does NOT do:
 //   • Own domain reducers      (→ event-application/*)
@@ -23,20 +54,11 @@
 //
 // Multi-tab safety:
 // ─────────────────
-// Each tab instantiates its own BoardRealtimeClient via the singleton export.
-// There is no shared mutable state between tabs — each tab independently
-// manages its own WS connection, outbox, and sync FSM.
-// Cross-tab "live" state is eventually consistent via the server broadcasting
-// events to every subscriber.
-//
-// Integration surface:
-// ────────────────────
-//   const client = boardRealtimeClient;
-//   client.connect(boardId, authToken);   // BoardPage useEffect
-//   client.disconnect();                  // BoardPage cleanup
-//   client.subscribe(cb);                 // useSyncStatus hook
-//   client.metrics                        // useSyncStatus hook
-//   client.triggerManualReconnect();      // "Retry" button in UI
+// Each tab has its own singleton instance (module-level export).
+// There is no shared mutable state between tabs — each manages its own WS
+// connection, outbox, and sync FSM independently.  Cross-tab consistency is
+// achieved via the server broadcasting every committed event to all
+// subscribers of that board room.
 // ============================================================================
 
 import { boardSocket }         from "./boardSocketClient";
@@ -59,7 +81,9 @@ export type RealtimeClientEvent =
   | { type: "sync_state_changed"; event: SyncStateChangeEvent }
   | { type: "resync_required";    reason: string }
   | { type: "reconnect_failed";   attempts: number }
-  | { type: "dlq_entry_added";    entry: DeadLetterEntry };
+  | { type: "dlq_entry_added";    entry: DeadLetterEntry }
+  /** GAP 8: emitted when FSM enters "resyncing" so BoardPage can reload */
+  | { type: "auto_resync_required"; reason: "buffer_overflow" | "server_ordered" };
 
 // ============================================================================
 // 📊 Unified Metrics Snapshot
@@ -82,9 +106,15 @@ export interface BoardRealtimeClientConfig {
   /**
    * retryFn — called by OutboxProcessor when a pending mutation is stale.
    * Must re-issue the HTTP call for the given mutation.
-   * Defaults to a no-op stub; callers should inject the real boardApi method.
+   * Defaults to a no-op stub; callers MUST inject the real boardApi method.
    */
   retryFn?: (mutation: PendingMutation) => Promise<void>;
+  /**
+   * GAP 8: called when the realtime engine determines a full board resync
+   * is required (buffer overflow ≥ 200 events or server RESYNC_REQUIRED).
+   * BoardPage should call window.location.reload() or re-fetch board data.
+   */
+  onResyncRequired?: (reason: "buffer_overflow" | "server_ordered") => void;
 }
 
 // ============================================================================
@@ -96,9 +126,14 @@ class BoardRealtimeClient {
   private _outbox: OutboxProcessor | null = null;
   private _retryFn: (mutation: PendingMutation) => Promise<void>;
 
+  // GAP 8: callback for auto-resync
+  private _onResyncRequired: ((reason: "buffer_overflow" | "server_ordered") => void) | undefined;
+
   // Unsubscribe handles for child subscriptions
   private _unsubTransport:   (() => void) | null = null;
   private _unsubSyncFsm:     (() => void) | null = null;
+  // GAP 2 FIX: save the Zustand unsubscribe fn so we don't leak on reconnect
+  private _unsubStore:       (() => void) | null = null;
 
   constructor() {
     // Default retry fn: no-op stub.  Real callers inject via configure().
@@ -119,6 +154,11 @@ class BoardRealtimeClient {
   public configure(cfg: BoardRealtimeClientConfig): void {
     if (cfg.retryFn) {
       this._retryFn = cfg.retryFn;
+    }
+
+    // GAP 8: wire resync callback
+    if (cfg.onResyncRequired) {
+      this._onResyncRequired = cfg.onResyncRequired;
     }
 
     // Re-create outbox with new config if already running
@@ -150,8 +190,14 @@ class BoardRealtimeClient {
     // Drive transport
     boardSocket.connect(boardId, token);
 
-    // Drive sync FSM — transport is now connecting
-    clientSyncFsm.send("transport_dropped"); // ensure not idle
+    // GAP 3 FIX: only send "transport_dropped" on *reconnect* (FSM not idle).
+    // On first connect the FSM is in "idle" — sending transport_dropped would
+    // move it to "reconnecting" before board_hydrated fires, which is
+    // semantically wrong and produces a spurious "reconnecting" flash in UI.
+    // board_hydrated is fired separately by notifyBoardHydrated() after initBoard().
+    if (clientSyncFsm.state !== "idle") {
+      clientSyncFsm.send("transport_dropped");
+    }
   }
 
   /**
@@ -218,7 +264,7 @@ class BoardRealtimeClient {
   // ==========================================================================
 
   private _wireSubscriptions(): void {
-    // Idempotent — only wire once
+    // Idempotent — only wire once per connect() call
     if (this._unsubTransport) return;
 
     // ── Transport FSM events → Sync FSM triggers ──────────────────────────
@@ -252,10 +298,13 @@ class BoardRealtimeClient {
       }
     });
 
-    // ── Sync FSM events → store SyncStatus sync ───────────────────────────
+    // ── Sync FSM transitions → single store writer (GAP 7) ───────────────
+    //
+    // boardRealtimeClient is the SOLE writer of useBoardStore.syncStatus.
+    // All direct useBoardStore.setState({ syncStatus }) calls have been
+    // removed from boardSocketClient.
     this._unsubSyncFsm = clientSyncFsm.subscribe((e: SyncStateChangeEvent) => {
-      // Keep the Zustand store's syncStatus in sync with the FSM
-      // so existing consumers (useSyncStatus, reconcileIncomingEvent) stay accurate
+      // Derive legacy SyncStatus from the new FSM state and write it once.
       const legacyStatus = clientSyncFsm.metrics.legacySyncStatus;
       const currentStoreStatus = useBoardStore.getState().syncStatus;
       if (currentStoreStatus !== legacyStatus) {
@@ -269,22 +318,53 @@ class BoardRealtimeClient {
         next:    e.next,
         trigger: e.trigger,
       });
+
+      // GAP 8 FIX: when FSM enters "resyncing" notify the UI so it can
+      // trigger a full board reload.  The FSM cannot initiate the reload
+      // itself — that is a UI concern (window.location.reload / re-fetch).
+      if (e.next === "resyncing") {
+        const reason =
+          e.trigger === "resync_required"
+            ? "server_ordered"
+            : "buffer_overflow";
+
+        telemetry.log("REALTIME_CLIENT", "AUTO_RESYNC_REQUIRED", { reason });
+
+        this._emit({ type: "auto_resync_required", reason });
+
+        // Fire the injected callback (BoardPage wires this to window.location.reload)
+        try {
+          this._onResyncRequired?.(reason);
+        } catch (err) {
+          console.error("[BoardRealtimeClient] onResyncRequired threw:", err);
+        }
+      }
     });
 
-    // ── Store syncStatus changes → Sync FSM triggers ─────────────────────
-    // reconcileIncomingEvent writes syncStatus directly to the store.
-    // We subscribe to those changes and forward them to the FSM.
-    useBoardStore.subscribe((state, prevState) => {
+    // ── Store syncStatus changes → Sync FSM triggers (GAP 2 FIX) ─────────
+    //
+    // reconcileIncomingEvent writes syncStatus directly to the Zustand store.
+    // We subscribe here and forward changes to the FSM so it stays in sync.
+    //
+    // GAP 2 FIX: the unsubscribe fn is NOW saved to this._unsubStore and
+    // called in _unwireSubscriptions().  Previously it was discarded,
+    // causing a new subscription to be added on every disconnect+reconnect.
+    this._unsubStore = useBoardStore.subscribe((state, prevState) => {
       if (state.syncStatus === prevState.syncStatus) return;
 
       if (state.syncStatus === "gap_detected") {
         clientSyncFsm.send("gap_detected");
       }
-      if (state.syncStatus === "healthy" &&
-          (prevState.syncStatus === "gap_detected")) {
+      if (
+        state.syncStatus === "healthy" &&
+        prevState.syncStatus === "gap_detected"
+      ) {
         clientSyncFsm.send("gap_resolved");
       }
       if (state.syncStatus === "desynced") {
+        // This path is triggered by reconcileIncomingEvent when buffer ≥ 200.
+        // The FSM will transition to "resyncing", which fires the observer
+        // above and calls _onResyncRequired.
         clientSyncFsm.send("resync_required");
       }
     });
@@ -293,8 +373,11 @@ class BoardRealtimeClient {
   private _unwireSubscriptions(): void {
     this._unsubTransport?.();
     this._unsubSyncFsm?.();
+    // GAP 2 FIX: clean up Zustand store subscription
+    this._unsubStore?.();
     this._unsubTransport = null;
     this._unsubSyncFsm   = null;
+    this._unsubStore     = null;
   }
 
   // ==========================================================================
@@ -309,13 +392,11 @@ class BoardRealtimeClient {
   }
 
   private _buildOutbox(cfg: Partial<OutboxConfig>): OutboxProcessor {
-    const store = useBoardStore.getState;
-
     const outbox = new OutboxProcessor(
       cfg,
       this._retryFn,
       {
-        getStore: () => store().pendingMutations,
+        getStore: () => useBoardStore.getState().pendingMutations,
 
         markFailed: (correlationId) =>
           useBoardStore.getState().updatePendingMutationStatus(correlationId, "failed"),
@@ -335,14 +416,16 @@ class BoardRealtimeClient {
             };
           });
         },
+
+        // GAP 1 FIX: onDlqEntry is now wired so boardRealtimeClient emits
+        // dlq_entry_added synchronously when OutboxProcessor._moveToDlq()
+        // fires.  useOutboxProcessor's subscriber will receive it correctly.
+        onDlqEntry: (entry) => {
+          this._emit({ type: "dlq_entry_added", entry });
+        },
       },
     );
 
-    // Forward DLQ entries to observers — patch _moveToDlq via the public
-    // clearDlq hook is not enough; we wrap the dlq array access instead.
-    // Since OutboxProcessor exposes deadLetterQueue as readonly, we poll
-    // for new entries in the FSM subscription heartbeat instead.
-    // (Simple, avoids monkey-patching the private class.)
     return outbox;
   }
 
