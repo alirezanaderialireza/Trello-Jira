@@ -26,7 +26,9 @@ export function applyCardUpdated(
     ...existingCard,
     ...changes,
     revision: event.version,
-    isOptimistic: envelope.optimistic ?? existingCard.isOptimistic ?? false,
+    isOptimistic: envelope.acknowledged
+      ? false
+      : envelope.optimistic ?? existingCard.isOptimistic ?? false,
   };
 
   return {

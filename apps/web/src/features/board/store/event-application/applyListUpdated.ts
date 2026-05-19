@@ -26,7 +26,9 @@ export function applyListUpdated(
     ...existingList,
     ...changes,
     revision: event.version,
-    isOptimistic: envelope.optimistic ?? existingList.isOptimistic ?? false,
+    isOptimistic: envelope.acknowledged
+      ? false
+      : envelope.optimistic ?? existingList.isOptimistic ?? false,
   };
 
   return {
