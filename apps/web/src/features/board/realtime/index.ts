@@ -1,10 +1,33 @@
 // apps/web/src/features/board/realtime/index.ts
 //
 // Phase-1 types barrel — single import point for all realtime abstractions.
-//
-// Usage:
-//   import { SyncState, transition, ConnectionFSM, runPipeline } from
-//     "@/features/board/realtime";
+
+// ── Protocol contracts ────────────────────────────────────────────────────────
+export type {
+  ProtocolVersion,
+  ClientMessage,
+  ClientConnect,
+  ClientResume,
+  ClientMutation,
+  ClientPing,
+  ClientAck,
+  ServerMessage,
+  ServerSubscribed,
+  ServerEvent,
+  ServerEventBatch,
+  ServerAck,
+  ServerNack,
+  ServerResyncRequired,
+  ServerPong,
+} from "./protocol";
+
+export {
+  PROTOCOL_VERSION,
+  MAX_BATCH_SIZE,
+  CATCH_UP_MAX_EVENTS,
+  serializeClientMessage,
+  parseServerMessage,
+} from "./protocol";
 
 // ── SyncState FSM ─────────────────────────────────────────────────────────────
 export type {
@@ -35,6 +58,24 @@ export {
   DEFAULT_CONNECTION_CONFIG,
 } from "./connection-fsm";
 
+// ── SessionManager ────────────────────────────────────────────────────────────
+export type { SessionState } from "./session-manager";
+export { SessionManager } from "./session-manager";
+
+// ── OutboxProcessor ───────────────────────────────────────────────────────────
+export type {
+  OutboxItemStatus,
+  OutboxItem,
+  DLQItem,
+  OutboxConfig,
+  OutboxCallbacks,
+} from "./outbox";
+
+export {
+  OutboxProcessor,
+  DEFAULT_OUTBOX_CONFIG,
+} from "./outbox";
+
 // ── Event Pipeline ────────────────────────────────────────────────────────────
 export type {
   PipelineOk,
@@ -56,3 +97,11 @@ export {
   checkInvariants,
   runPipeline,
 } from "./event-pipeline";
+
+// ── BoardRealtimeClient ───────────────────────────────────────────────────────
+export type {
+  ReducerFn,
+  BoardRealtimeConfig,
+} from "./board-realtime-client";
+
+export { BoardRealtimeClient } from "./board-realtime-client";
