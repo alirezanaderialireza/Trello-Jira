@@ -2,21 +2,23 @@
 "use client";
 
 import { useEffect, useRef, useCallback } from "react";
-import { useBoardStore } from "../store/useBoardStore";
-import { usePendingGC } from "../store/mutations/core/usePendingGC";
-import { boardSocket } from "../api/realtime/boardSocketClient";
-import { useSyncStatus } from "../api/realtime/useSyncStatus";
-import type { ListDto, CardDto } from "../store/useBoardStore";
+import { useBoardStore }             from "../store/useBoardStore";
+import { usePendingGC }              from "../store/mutations/core/usePendingGC";
+import { useOutboxProcessor }        from "../store/mutations/core/useOutboxProcessor";
+import { boardRealtimeClient }       from "../api/realtime/boardRealtimeClient";
+import { useSyncStatus }             from "../api/realtime/useSyncStatus";
+import type { ListDto, CardDto }     from "../store/useBoardStore";
+import type { DeadLetterEntry }      from "../api/realtime/outboxProcessor";
 
 // ============================================================================
 // 🛡️ Types
 // ============================================================================
 
 interface BoardPageProps {
-  boardId: string;
-  initialLists: (ListDto & { cards: CardDto[] })[];
+  boardId:        string;
+  initialLists:   (ListDto & { cards: CardDto[] })[];
   initialSequence: string;
-  authToken?: string;
+  authToken?:     string;
 }
 
 // ============================================================================
@@ -24,12 +26,21 @@ interface BoardPageProps {
 // ============================================================================
 
 function SyncIndicator() {
-  const { uiStatus, latencyMs, reconnectAttempts, canReload } = useSyncStatus();
+  const {
+    uiStatus,
+    latencyMs,
+    reconnectAttempts,
+    gapCount,
+    resyncCount,
+    dlqSize,
+    canReload,
+  } = useSyncStatus();
 
   const handleReload = useCallback(() => {
     window.location.reload();
   }, []);
 
+  // ── synced ────────────────────────────────────────────────────────────────
   if (uiStatus === "synced") {
     return (
       <span className="flex items-center gap-1.5 text-emerald-400 text-sm font-medium">
@@ -39,14 +50,18 @@ function SyncIndicator() {
         </span>
         Synced
         {latencyMs !== null && (
-          <span className="text-emerald-600 text-xs font-normal">
-            {latencyMs}ms
+          <span className="text-emerald-600 text-xs font-normal">{latencyMs}ms</span>
+        )}
+        {process.env.NODE_ENV === "development" && (
+          <span className="text-zinc-600 text-xs font-normal ml-1">
+            gaps:{gapCount} resyncs:{resyncCount}
           </span>
         )}
       </span>
     );
   }
 
+  // ── catching_up ───────────────────────────────────────────────────────────
   if (uiStatus === "catching_up") {
     return (
       <span className="flex items-center gap-1.5 text-sky-400 text-sm font-medium animate-pulse">
@@ -56,6 +71,7 @@ function SyncIndicator() {
     );
   }
 
+  // ── reconnecting ──────────────────────────────────────────────────────────
   if (uiStatus === "reconnecting") {
     return (
       <span className="flex items-center gap-1.5 text-amber-400 text-sm font-medium animate-pulse">
@@ -70,6 +86,17 @@ function SyncIndicator() {
     );
   }
 
+  // ── resyncing (full snapshot reload in progress) ──────────────────────────
+  if (uiStatus === "resyncing") {
+    return (
+      <span className="flex items-center gap-1.5 text-violet-400 text-sm font-medium animate-pulse">
+        <span className="h-2 w-2 rounded-full bg-violet-400" />
+        Refreshing board…
+      </span>
+    );
+  }
+
+  // ── resyncing_required (server ordered, user action) ──────────────────────
   if (uiStatus === "resyncing_required") {
     return (
       <span className="flex items-center gap-2 text-rose-400 text-sm font-medium">
@@ -86,11 +113,17 @@ function SyncIndicator() {
     );
   }
 
+  // ── offline (terminal, max reconnects exhausted) ──────────────────────────
   if (uiStatus === "offline") {
     return (
       <span className="flex items-center gap-2 text-zinc-500 text-sm font-medium">
         <span className="h-2 w-2 rounded-full bg-zinc-600" />
         Offline
+        {dlqSize > 0 && (
+          <span className="text-zinc-400 text-xs">
+            {dlqSize} unsaved change{dlqSize !== 1 ? "s" : ""}
+          </span>
+        )}
         {canReload && (
           <button
             onClick={handleReload}
@@ -118,9 +151,7 @@ export function BoardPage({
   initialSequence,
   authToken,
 }: BoardPageProps) {
-  // ── Guard hydration to a single run ──────────────────────────────────────
-  // Using a ref (not useState) so it never triggers a re-render.
-  // initBoard itself is synchronous and idempotent when called once.
+  // ── Single-run hydration guard ────────────────────────────────────────────
   const isHydrated = useRef(false);
   const initBoard  = useBoardStore((state) => state.initBoard);
   const listOrder  = useBoardStore((state) => state.listOrder);
@@ -130,17 +161,31 @@ export function BoardPage({
     isHydrated.current = true;
   }
 
-  // ── Garbage-collect stale pending mutations every 60 s ───────────────────
+  // ── Background GC for stale pending mutations ─────────────────────────────
   usePendingGC(60_000);
 
-  // ── WebSocket lifecycle ───────────────────────────────────────────────────
-  useEffect(() => {
-    // connect() is idempotent: safe to call even if already connected.
-    boardSocket.connect(boardId, authToken);
+  // ── Outbox DLQ observer ───────────────────────────────────────────────────
+  const handleDlqEntry = useCallback((entry: DeadLetterEntry) => {
+    // In production you might show a toast or log to an error tracker.
+    // For now we surface it in dev console.
+    if (process.env.NODE_ENV === "development") {
+      console.warn("[BoardPage] Mutation entered DLQ:", entry);
+    }
+  }, []);
 
-    // Graceful teardown when the component unmounts (user navigates away).
+  useOutboxProcessor({ onDlqEntry: handleDlqEntry });
+
+  // ── Realtime lifecycle ────────────────────────────────────────────────────
+  useEffect(() => {
+    // connect() is idempotent — safe even if called while already connected.
+    boardRealtimeClient.connect(boardId, authToken);
+
+    // Notify the sync FSM that the board is now hydrated.
+    boardRealtimeClient.notifyBoardHydrated();
+
     return () => {
-      boardSocket.disconnect();
+      // Graceful teardown: stops outbox processor, disconnects WS, resets sync FSM.
+      boardRealtimeClient.disconnect();
     };
   }, [boardId, authToken]);
 

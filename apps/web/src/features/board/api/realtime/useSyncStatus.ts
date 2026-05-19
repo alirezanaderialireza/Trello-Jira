@@ -1,93 +1,87 @@
 // apps/web/src/features/board/api/realtime/useSyncStatus.ts
 //
 // ============================================================================
-// 🔌 useSyncStatus — Unified Connection + Data-Sync Status Hook
+// 🔌 useSyncStatus — Unified Status Hook (Phase 2)
 // ============================================================================
 //
-// Architecture note:
-// ──────────────────
-// Two independent state machines must be combined for the UI:
+// Phase 2 changes:
+// ────────────────
+// Now consumes boardRealtimeClient instead of boardSocket directly.
+// This gives a unified view of:
+//   • Transport FSM  (ConnectionMetrics)
+//   • Sync FSM       (ClientSyncState)
+//   • DLQ size       (for devtools / warnings)
+//   • Outbox health
 //
-//   ConnectionState (transport)   — from boardSocket.metrics
-//   SyncStatus      (data-sync)   — from useBoardStore
-//
-// Neither is sufficient alone:
-//   • ConnectionState "connected" + SyncStatus "desynced" → "Reconnected but
-//     data is behind; catching up"
-//   • ConnectionState "reconnecting" + SyncStatus "healthy" → "Temporarily
-//     offline but last known state is good"
-//
-// This hook fuses both into a single UISyncStatus for component consumption,
-// keeping the two FSMs decoupled at the source.
-//
-// Subscription model:
-// ───────────────────
-// boardSocket.subscribe() is an observer pattern (not React state), so we
-// bridge it into React state via useEffect + useState.  The component
-// re-renders ONLY when the derived UISyncStatus changes — not on every
-// metrics_updated tick (which fires on every RTT sample).
+// The derived UISyncStatus priority table has been extended:
+//   terminal   → "offline"
+//   offline    → "offline"           (sync FSM terminal)
+//   resyncing  → "resyncing"         (new: full snapshot in progress)
+//   desynced   → "resyncing_required"
+//   reconnecting (any) → "reconnecting"
+//   catching_up → "catching_up"
+//   idle        → "idle"
+//   synced      → "synced"
 // ============================================================================
 
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useBoardStore } from "../../store/useBoardStore";
-import { boardSocket } from "./boardSocketClient";
-import type { ConnectionState, ConnectionMetrics } from "./connectionFsm";
-import type { SyncStatus } from "../../store/useBoardStore";
+import { boardRealtimeClient }                 from "./boardRealtimeClient";
+import type { RealtimeClientEvent, RealtimeClientMetrics } from "./boardRealtimeClient";
+import type { ClientSyncState }                from "./clientSyncFsm";
+import type { ConnectionState }                from "./connectionFsm";
+import type { SyncStatus }                     from "../../store/useBoardStore";
 
 // ============================================================================
 // 🎨 Derived UI Status
 // ============================================================================
 
-/**
- * A single enum consumed by UI components.
- * Derived from ConnectionState × SyncStatus.
- */
 export type UISyncStatus =
-  /** Socket open, data up-to-date */
   | "synced"
-  /** Socket open, catching up on missed events (gap in sequence) */
   | "catching_up"
-  /** Socket temporarily dropped; attempting to reconnect */
   | "reconnecting"
-  /** Socket open but a full resync is required (data too far behind) */
+  | "resyncing"
   | "resyncing_required"
-  /** Max reconnect attempts exhausted; user action required */
   | "offline"
-  /** Initial state: socket not yet opened */
   | "idle";
 
 // ============================================================================
-// 🔢 Priority Table
-// ============================================================================
-// Maps (ConnectionState, SyncStatus) → UISyncStatus.
-// Ordered from most-severe to least-severe so the UI always shows the
-// most actionable state.
+// 🔢 Derivation
 // ============================================================================
 
 function deriveUiStatus(
-  conn: ConnectionState,
-  sync: SyncStatus,
+  connState: ConnectionState,
+  syncState: ClientSyncState,
+  storeSyncStatus: SyncStatus,
 ): UISyncStatus {
-  // Terminal transport = nothing works; user must act.
-  if (conn === "terminal") return "offline";
+  // Transport terminal (max reconnect attempts) or sync FSM offline
+  if (connState === "terminal" || syncState === "offline") return "offline";
 
-  // Server-ordered resync regardless of connection state.
-  if (sync === "desynced") return "resyncing_required";
+  // Full resync in progress (buffer overflow or server RESYNC_REQUIRED)
+  if (syncState === "resyncing") return "resyncing";
 
-  // Transport is down but not terminal.
-  if (conn === "reconnecting" || conn === "connecting" || conn === "handshaking") {
+  // Store says desynced but FSM hasn't yet received the trigger
+  if (storeSyncStatus === "desynced") return "resyncing_required";
+
+  // Transport not yet up
+  if (
+    connState === "reconnecting" ||
+    connState === "connecting"   ||
+    connState === "handshaking"  ||
+    syncState === "reconnecting"
+  ) {
     return "reconnecting";
   }
 
-  // Not yet started.
-  if (conn === "idle") return "idle";
+  // Not yet started
+  if (connState === "idle" || syncState === "idle") return "idle";
 
-  // Transport connected — look at data-sync dimension.
-  if (sync === "gap_detected") return "catching_up";
+  // Data gap in progress
+  if (syncState === "catching_up" || storeSyncStatus === "gap_detected") {
+    return "catching_up";
+  }
 
-  // Both healthy.
   return "synced";
 }
 
@@ -97,17 +91,25 @@ function deriveUiStatus(
 
 export interface SyncStatusInfo {
   /** Derived UI-facing status */
-  uiStatus:   UISyncStatus;
-  /** Raw transport FSM state (for devtools / advanced consumers) */
-  connState:  ConnectionState;
-  /** Raw data-sync state from store */
-  syncStatus: SyncStatus;
+  uiStatus:          UISyncStatus;
+  /** Raw transport state */
+  connState:         ConnectionState;
+  /** Rich sync FSM state */
+  syncState:         ClientSyncState;
+  /** Legacy store status (for backward-compat consumers) */
+  syncStatus:        SyncStatus;
   /** Latest RTT in ms, null if never measured */
-  latencyMs:  number | null;
-  /** Number of reconnect attempts in current session */
+  latencyMs:         number | null;
+  /** Reconnect attempts in current session */
   reconnectAttempts: number;
-  /** Whether the user can trigger a manual reload to recover */
-  canReload: boolean;
+  /** Gap events detected this session */
+  gapCount:          number;
+  /** Full resyncs performed this session */
+  resyncCount:       number;
+  /** Dead-letter queue size */
+  dlqSize:           number;
+  /** Whether the user can trigger a reload */
+  canReload:         boolean;
 }
 
 // ============================================================================
@@ -115,62 +117,88 @@ export interface SyncStatusInfo {
 // ============================================================================
 
 export function useSyncStatus(): SyncStatusInfo {
-  // ── Data-sync state from Zustand (reactive) ──────────────────────────────
-  const syncStatus = useBoardStore((state) => state.syncStatus);
-
-  // ── Transport metrics from boardSocket (observer-based) ──────────────────
-  // We initialize from the singleton's current snapshot so the hook is
-  // accurate even if it mounts after the socket is already connected.
-  const [metrics, setMetrics] = useState<ConnectionMetrics>(
-    () => boardSocket.metrics,
+  // ── Initialize from current snapshot ─────────────────────────────────────
+  const [clientMetrics, setClientMetrics] = useState<RealtimeClientMetrics>(
+    () => boardRealtimeClient.metrics,
   );
 
-  const handleConnectionEvent = useCallback(
-    (event: Parameters<Parameters<typeof boardSocket.subscribe>[0]>[0]) => {
-      // We only need to re-render when metrics that affect UISyncStatus change.
-      // Specifically: state, reconnectAttempts, latencyMs.
-      // "metrics_updated" fires on every pong — we only update React state
-      // when the relevant fields actually change to avoid unnecessary renders.
-      if (event.type === "state_changed" || event.type === "metrics_updated") {
-        setMetrics((prev) => {
-          const next =
-            event.type === "metrics_updated"
-              ? event.metrics
-              : boardSocket.metrics;
+  // Store's SyncStatus (legacy, kept for reconcileIncomingEvent compat)
+  const [storeSyncStatus, setStoreSyncStatus] = useState<SyncStatus>("healthy");
 
-          // Bail if nothing UI-relevant changed.
-          if (
-            prev.state             === next.state &&
-            prev.reconnectAttempts === next.reconnectAttempts &&
-            prev.latencyMs         === next.latencyMs
-          ) {
-            return prev; // reference-equal → no re-render
-          }
+  // ── Bridge boardRealtimeClient observer into React state ──────────────────
+  const handleClientEvent = useCallback((event: RealtimeClientEvent) => {
+    if (
+      event.type === "transport_changed" ||
+      event.type === "sync_state_changed"
+    ) {
+      setClientMetrics((prev) => {
+        const next = boardRealtimeClient.metrics;
 
-          return next;
-        });
-      }
-    },
-    [],
-  );
+        // Bail if nothing UI-relevant changed (avoid re-renders on every RTT pong)
+        if (
+          prev.transport.state             === next.transport.state             &&
+          prev.transport.reconnectAttempts === next.transport.reconnectAttempts &&
+          prev.transport.latencyMs         === next.transport.latencyMs         &&
+          prev.syncState                   === next.syncState                   &&
+          prev.gapCount                    === next.gapCount                    &&
+          prev.dlqSize                     === next.dlqSize
+        ) {
+          return prev;
+        }
+
+        return next;
+      });
+    }
+
+    if (event.type === "sync_state_changed") {
+      // Sync the store status to keep legacy consumers accurate
+      const { legacySyncStatus } = boardRealtimeClient.metrics.transport
+        ? { legacySyncStatus: _syncStateToLegacy(event.event.next) }
+        : { legacySyncStatus: "healthy" as SyncStatus };
+      setStoreSyncStatus(legacySyncStatus);
+    }
+  }, []);
 
   useEffect(() => {
-    // Subscribe and sync immediately in case metrics changed between
-    // useState initializer and this effect running.
-    setMetrics(boardSocket.metrics);
-    const unsub = boardSocket.subscribe(handleConnectionEvent);
+    // Sync immediately in case events fired between useState init and mount
+    setClientMetrics(boardRealtimeClient.metrics);
+    const unsub = boardRealtimeClient.subscribe(handleClientEvent);
     return unsub;
-  }, [handleConnectionEvent]);
+  }, [handleClientEvent]);
 
-  // ── Derive UI status ─────────────────────────────────────────────────────
-  const uiStatus = deriveUiStatus(metrics.state, syncStatus);
+  // ── Derive ────────────────────────────────────────────────────────────────
+  const { transport, syncState, gapCount, resyncCount, dlqSize } = clientMetrics;
+
+  const uiStatus = deriveUiStatus(transport.state, syncState, storeSyncStatus);
 
   return {
     uiStatus,
-    connState:         metrics.state,
-    syncStatus,
-    latencyMs:         metrics.latencyMs,
-    reconnectAttempts: metrics.reconnectAttempts,
-    canReload:         uiStatus === "offline" || uiStatus === "resyncing_required",
+    connState:         transport.state,
+    syncState,
+    syncStatus:        storeSyncStatus,
+    latencyMs:         transport.latencyMs,
+    reconnectAttempts: transport.reconnectAttempts,
+    gapCount,
+    resyncCount,
+    dlqSize,
+    canReload:
+      uiStatus === "offline"             ||
+      uiStatus === "resyncing_required"  ||
+      uiStatus === "resyncing",
   };
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function _syncStateToLegacy(state: ClientSyncState): SyncStatus {
+  switch (state) {
+    case "idle":
+    case "synced":       return "healthy";
+    case "catching_up":  return "gap_detected";
+    case "reconnecting": return "reconnecting";
+    case "resyncing":
+    case "offline":      return "desynced";
+  }
 }
