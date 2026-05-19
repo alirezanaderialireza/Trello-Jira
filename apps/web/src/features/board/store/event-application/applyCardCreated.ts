@@ -80,8 +80,7 @@ export function applyCardCreated(
     title,
     position,
 
-    // 🌟 (Fix 2): جلوگیری از ارور TS در صورتی که اسم فیلد ورژن در دامین متفاوت باشد
-    revision: (event as any).version || (event as any).eventVersion || 0,
+    revision: event.version ?? 0,
 
     /**
      * Runtime-only metadata

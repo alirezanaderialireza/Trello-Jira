@@ -76,7 +76,7 @@ export function applyListMoved(
     position: newPosition,
 
     // 🌟 (Fix 3): جلوگیری از ارور تایپ مربوط به فیلد ورژن
-    revision: (event as any).version || (event as any).eventVersion || 0,
+    revision: event.version ?? 0,
 
     /**
      * Runtime-only metadata

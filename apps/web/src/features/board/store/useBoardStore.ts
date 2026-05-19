@@ -15,8 +15,10 @@ import type {
 import type { ClientEventEnvelope } from "./event-application/types";
 import type { ReducerContext } from "./event-application/context";
 import { applyEvent as dispatcherApplyEvent } from "./event-application/dispatcher";
-
 import { reconcileIncomingEvent } from "./event-application/reconcileIncomingEvent";
+
+// Canonical shared types — single source of truth
+import type { WsEvent, SyncStatus } from "./sync/syncContracts";
 
 // ============================================================================
 // 🛡️ DTOs & Snapshots
@@ -66,17 +68,9 @@ export interface PendingMutation {
   optimisticVersion?: number;
 }
 
-export interface WsEvent {
-  sequence: string;
-  type: string;
-  payload: AppDomainEvent;
-}
-
-export type SyncStatus =
-  | "healthy"
-  | "gap_detected"
-  | "reconnecting"
-  | "desynced";
+// Re-export canonical types from syncContracts so store consumers
+// import from a single location.
+export type { WsEvent, SyncStatus } from "./sync/syncContracts";
 
 // ============================================================================
 // 🌟 PURE STORE STATE
@@ -157,7 +151,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
   listOrder: [],
   boardSequence: "0",
   bufferedEvents: {},
-  syncStatus: "healthy",
+  syncStatus: "synced" as SyncStatus,
   pendingMutations: {},
 
   // ==========================================================================
@@ -207,7 +201,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
         cardsByList: newCardsByList,
         listOrder: newListOrder,
         boardSequence: sequence,
-        syncStatus: "healthy",
+        syncStatus: "synced" as SyncStatus,
         bufferedEvents: {},
         pendingMutations: {},
       };
@@ -467,27 +461,42 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
   replaceCard: (tempId, serverCard) =>
     set((state) => {
-      const envelope: ClientEventEnvelope<CardUpdatedEvent> = {
-        event: {
-          id: crypto.randomUUID(),
-          type: "card.updated",
-          version: serverCard.revision ?? 0,
-          occurredAt: new Date().toISOString(),
-          aggregateId: tempId,
-          aggregateType: "card",
-          payload: {
-            boardId: serverCard.boardId ?? "",
-            cardId: tempId,
-            changes: {
-              title: serverCard.title,
-              description: serverCard.description,
-            },
-          },
-        },
-        optimistic: false,
+      // ✅ FIX: replaceCard previously used card.updated → applyCardUpdated
+      // which only merges {title, description}. It never replaced the tempId
+      // with the real server id.
+      //
+      // Correct approach: direct map swap — remove tempId entry, insert
+      // serverCard under its real id, and update the cardsByList reference.
+      const existingCard = state.cards[tempId];
+      if (!existingCard) return state;
+
+      const realId = serverCard.id as string;
+      if (!realId) return state;
+
+      // Build the final authoritative card
+      const finalCard = {
+        ...existingCard,
+        ...serverCard,
+        id: realId,
+        isOptimistic: false,
       };
 
-      return dispatcherApplyEvent(state, envelope, { mode: "live" });
+      // Remove temp entry, add real entry
+      const { [tempId]: _removed, ...restCards } = state.cards;
+      const nextCards = { ...restCards, [realId]: finalCard };
+
+      // Update cardsByList: swap tempId → realId in the correct list
+      const listId = finalCard.listId;
+      const listCards = state.cardsByList[listId] ?? [];
+      const nextListCards = listCards.map((id) => (id === tempId ? realId : id));
+
+      return {
+        cards: nextCards,
+        cardsByList: {
+          ...state.cardsByList,
+          [listId]: nextListCards,
+        },
+      };
     }),
 
   /**

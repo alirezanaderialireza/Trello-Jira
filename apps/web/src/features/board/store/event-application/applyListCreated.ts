@@ -41,7 +41,7 @@ export function applyListCreated(
     id: listId,
     title,
     position,
-    revision: event.version,
+    revision: event.version ?? 0,
     isOptimistic: envelope.optimistic ?? false,
   };
 

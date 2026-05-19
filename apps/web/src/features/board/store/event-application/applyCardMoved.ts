@@ -78,7 +78,7 @@ export function applyCardMoved(
     position: newPosition,
 
     // 🌟 فیکس ارور version:
-    revision: (event as any).version || (event as any).eventVersion || 0,
+    revision: event.version ?? 0,
 
     isOptimistic: envelope.optimistic ?? existingCard.isOptimistic ?? false,
   };

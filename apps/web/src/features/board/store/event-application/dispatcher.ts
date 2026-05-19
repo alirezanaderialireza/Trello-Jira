@@ -9,6 +9,7 @@ import type {
   ListCreatedEvent,
   ListUpdatedEvent,
   ListMovedEvent,
+  ListDeletedEvent,
 } from "@repo/domain";
 
 import type { BoardStoreState } from "../useBoardStore";
@@ -29,6 +30,7 @@ import { applyCardDeleted } from "./applyCardDeleted";
 import { applyListMoved } from "./applyListMoved";
 import { applyListCreated } from "./applyListCreated";
 import { applyListUpdated } from "./applyListUpdated";
+import { applyListDeleted } from "./applyListDeleted";
 
 // ============================================================================
 // 🌟 Event Handler Contract
@@ -79,6 +81,8 @@ type EventMap = {
   "list.updated": ListUpdatedEvent;
 
   "list.moved": ListMovedEvent;
+
+  "list.deleted": ListDeletedEvent;
 };
 
 // ============================================================================
@@ -120,6 +124,8 @@ const HANDLERS: HandlerRegistry = {
   "list.created": applyListCreated,
 
   "list.updated": applyListUpdated,
+
+  "list.deleted": applyListDeleted,
 };
 
 // ============================================================================
@@ -187,8 +193,8 @@ export function applyEvent(
       context,
     );
 
-    // 🌟 TELEMETRY: ثبتِ موفقیت‌آمیز بودنِ تغییرِ خوش‌بینانه
-    if (context.mode !== "live" && correlationId) {
+    // 🌟 TELEMETRY: optimistic events run in "live" mode
+    if (context.mode === "live" && correlationId && !envelope.acknowledged) {
       telemetry.mutation(correlationId, eventType, "OPTIMISTIC_APPLIED");
     }
 
