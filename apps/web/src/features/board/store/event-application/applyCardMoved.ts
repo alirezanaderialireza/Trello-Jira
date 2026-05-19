@@ -80,7 +80,9 @@ export function applyCardMoved(
     // 🌟 فیکس ارور version:
     revision: (event as any).version || (event as any).eventVersion || 0,
 
-    isOptimistic: envelope.optimistic ?? existingCard.isOptimistic ?? false,
+    isOptimistic: envelope.acknowledged
+      ? false
+      : envelope.optimistic ?? existingCard.isOptimistic ?? false,
   };
 
   /**

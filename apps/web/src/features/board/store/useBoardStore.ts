@@ -29,6 +29,7 @@ export type CardDto = {
 
 export type ListDto = {
   id: string;
+  boardId: string;
   title: string;
   position: string;
   revision: number;
@@ -230,6 +231,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
       sortedLists.forEach((list) => {
         newLists[list.id] = {
           id: list.id,
+          boardId: list.boardId ?? "",
           title: list.title,
           position: list.position,
           revision: list.revision,
@@ -316,27 +318,62 @@ export const useBoardStore = create<BoardState>()((set) => ({
     const nextCardsByList = { ...state.cardsByList };
 
     if (snapshot.cards) {
-    Object.entries(snapshot.cards).forEach(([id, snapCard]) => {
-      const currentCard = state.cards[id];
-      
-      if (currentCard && currentCard.revision > snapCard.revision) {
-        // 🌟 محل قرارگیری سنسور: رول‌بک به ورژن قدیمی‌تر انجام نشد
-        telemetry.log(
-          "SNAPSHOT_MANAGER",
-          "ROLLBACK_SKIPPED",
-          { entityId: id, currentRevision: currentCard.revision, snapshotRevision: snapCard.revision, reason: "stale_protection" }
-        );
-        return; // از این مورد عبور کن
+      Object.entries(snapshot.cards).forEach(([id, snapCard]) => {
+        const currentCard = state.cards[id];
+
+        // 🌟 Stale Protection علیه server events:
+        // اگر کارت در حال حاضر isOptimistic نیست و revision آن جلوتر از snapshot است،
+        // یعنی یک رویداد سرور (یا کاربر دیگر) داده‌ی جدیدتری برای ما فرستاده.
+        // در این حالت rollback نمی‌کنیم تا کار درست شده‌ی دیگران را نشکنیم.
+        // اما اگر کارت هنوز isOptimistic باشد (یعنی revision آن ساختگی است)،
+        // rollback را اجرا می‌کنیم چون هنوز توسط سرور تایید نشده.
+        if (
+          currentCard &&
+          !currentCard.isOptimistic &&
+          currentCard.revision > snapCard.revision
+        ) {
+          telemetry.log(
+            "SNAPSHOT_MANAGER",
+            "ROLLBACK_SKIPPED",
+            { entityId: id, currentRevision: currentCard.revision, snapshotRevision: snapCard.revision, reason: "stale_protection" }
+          );
+          return;
+        }
+
+        // 🌟 Rollback واقعی: مقدار snapshot را برمی‌گردانیم
+        nextCards[id] = snapCard;
+      });
+
+      // 🌟 پاکسازی کارت‌های optimistic که در snapshot نبودن
+      // فقط در مرز موجودیت‌های مرتبط با rollback (یعنی listهای داخل snapshot.cardsByList)
+      // تا کارت‌های optimistic در لیست‌های دیگر (mutationهای موازی) را تصادفاً پاک نکنیم.
+      if (snapshot.cardsByList) {
+        const targetListIds = new Set(Object.keys(snapshot.cardsByList));
+        Object.keys(state.cards).forEach((id) => {
+          const card = state.cards[id];
+          if (
+            card?.isOptimistic &&
+            !snapshot.cards![id] &&
+            targetListIds.has(card.listId)
+          ) {
+            delete nextCards[id];
+          }
+        });
       }
-      // در غیر این صورت رول‌بک انجام شود...
-    });
-  }
+    }
 
     if (snapshot.lists) {
       Object.entries(snapshot.lists).forEach(([id, snapList]) => {
-        if (!state.lists[id] || state.lists[id].revision <= snapList.revision) {
-          nextLists[id] = snapList;
+        const currentList = state.lists[id];
+        // همان منطق Stale Protection برای لیست‌ها
+        if (
+          currentList &&
+          !currentList.isOptimistic &&
+          currentList.revision > snapList.revision
+        ) {
+          return;
         }
+        nextLists[id] = snapList;
       });
     }
 
@@ -344,9 +381,16 @@ export const useBoardStore = create<BoardState>()((set) => ({
       Object.entries(snapshot.cardsByList).forEach(([id, snapArr]) => {
         const currentList = state.lists[id];
         const snapList = snapshot.lists?.[id];
-        if (!currentList || (snapList && currentList.revision <= snapList.revision)) {
-          nextCardsByList[id] = [...snapArr];
+        // اگر لیست از سرور به‌روز شده، آرایه ترتیب کارت‌ها را override نمی‌کنیم
+        if (
+          currentList &&
+          !currentList.isOptimistic &&
+          snapList &&
+          currentList.revision > snapList.revision
+        ) {
+          return;
         }
+        nextCardsByList[id] = [...snapArr];
       });
     }
 
@@ -407,6 +451,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
           payload: {
             cardId: card.id,
+            boardId: card.boardId,
             listId: card.listId,
             title: card.title,
             position: card.position,
@@ -454,8 +499,10 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
           payload: {
             cardId,
+            boardId: currentCard.boardId,
             fromListId,
             toListId,
+            oldPosition: currentCard.position,
             newPosition:
               currentCard.position + "V",
           },
@@ -498,6 +545,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
           payload: {
             cardId,
+            boardId: currentCard.boardId,
             changes,
           },
         } as AppDomainEvent,
@@ -577,6 +625,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
           payload: {
             cardId,
+            boardId: currentCard.boardId,
           },
         } as AppDomainEvent,
 
@@ -609,6 +658,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
           payload: {
             listId: list.id,
+            boardId: list.boardId,
             title: list.title,
             position: list.position,
           },
@@ -704,7 +754,8 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
           payload: {
             listId,
-
+            boardId: list.boardId,
+            oldPosition: list.position,
             newPosition:
               list.position + "V",
           },

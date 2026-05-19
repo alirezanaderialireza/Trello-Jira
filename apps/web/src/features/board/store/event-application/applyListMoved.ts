@@ -81,10 +81,11 @@ export function applyListMoved(
     /**
      * Runtime-only metadata
      */
-    isOptimistic:
-      envelope.optimistic ??
-      existingList.isOptimistic ??
-      false,
+    isOptimistic: envelope.acknowledged
+      ? false
+      : envelope.optimistic ??
+        existingList.isOptimistic ??
+        false,
   };
 
   /**

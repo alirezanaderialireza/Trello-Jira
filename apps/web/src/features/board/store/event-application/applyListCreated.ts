@@ -42,7 +42,9 @@ export function applyListCreated(
     title,
     position,
     revision: event.version,
-    isOptimistic: envelope.optimistic ?? false,
+    isOptimistic: envelope.acknowledged
+      ? false
+      : envelope.optimistic ?? false,
   };
 
   /**

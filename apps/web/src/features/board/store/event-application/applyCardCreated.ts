@@ -86,7 +86,9 @@ export function applyCardCreated(
     /**
      * Runtime-only metadata
      */
-    isOptimistic: envelope.optimistic ?? false,
+    isOptimistic: envelope.acknowledged
+      ? false
+      : envelope.optimistic ?? false,
   };
 
   /**
