@@ -46,6 +46,9 @@ export function applyListCreated(
     title,
     position,
     revision: event.version,
+    confirmedRevision: envelope.acknowledged
+      ? event.version
+      : existingList?.confirmedRevision ?? 0,
     isOptimistic: envelope.acknowledged
       ? false
       : envelope.optimistic ?? existingList?.isOptimistic ?? false,

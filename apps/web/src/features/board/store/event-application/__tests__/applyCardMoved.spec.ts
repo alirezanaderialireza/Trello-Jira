@@ -35,6 +35,8 @@ describe("applyCardMoved Reducer", () => {
 
   revision: 1,
 
+  confirmedRevision: 1,
+
   ...overrides,
 });
 

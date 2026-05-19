@@ -81,6 +81,11 @@ export function applyCardCreated(
     title,
     position,
     revision: event.version,
+    // 🌟 confirmedRevision tracks the last server-canonical version.
+    // Acknowledged event → bump it. Optimistic event → preserve.
+    confirmedRevision: envelope.acknowledged
+      ? event.version
+      : existingCard?.confirmedRevision ?? 0,
     isOptimistic: envelope.acknowledged
       ? false
       : envelope.optimistic ?? existingCard?.isOptimistic ?? false,

@@ -32,11 +32,21 @@ export function applyCardUpdated(
   }
 
   /**
-   * 🛡️ Stale Protection
-   * Drop already-applied or superseded events.
+   * 🛡️ Stale Protection — dual-revision aware
+   *
+   * For server events: compare against confirmedRevision (canonical).
+   * For optimistic events: compare against revision (local optimistic).
+   * Without this distinction, an ACK with version === optimistic-revision
+   * would be wrongly dropped, leaving the client diverged from the server.
    */
-  if (existingCard.revision >= event.version) {
-    return {};
+  if (envelope.acknowledged) {
+    if (existingCard.confirmedRevision >= event.version) {
+      return {};
+    }
+  } else {
+    if (existingCard.revision >= event.version) {
+      return {};
+    }
   }
 
   // 🌟 boardId from payload is authoritative; if missing (e.g. legacy/test
@@ -47,6 +57,9 @@ export function applyCardUpdated(
     ...(changes.title !== undefined && { title: changes.title }),
     ...(changes.description !== undefined && { description: changes.description }),
     revision: event.version,
+    confirmedRevision: envelope.acknowledged
+      ? event.version
+      : existingCard.confirmedRevision,
     isOptimistic: envelope.acknowledged
       ? false
       : envelope.optimistic ?? existingCard.isOptimistic ?? false,

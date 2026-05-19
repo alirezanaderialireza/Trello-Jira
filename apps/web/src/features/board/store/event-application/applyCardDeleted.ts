@@ -29,13 +29,27 @@ export function applyCardDeleted(
 
   const existingCard = state.cards[cardId];
 
-  /**
-   * 🛡️ Idempotency & Stale Guard
-   * - Card already removed? Skip.
-   * - Already at revision >= event.version (recreate scenario)? Skip.
-   */
-  if (!existingCard || existingCard.revision >= event.version) {
+  // 🛡️ Idempotency: deleting an absent card is a safe no-op.
+  if (!existingCard) {
     return {};
+  }
+
+  /**
+   * 🛡️ Idempotency & Stale Guard — dual-revision aware
+   *
+   * For server events: compare against confirmedRevision.
+   * For optimistic events: compare against revision.
+   * Use STRICT '>' (not '>=') because deletion is a terminal state:
+   * if existing.X === event.version we still apply the delete.
+   */
+  if (envelope.acknowledged) {
+    if (existingCard.confirmedRevision > event.version) {
+      return {};
+    }
+  } else {
+    if (existingCard.revision > event.version) {
+      return {};
+    }
   }
 
   const sourceListId = existingCard.listId;

@@ -46,9 +46,19 @@ export function applyListDeleted(
     return {};
   }
 
-  // 🛡️ Stale Protection (terminal-state semantics — strict `>`)
-  if (existingList.revision > event.version) {
-    return {};
+  /**
+   * 🛡️ Stale Protection (terminal-state semantics — strict `>`)
+   * dual-revision aware: server events compare against confirmedRevision,
+   * optimistic events against revision.
+   */
+  if (envelope.acknowledged) {
+    if (existingList.confirmedRevision > event.version) {
+      return {};
+    }
+  } else {
+    if (existingList.revision > event.version) {
+      return {};
+    }
   }
 
   // Remove list itself

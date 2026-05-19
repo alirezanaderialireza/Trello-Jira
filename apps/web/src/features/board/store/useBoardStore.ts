@@ -22,7 +22,23 @@ export type CardDto = {
   position: string;
   listId: string;
   description?: string;
+  /**
+   * 🌟 Optimistic version (local source of truth for ordering inserts).
+   * Bumped by every optimistic mutation, then re-aligned to the server
+   * version on ACK. Used by reducers to drop stale optimistic events.
+   */
   revision: number;
+  /**
+   * 🌟 Confirmed (server-canonical) version.
+   * Updated only when an event with envelope.acknowledged === true is
+   * applied. Used by reducers to drop stale SERVER events:
+   *   if (existing.confirmedRevision >= event.version) → drop
+   * This is the only safe way to differentiate:
+   *   - "I already applied this server event" (drop)
+   *   - "I have an optimistic bump but the server's canonical state
+   *      should still override my optimistic position" (apply)
+   */
+  confirmedRevision: number;
   updatedAt?: string | number;
   isOptimistic?: boolean;
 };
@@ -33,6 +49,8 @@ export type ListDto = {
   title: string;
   position: string;
   revision: number;
+  /** 🌟 See CardDto.confirmedRevision. */
+  confirmedRevision: number;
   updatedAt?: string | number;
   isOptimistic?: boolean;
 };
@@ -246,6 +264,8 @@ export const useBoardStore = create<BoardState>()((set) => ({
           title: list.title,
           position: list.position,
           revision: list.revision,
+          // 🌟 Hydration: server-supplied data is fully confirmed by definition.
+          confirmedRevision: list.revision,
           updatedAt: list.updatedAt,
         };
 
@@ -260,7 +280,11 @@ export const useBoardStore = create<BoardState>()((set) => ({
         );
 
         sortedCards.forEach((card) => {
-          newCards[card.id] = card;
+          // 🌟 Hydration: confirmedRevision = revision (server is the source).
+          newCards[card.id] = {
+            ...card,
+            confirmedRevision: card.confirmedRevision ?? card.revision,
+          };
 
           newCardsByList[list.id].push(card.id);
         });
@@ -660,6 +684,9 @@ export const useBoardStore = create<BoardState>()((set) => ({
             title: serverCard.title ?? optimisticCard.title,
             position: serverCard.position ?? optimisticCard.position,
             revision: serverCard.revision ?? optimisticCard.revision,
+            // 🌟 Server-confirmed identity migration → confirmedRevision aligns with server.
+            confirmedRevision:
+              serverCard.confirmedRevision ?? serverCard.revision ?? optimisticCard.revision,
             isOptimistic: false,
           };
 
@@ -824,6 +851,9 @@ export const useBoardStore = create<BoardState>()((set) => ({
             title: serverList.title ?? optimisticList.title,
             position: serverList.position ?? optimisticList.position,
             revision: serverList.revision ?? optimisticList.revision,
+            // 🌟 Server-confirmed identity migration → confirmedRevision aligns with server.
+            confirmedRevision:
+              serverList.confirmedRevision ?? serverList.revision ?? optimisticList.revision,
             isOptimistic: false,
           };
 
