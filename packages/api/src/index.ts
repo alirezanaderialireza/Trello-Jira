@@ -5,6 +5,9 @@ import { boardRouter } from "./routers/board";
 import { listRouter } from "./routers/list";
 import { cardRouter } from "./routers/card";
 
+// 🔐 Auth (Phase 2)
+import { authRouter } from "./routers/auth.router";
+
 // ⚡ Realtime & Sync
 import { realtimeSyncRouter } from "./routers/realtime/sync.router";
 import { presenceRouter } from "./routers/realtime/presence.router";
@@ -20,7 +23,12 @@ import { webhookRouter } from "./routers/internal/webhooks";
 
 export const appRouter = router({
   v1: router({
-    
+
+    // ------------------------------------------------------------------------
+    // 🔐 AUTH BOUNDARY (Phase 2)
+    // ------------------------------------------------------------------------
+    auth: authRouter,
+
     // ------------------------------------------------------------------------
     // 🌍 PUBLIC BOUNDARY
     // ------------------------------------------------------------------------
