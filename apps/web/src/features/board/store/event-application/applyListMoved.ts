@@ -54,10 +54,16 @@ export function applyListMoved(
   }
 
   /**
-   * Stale Protection: drop already-applied / superseded events.
+   * Stale Protection — dual-revision aware (see applyCardMoved).
    */
-  if (existingList.revision >= event.version) {
-    return {};
+  if (envelope.acknowledged) {
+    if (existingList.confirmedRevision >= event.version) {
+      return {};
+    }
+  } else {
+    if (existingList.revision >= event.version) {
+      return {};
+    }
   }
 
   const updatedList: ListDto = {
@@ -65,6 +71,9 @@ export function applyListMoved(
     boardId: boardId ?? existingList.boardId,
     position: newPosition,
     revision: event.version,
+    confirmedRevision: envelope.acknowledged
+      ? event.version
+      : existingList.confirmedRevision,
     isOptimistic: envelope.acknowledged
       ? false
       : envelope.optimistic ?? existingList.isOptimistic ?? false,

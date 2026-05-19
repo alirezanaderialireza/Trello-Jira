@@ -64,16 +64,31 @@ export function applyCardMoved(
 
   /**
    * --------------------------------------------------------------
-   * Stale Protection
+   * Stale Protection — dual-revision aware
    * --------------------------------------------------------------
-   * If our existing card revision is already >= the event's version,
-   * this event is stale (already applied or superseded). Drop it.
-   * Note: event.version may be undefined in test fixtures — in that
-   * case we let the event through (NaN comparison yields false).
+   * Two flavors of "stale":
+   *
+   *  1. Server event arrives (envelope.acknowledged === true):
+   *     We compare against `confirmedRevision`. If we have already
+   *     processed a server event with version >= event.version, drop.
+   *     This MUST NOT compare against `revision`, because `revision`
+   *     gets bumped by optimistic local mutations and would falsely
+   *     equal `event.version` when the server canonical state still
+   *     needs to override the optimistic position.
+   *
+   *  2. Optimistic event from our own bridge (acknowledged !== true):
+   *     We compare against `revision` (local optimistic version) so
+   *     replayed optimistic events stay idempotent.
    * --------------------------------------------------------------
    */
-  if (existingCard.revision >= event.version) {
-    return {};
+  if (envelope.acknowledged) {
+    if (existingCard.confirmedRevision >= event.version) {
+      return {};
+    }
+  } else {
+    if (existingCard.revision >= event.version) {
+      return {};
+    }
   }
 
   /**
@@ -84,14 +99,21 @@ export function applyCardMoved(
    * a stale or empty boardId, this self-heals.
    * Revision falls back to existing+1 if event.version is missing
    * (defensive — prevents undefined leaking into state).
+   *
+   * confirmedRevision advances ONLY on acknowledged server events.
    * --------------------------------------------------------------
    */
+  const nextRevision = event.version ?? existingCard.revision + 1;
+
   const updatedCard: CardDto = {
     ...existingCard,
     boardId: boardId ?? existingCard.boardId,
     listId: toListId,
     position: newPosition,
-    revision: event.version ?? existingCard.revision + 1,
+    revision: nextRevision,
+    confirmedRevision: envelope.acknowledged
+      ? nextRevision
+      : existingCard.confirmedRevision,
     isOptimistic: envelope.acknowledged
       ? false
       : envelope.optimistic ?? existingCard.isOptimistic ?? false,
