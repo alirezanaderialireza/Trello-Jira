@@ -31,7 +31,11 @@ export function applyCardDeleted(
    * اگر کارت وجود ندارد یا قبلاً توسط رویدادی با ورژن بالاتر (مثلاً Recreate) 
    * مدیریت شده، هیچ تغییری اعمال نمی‌کنیم.
    */
-  if (!existingCard || existingCard.revision >= event.version) {
+  // FIX B6: stale guard uses strict > so that an event with the same version
+  // as the current card is still applied (idempotent delete is safe).
+  // Using >= would incorrectly drop a legitimate first-time delete whose
+  // version equals the card's current revision.
+  if (!existingCard || existingCard.revision > event.version) {
     return {};
   }
 

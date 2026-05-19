@@ -1,9 +1,7 @@
 // apps/web/src/features/board/store/event-application/applyCardCreated.ts
 
-// 🌟 (Fix 1): ایمپورت مستقیماً از ریشه دامین انجام می‌شود
 import type { CardCreatedEvent } from "@repo/domain";
 import type { BoardStoreState } from "../useBoardStore";
-
 import type { ClientEventEnvelope } from "./types";
 import type { ReducerContext } from "./context";
 
@@ -15,7 +13,7 @@ import type { ReducerContext } from "./context";
  * Pure Event Reducer
  *
  * Responsibilities:
- * - create card entity
+ * - create card entity (including boardId)
  * - insert card into list ordering
  * - preserve replay safety
  * - support optimistic reconciliation
@@ -32,32 +30,21 @@ import type { ReducerContext } from "./context";
  */
 
 export function applyCardCreated(
-  state: BoardStoreState, // 🌟 به BoardStoreState که در فایل استور تو وجود دارد تغییر یافت
+  state: BoardStoreState,
   envelope: ClientEventEnvelope<CardCreatedEvent>,
   _context: ReducerContext,
 ): Partial<BoardStoreState> {
   const { event } = envelope;
 
-  const {
-    cardId,
-    listId,
-    title,
-    position,
-  } = event.payload;
+  const { cardId, listId, boardId, title, position } = event.payload;
 
   /**
    * --------------------------------------------------------------
-   * Existing Card Detection
+   * Existing Card Detection (Idempotency / Optimistic Reconciliation)
    * --------------------------------------------------------------
    *
-   * Extremely important for:
-   * - optimistic reconciliation
-   * - websocket replay
-   * - offline hydration
-   * - idempotency
-   *
-   * If card already exists:
-   * preserve local fields and merge authoritative server data.
+   * If card already exists preserve local fields and merge
+   * authoritative server data.
    * --------------------------------------------------------------
    */
   const existingCard = state.cards[cardId] ?? {};
@@ -67,25 +54,18 @@ export function applyCardCreated(
    * Build Card Entity
    * --------------------------------------------------------------
    *
-   * Immutable merge.
-   * Server becomes source of truth.
+   * FIX B3: boardId is now read from payload and written to entity.
+   * CardDto.boardId is required — never leave it undefined here.
    * --------------------------------------------------------------
    */
   const newCard = {
     ...existingCard,
-
     id: cardId,
-
+    boardId,       // ← FIX B3: was missing before
     listId,
     title,
     position,
-
-    // 🌟 (Fix 2): جلوگیری از ارور TS در صورتی که اسم فیلد ورژن در دامین متفاوت باشد
-    revision: (event as any).version || (event as any).eventVersion || 0,
-
-    /**
-     * Runtime-only metadata
-     */
+    revision: event.version,
     isOptimistic: envelope.optimistic ?? false,
   };
 
@@ -117,7 +97,6 @@ export function applyCardCreated(
    * Deterministic Stable Sort
    * --------------------------------------------------------------
    *
-   * Important:
    * Use newCard.position for the newly inserted entity.
    * Never trust stale state during reducer execution.
    * Fallback to ID guarantees total ordering stability.
@@ -125,14 +104,10 @@ export function applyCardCreated(
    */
   nextListCards.sort((a, b) => {
     const posA =
-      a === cardId
-        ? newCard.position
-        : state.cards[a]?.position ?? "";
+      a === cardId ? newCard.position : (state.cards[a]?.position ?? "");
 
     const posB =
-      b === cardId
-        ? newCard.position
-        : state.cards[b]?.position ?? "";
+      b === cardId ? newCard.position : (state.cards[b]?.position ?? "");
 
     return posA.localeCompare(posB) || a.localeCompare(b);
   });
@@ -147,7 +122,6 @@ export function applyCardCreated(
       ...state.cards,
       [cardId]: newCard,
     },
-
     cardsByList: {
       ...state.cardsByList,
       [listId]: nextListCards,
