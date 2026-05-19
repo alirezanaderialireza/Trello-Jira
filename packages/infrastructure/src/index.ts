@@ -13,6 +13,23 @@ export type { TokenPair, AccessTokenClaims, TokenServiceConfig } from "./auth/to
 export { AclEngine, roleAtLeast, hasPermission } from "./auth/aclEngine";
 export type { BoardRole, BoardPermission, AclCheckResult } from "./auth/aclEngine";
 
+// Phase 2: Card-level ACL
+export { CardAclEngine } from "./auth/cardAclEngine";
+export type { CardPermission, CardVisibility, CardAclCheckResult } from "./auth/cardAclEngine";
+
+// Phase 2: Live ACL Invalidation
+export { AclInvalidationBus, ACL_INVALIDATION_CHANNEL } from "./auth/liveAcl/aclInvalidationBus";
+export type { AclInvalidationEvent, AclInvalidationEventType } from "./auth/liveAcl/aclInvalidationBus";
+export { SessionRevoker } from "./auth/liveAcl/sessionRevoker";
+export { WsAclEnforcer } from "./auth/liveAcl/wsAclEnforcer";
+
+// Phase 2: Auth Observability
+export { AuthMetrics } from "./auth/observability/authMetrics";
+export { ReplayAttackDetector } from "./auth/observability/replayAttackDetector";
+export { AnomalyDetector } from "./auth/observability/anomalyDetector";
+export { computeFingerprint, verifyFingerprint } from "./auth/observability/sessionFingerprint";
+export type { FingerprintComponents, FingerprintMismatch, FingerprintResult, RiskLevel } from "./auth/observability/sessionFingerprint";
+
 export { MembershipCache } from "./redis/membershipCache";
 export type { MembershipEntry } from "./redis/membershipCache";
 
