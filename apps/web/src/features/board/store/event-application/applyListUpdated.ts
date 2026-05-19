@@ -1,15 +1,29 @@
+// apps/web/src/features/board/store/event-application/applyListUpdated.ts
+
 import type { ListUpdatedEvent } from "@repo/domain";
-import type { BoardStoreState } from "../useBoardStore";
+import type { BoardStoreState, ListDto } from "../useBoardStore";
 import type { ClientEventEnvelope } from "./types";
 import type { ReducerContext } from "./context";
 
+/**
+ * ------------------------------------------------------------------
+ * applyListUpdated
+ * ------------------------------------------------------------------
+ * Responsibilities:
+ * - apply title changes from payload
+ * - propagate boardId from payload (defensive self-healing)
+ * - stale protection via version check
+ * ------------------------------------------------------------------
+ */
 export function applyListUpdated(
   state: BoardStoreState,
   envelope: ClientEventEnvelope<ListUpdatedEvent>,
   _context: ReducerContext,
 ): Partial<BoardStoreState> {
   const { event } = envelope;
-  const { listId, changes } = event.payload;
+
+  // 🌟 Full canonical payload destructure
+  const { listId, boardId, changes } = event.payload;
 
   const existingList = state.lists[listId];
 
@@ -17,14 +31,17 @@ export function applyListUpdated(
     return {};
   }
 
-  // 🌟 Stale Protection Guard
+  /**
+   * 🛡️ Stale Protection
+   */
   if (existingList.revision >= event.version) {
     return {};
   }
 
-  const updatedList = {
+  const updatedList: ListDto = {
     ...existingList,
-    ...changes,
+    boardId: boardId ?? existingList.boardId,
+    ...(changes.title !== undefined && { title: changes.title }),
     revision: event.version,
     isOptimistic: envelope.acknowledged
       ? false

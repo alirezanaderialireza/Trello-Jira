@@ -1,10 +1,8 @@
 // apps/web/src/features/board/store/event-application/applyListMoved.ts
 
-// 🌟 (Fix 1): ایمپورت مستقیم از ریشه دامین
 import type { ListMovedEvent } from "@repo/domain";
 
-// 🌟 (Fix 2): استفاده از BoardState به جای BoardStoreState
-import type { BoardStoreState } from "../useBoardStore";
+import type { BoardStoreState, ListDto } from "../useBoardStore";
 
 import type { ClientEventEnvelope } from "./types";
 import type { ReducerContext } from "./context";
@@ -19,6 +17,7 @@ import type { ReducerContext } from "./context";
  * Responsibilities:
  * - move/reorder lists
  * - update LexoRank position
+ * - propagate boardId from payload (defensive)
  * - maintain deterministic board ordering
  * - preserve replay safety
  * - support optimistic reconciliation
@@ -27,6 +26,7 @@ import type { ReducerContext } from "./context";
  * ✅ Pure
  * ✅ Immutable
  * ✅ Replay-safe
+ * ✅ Stale-protected
  * ✅ Deterministic
  * ✅ Partial state return
  * ✅ Stable sorting
@@ -34,31 +34,19 @@ import type { ReducerContext } from "./context";
  */
 
 export function applyListMoved(
-  state: BoardStoreState, // 🌟 تغییر به BoardState
+  state: BoardStoreState,
   envelope: ClientEventEnvelope<ListMovedEvent>,
   _context: ReducerContext,
-): Partial<BoardStoreState> { // 🌟 تغییر به BoardState
+): Partial<BoardStoreState> {
   const { event } = envelope;
 
+  // 🌟 Full canonical payload destructure
   const {
     listId,
+    boardId,
     newPosition,
   } = event.payload;
 
-  /**
-   * --------------------------------------------------------------
-   * Replay Safety Guard
-   * --------------------------------------------------------------
-   *
-   * Reducers must never throw during:
-   * - websocket replay
-   * - offline recovery
-   * - hydration
-   * - partial synchronization
-   *
-   * Missing entities are ignored safely.
-   * --------------------------------------------------------------
-   */
   const existingList = state.lists[listId];
 
   if (!existingList) {
@@ -66,54 +54,26 @@ export function applyListMoved(
   }
 
   /**
-   * --------------------------------------------------------------
-   * Immutable List Update
-   * --------------------------------------------------------------
+   * Stale Protection: drop already-applied / superseded events.
    */
-  const updatedList = {
+  if (existingList.revision >= event.version) {
+    return {};
+  }
+
+  const updatedList: ListDto = {
     ...existingList,
-
+    boardId: boardId ?? existingList.boardId,
     position: newPosition,
-
-    // 🌟 (Fix 3): جلوگیری از ارور تایپ مربوط به فیلد ورژن
-    revision: (event as any).version || (event as any).eventVersion || 0,
-
-    /**
-     * Runtime-only metadata
-     */
+    revision: event.version,
     isOptimistic: envelope.acknowledged
       ? false
-      : envelope.optimistic ??
-        existingList.isOptimistic ??
-        false,
+      : envelope.optimistic ?? existingList.isOptimistic ?? false,
   };
 
-  /**
-   * --------------------------------------------------------------
-   * Snapshot Current Ordering
-   * --------------------------------------------------------------
-   *
-   * We clone to preserve immutability.
-   * --------------------------------------------------------------
-   */
   const nextListOrder = [...state.listOrder];
 
   /**
-   * --------------------------------------------------------------
-   * Deterministic Stable Sort
-   * --------------------------------------------------------------
-   *
-   * Critical:
-   * use updatedList.position instead of stale state.
-   *
-   * Guarantees:
-   * - replay consistency
-   * - websocket consistency
-   * - offline deterministic recovery
-   * - stable hydration
-   *
-   * Fallback to ID ensures total ordering stability.
-   * --------------------------------------------------------------
+   * Deterministic Stable Sort using updatedList.position (not stale state).
    */
   nextListOrder.sort((a, b) => {
     const posA =
@@ -129,18 +89,11 @@ export function applyListMoved(
     return posA.localeCompare(posB) || a.localeCompare(b);
   });
 
-  /**
-   * --------------------------------------------------------------
-   * Partial Immutable State Return
-   * --------------------------------------------------------------
-   */
   return {
     lists: {
       ...state.lists,
-
       [listId]: updatedList,
     },
-
     listOrder: nextListOrder,
   };
 }

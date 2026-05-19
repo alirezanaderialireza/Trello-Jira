@@ -30,6 +30,8 @@ const generateOptimisticPosition = (
 type BoardCard = {
   id: string;
 
+  boardId: string;
+
   listId: string;
 
   title: string;
@@ -62,8 +64,10 @@ type BoardStore = {
 
 export default function CreateCardForm({
   listId,
+  boardId,
 }: {
   listId: string;
+  boardId: string;
 }) {
   const [isEditing, setIsEditing] =
     useState(false);
@@ -196,6 +200,8 @@ export default function CreateCardForm({
     const optimisticCard: BoardCard = {
       id: tempId,
 
+      boardId,
+
       listId,
 
       title: trimmedTitle,
@@ -258,6 +264,8 @@ export default function CreateCardForm({
 
       const confirmedCard: BoardCard = {
         id: result.data.cardId,
+
+        boardId,
 
         listId,
 

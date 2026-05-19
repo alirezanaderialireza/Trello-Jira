@@ -44,6 +44,7 @@ import { useBoardStore } from "../store/useBoardStore";
 
 export type CardDto = {
   id: string;
+  boardId: string;
   title: string;
   position: string;
   listId: string;
@@ -52,6 +53,7 @@ export type CardDto = {
 
 export type ListDto = {
   id: string;
+  boardId: string;
   title: string;
   position: string;
   cards: CardDto[];
@@ -182,9 +184,26 @@ export default function BoardView({
 
     if (boardVersionRef.current !== versionHash) {
       /**
+       * 🌟 Hydration: enrich each list with boardId before passing to store.
+       * Server may eventually include boardId in payload, but until then
+       * we inject from the boardId prop. Cards inherit boardId from their list.
+       */
+      const enrichedLists = (data?.lists || []).map((list) => ({
+        ...list,
+        boardId: list.boardId ?? boardId,
+        revision: (list as any).revision ?? 0,
+        cards: (list.cards || []).map((card) => ({
+          ...card,
+          boardId: card.boardId ?? boardId,
+          revision: (card as any).revision ?? 0,
+          description: card.description ?? undefined,
+        })),
+      })) as any;
+
+      /**
        * sequence اجباریه
        */
-      initBoard(data?.lists || [], "0");
+      initBoard(enrichedLists, "0");
 
       boardVersionRef.current = versionHash;
     }
@@ -718,6 +737,7 @@ export default function BoardView({
                 <ListColumn
                   key={listId}
                   listId={listId}
+                  boardId={boardId}
                   onDeleteCard={
                     deleteCardWithUndo
                   }

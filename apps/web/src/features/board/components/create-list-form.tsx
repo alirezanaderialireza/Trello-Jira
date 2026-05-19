@@ -153,6 +153,8 @@ export default function CreateListForm({
     const optimisticList = {
       id: tempId,
 
+      boardId,
+
       title: trimmedTitle,
 
       position: optimisticPosition,
@@ -210,6 +212,8 @@ export default function CreateListForm({
 
       const confirmedList = {
         id: result.data.listId,
+
+        boardId,
 
         title: trimmedTitle,
 
