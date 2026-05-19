@@ -1,11 +1,18 @@
-// packages/api/src/routers/realtime/sync.ts
+// packages/api/src/routers/realtime/sync.router.ts
 
 import { performance } from "node:perf_hooks";
 
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
+import { and, asc, eq, gt } from "drizzle-orm";
 
-// ✅ ارور ۱: مسیر اشتباه — realtime/sync.ts دو سطح از trpc.ts فاصله دارد
+// 🌟 Use the explicit table reference (not `db.query.outboxEvents`).
+//   `db.query.X` requires `relations()` declared for the table — outboxEvents
+//   has none today, so reaching through `db.query` is fragile and would
+//   evaluate to `undefined` in some Drizzle setups. Using the table object
+//   directly is type-safe and runtime-safe.
+import { outboxEvents } from "@repo/db";
+
 import { router, protectedProcedure } from "../../trpc";
 
 // ============================================================================
@@ -101,7 +108,6 @@ function ensureBoardAccess(board: unknown, tenantId: string): void {
 // ============================================================================
 
 export const realtimeSyncRouter = router({
-  // ✅ ارور ۲+۳: با fix مسیر import، input و ctx نوع صحیح می‌گیرند
   pullMissedEvents: protectedProcedure
     .input(PullMissedEventsInputSchema)
     .query(async ({ input, ctx }): Promise<PullMissedEventsResponse> => {
@@ -125,23 +131,34 @@ export const realtimeSyncRouter = router({
         // ----------------------------------------------------------------
         // 2. Authorization
         // ----------------------------------------------------------------
-        const board = await ctx.repos.board.findById(input.boardId as import("@repo/domain").BoardId);
+        const board = await ctx.repos.board.findById(
+          input.boardId as import("@repo/domain").BoardId,
+        );
         ensureBoardAccess(board, ctx.session.tenantId);
 
         // ----------------------------------------------------------------
-        // 3. Read Events
+        // 3. Read Events  (explicit table reference, not db.query.*)
         // ----------------------------------------------------------------
-        const rows = await ctx.infra.db.query.outboxEvents.findMany({
-          where: (
-            fields: Record<string, unknown>,
-            { and, eq, gt }: Record<string, (...args: unknown[]) => unknown>,
-          ) => and(eq(fields.aggregateId, input.boardId), gt(fields.sequence, input.lastSeenSequence)),
-          orderBy: (
-            fields: Record<string, unknown>,
-            { asc }: Record<string, (...args: unknown[]) => unknown>,
-          ) => [asc(fields.sequence)],
-          limit: input.limit + 1,
-        });
+        const rows = await ctx.infra.db
+          .select({
+            eventId: outboxEvents.eventId,
+            type: outboxEvents.type,
+            sequence: outboxEvents.sequence,
+            payload: outboxEvents.payload,
+            occurredAt: outboxEvents.occurredAt,
+            correlationId: outboxEvents.correlationId,
+            causationId: outboxEvents.causationId,
+            eventVersion: outboxEvents.eventVersion,
+          })
+          .from(outboxEvents)
+          .where(
+            and(
+              eq(outboxEvents.aggregateId, input.boardId),
+              gt(outboxEvents.sequence, input.lastSeenSequence),
+            ),
+          )
+          .orderBy(asc(outboxEvents.sequence))
+          .limit(input.limit + 1);
 
         // ----------------------------------------------------------------
         // 4. Pagination
@@ -149,15 +166,15 @@ export const realtimeSyncRouter = router({
         const hasMore = rows.length > input.limit;
         const pageRows = hasMore ? rows.slice(0, input.limit) : rows;
 
-        const events: SyncEventDTO[] = pageRows.map((event: Record<string, unknown>) => ({
-          eventId: event.eventId as string,
-          type: event.type as string,
-          sequence: String(event.sequence),
-          payload: event.payload as Record<string, unknown>,
-          occurredAt: event.occurredAt as Date,
-          correlationId: (event.correlationId as string | null | undefined) ?? null,
-          causationId: (event.causationId as string | null | undefined) ?? null,
-          eventVersion: event.eventVersion as string,
+        const events: SyncEventDTO[] = pageRows.map((row) => ({
+          eventId: row.eventId,
+          type: row.type,
+          sequence: String(row.sequence),
+          payload: (row.payload as Record<string, unknown>) ?? {},
+          occurredAt: row.occurredAt,
+          correlationId: row.correlationId ?? null,
+          causationId: row.causationId ?? null,
+          eventVersion: row.eventVersion,
         }));
 
         // ----------------------------------------------------------------

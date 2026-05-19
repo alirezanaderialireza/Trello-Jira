@@ -886,25 +886,41 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
   deleteList: (listId) =>
     set((state) => {
-      const { [listId]: _, ...remainingLists } =
-        state.lists;
+      const list = state.lists[listId];
 
-      const {
-        [listId]: __,
-        ...remainingCardsByList
-      } = state.cardsByList;
+      // Idempotency: deleting a missing list is a safe no-op
+      if (!list) {
+        return state;
+      }
 
-      return {
-        lists: remainingLists,
+      const envelope: ClientEventEnvelope = {
+        event: {
+          id: crypto.randomUUID(),
 
-        cardsByList:
-          remainingCardsByList,
+          type: "list.deleted",
 
-        listOrder:
-          state.listOrder.filter(
-            (id) => id !== listId
-          ),
+          version: list.revision + 1,
+
+          occurredAt: new Date().toISOString(),
+
+          aggregateId: listId,
+
+          aggregateType: "list",
+
+          payload: {
+            listId,
+            boardId: list.boardId,
+          },
+        } as AppDomainEvent,
+
+        optimistic: true,
       };
+
+      return dispatcherApplyEvent(
+        state,
+        envelope,
+        { mode: "live" }
+      );
     }),
 
   moveList: (fromIndex, toIndex) =>
