@@ -64,6 +64,7 @@
 import { boardSocket }         from "./boardSocketClient";
 import { clientSyncFsm }       from "./clientSyncFsm";
 import { OutboxProcessor }     from "./outboxProcessor";
+import { tabCoordination }     from "./tabCoordination";
 import { useBoardStore }        from "../../store/useBoardStore";
 import { telemetry }            from "../../devtools/logEvent";
 
@@ -95,6 +96,8 @@ export interface RealtimeClientMetrics {
   gapCount:    number;
   resyncCount: number;
   dlqSize:     number;
+  /** True when this tab is the outbox-retry leader across all open tabs */
+  isTabLeader: boolean;
 }
 
 // ============================================================================
@@ -134,6 +137,9 @@ class BoardRealtimeClient {
   private _unsubSyncFsm:     (() => void) | null = null;
   // GAP 2 FIX: save the Zustand unsubscribe fn so we don't leak on reconnect
   private _unsubStore:       (() => void) | null = null;
+
+  // Multi-tab: whether this tab is the outbox-retry leader
+  private _isTabLeader = false;
 
   constructor() {
     // Default retry fn: no-op stub.  Real callers inject via configure().
@@ -184,17 +190,57 @@ class BoardRealtimeClient {
     // Wire child subscriptions on first connect
     this._wireSubscriptions();
 
-    // Start outbox processor
+    // Open multi-tab coordination channel for this board.
+    // Callbacks are wired before any WS events can arrive.
+    tabCoordination.open(boardId, {
+      // A remote tab applied a WS event — learn its sequence so our
+      // reconcileIncomingEvent can use it as a guard.  We do NOT re-apply
+      // the event (the server will broadcast it to us directly).
+      onRemoteSeqAdvance: (seq) => {
+        const store = useBoardStore.getState();
+        // Only advance our own sequence if the remote is ahead — prevents
+        // rewind on out-of-order cross-tab messages.
+        if (BigInt(seq) > BigInt(store.boardSequence)) {
+          // Mark sequence as known without applying reducer — this closes
+          // the gap so our buffer drain loop doesn't stall.
+          useBoardStore.setState({ boardSequence: seq });
+          telemetry.log("REALTIME_CLIENT", "TAB_SEQ_ADVANCE", { seq });
+        }
+      },
+
+      // A remote tab got a WS ACK for a mutation we may have in our
+      // pendingMutations (e.g. Tab A created a card, Tab B received ACK).
+      onRemoteMutationAck: (correlationId) => {
+        const store = useBoardStore.getState();
+        if (store.pendingMutations[correlationId]) {
+          store.resolvePendingMutation(correlationId);
+          telemetry.log("REALTIME_CLIENT", "TAB_MUTATION_ACKED", { correlationId });
+        }
+      },
+
+      // Leadership changed — only the leader runs outbox retries to prevent
+      // duplicate HTTP calls when multiple tabs are open on the same board.
+      onLeaderChanged: (isLeader) => {
+        this._isTabLeader = isLeader;
+        telemetry.log("REALTIME_CLIENT", "TAB_LEADER_CHANGED", { isLeader });
+
+        // Restart / stop the outbox processor based on leadership.
+        // Non-leaders still track pendingMutations but don't retry them.
+        if (isLeader) {
+          this._ensureOutbox().start();
+        } else {
+          this._ensureOutbox().stop();
+        }
+      },
+    });
+
+    // Start outbox processor (may be stopped below if we're not leader)
     this._ensureOutbox().start();
 
     // Drive transport
     boardSocket.connect(boardId, token);
 
     // GAP 3 FIX: only send "transport_dropped" on *reconnect* (FSM not idle).
-    // On first connect the FSM is in "idle" — sending transport_dropped would
-    // move it to "reconnecting" before board_hydrated fires, which is
-    // semantically wrong and produces a spurious "reconnecting" flash in UI.
-    // board_hydrated is fired separately by notifyBoardHydrated() after initBoard().
     if (clientSyncFsm.state !== "idle") {
       clientSyncFsm.send("transport_dropped");
     }
@@ -210,6 +256,9 @@ class BoardRealtimeClient {
     boardSocket.disconnect();
     this._ensureOutbox().stop();
     this._unwireSubscriptions();
+
+    // Close multi-tab channel — resets leader state too.
+    tabCoordination.close();
 
     clientSyncFsm.send("board_closed");
   }
@@ -243,6 +292,7 @@ class BoardRealtimeClient {
       gapCount:    fsmMetrics.gapCount,
       resyncCount: fsmMetrics.resyncCount,
       dlqSize:     this._outbox?.deadLetterQueue.length ?? 0,
+      isTabLeader: this._isTabLeader,
     };
   }
 
@@ -311,6 +361,14 @@ class BoardRealtimeClient {
         useBoardStore.setState({ syncStatus: legacyStatus });
       }
 
+      // When the transport becomes connected (after reconnect), broadcast
+      // our current boardSequence so peer tabs can catch up without waiting
+      // for the next WS event.
+      if (e.next === "synced" && e.trigger === "ws_connected") {
+        const seq = useBoardStore.getState().boardSequence;
+        tabCoordination.broadcastSeqAdvance(seq);
+      }
+
       this._emit({ type: "sync_state_changed", event: e });
 
       telemetry.log("REALTIME_CLIENT", "SYNC_STATE_CHANGED", {
@@ -341,15 +399,36 @@ class BoardRealtimeClient {
       }
     });
 
-    // ── Store syncStatus changes → Sync FSM triggers (GAP 2 FIX) ─────────
+    // ── Store syncStatus + boardSequence changes → multi-tab broadcast ────
     //
-    // reconcileIncomingEvent writes syncStatus directly to the Zustand store.
-    // We subscribe here and forward changes to the FSM so it stays in sync.
-    //
-    // GAP 2 FIX: the unsubscribe fn is NOW saved to this._unsubStore and
-    // called in _unwireSubscriptions().  Previously it was discarded,
-    // causing a new subscription to be added on every disconnect+reconnect.
+    // reconcileIncomingEvent writes syncStatus and boardSequence directly to
+    // the Zustand store.  We subscribe here to:
+    //   1. Forward syncStatus changes to the FSM (existing logic)
+    //   2. Broadcast sequence advances to peer tabs (multi-tab coordination)
+    //   3. Broadcast mutation ACKs to peer tabs so they can clean up their
+    //      own pendingMutations registries.
     this._unsubStore = useBoardStore.subscribe((state, prevState) => {
+      // ── Sequence advance broadcast ──────────────────────────────────────
+      // When this tab applies a WS event and advances boardSequence, tell
+      // other tabs so they don't buffer/re-apply an event they missed.
+      if (state.boardSequence !== prevState.boardSequence) {
+        tabCoordination.broadcastSeqAdvance(state.boardSequence);
+      }
+
+      // ── Mutation ACK broadcast ──────────────────────────────────────────
+      // When a pending mutation transitions from "pending"/"acked" to
+      // deleted (resolvePendingMutation), broadcast the correlationId so
+      // peer tabs can also remove it from their registries.
+      const prevIds = new Set(Object.keys(prevState.pendingMutations));
+      const nextIds = new Set(Object.keys(state.pendingMutations));
+      for (const id of prevIds) {
+        if (!nextIds.has(id)) {
+          // Mutation was removed from this tab — broadcast the ACK
+          tabCoordination.broadcastMutationAck(id);
+        }
+      }
+
+      // ── SyncStatus → ClientSyncFSM forward ──────────────────────────────
       if (state.syncStatus === prevState.syncStatus) return;
 
       if (state.syncStatus === "gap_detected") {
@@ -362,9 +441,6 @@ class BoardRealtimeClient {
         clientSyncFsm.send("gap_resolved");
       }
       if (state.syncStatus === "desynced") {
-        // This path is triggered by reconcileIncomingEvent when buffer ≥ 200.
-        // The FSM will transition to "resyncing", which fires the observer
-        // above and calls _onResyncRequired.
         clientSyncFsm.send("resync_required");
       }
     });

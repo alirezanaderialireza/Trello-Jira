@@ -1,110 +1,45 @@
 // apps/web/src/features/board/api/realtime/boardSocketClient.ts
 //
 // ============================================================================
-// 🔌 Production-Grade WebSocket Gateway
+// 🔌 BoardSocketClient — Pure WebSocket Transport (Phase 2)
 // ============================================================================
 //
-// Architecture:
-// ─────────────
-//   Transport FSM  (ConnectionState)  — lives here, observable via metrics
-//   Data-sync FSM  (SyncStatus)       — lives in Zustand store
+// Phase 2 change: all FSM state has been extracted into ConnectionFSM.
+// BoardSocketClient is now a thin transport layer that:
+//   1. Owns the WebSocket object lifecycle (create / close)
+//   2. Routes raw WS events → ConnectionFSM triggers
+//   3. Reads FSM state to guard stale callbacks (epoch)
+//   4. Manages heartbeat timer and batch event queue
+//   5. Exposes boardSocket.subscribe() / boardSocket.metrics via the FSM
 //
-// Responsibilities of this class:
-//   1. Explicit FSM: idle → connecting → handshaking → connected
-//                              ↕                          ↕
-//                          reconnecting ←────────────────┘
-//                              ↓ (maxAttempts exhausted)
-//                           terminal
+// What is NO longer here:
+//   • _state field (→ fsm.state)
+//   • epoch field (→ fsm.epoch)
+//   • reconnectAttempts / backoff inline (→ fsm.reconnectAttempts / fsm.backoff)
+//   • latencyMs / lastPongAt / pingInFlight (→ fsm.*)
+//   • VALID_TRANSITIONS logic (→ fsm._transition)
 //
-//   2. Session epoch — every new WebSocket.onopen bumps epoch.
-//      All async callbacks capture epoch at creation time and bail if stale.
-//      This eliminates the "ghost reconnect" bug where a callback from a
-//      dead socket fires after a new one is already open.
-//
-//   3. Heartbeat with RTT tracking
-//      • PING sent every PING_INTERVAL_MS
-//      • If no PONG arrives within PONG_TIMEOUT_MS → treat as dead connection
-//      • RTT sampled via performance.now() for observability
-//
-//   4. Full-jitter exponential backoff
-//      • base 500 ms, cap 30 s, jitter ±30 %
-//      • Prevents thundering-herd on mass reconnect
-//
-//   5. Session recovery (RESUME semantic)
-//      • On reconnect, SUBSCRIBE is sent with lastSequence from the store
-//      • Server replays missed events; reconcileIncomingEvent handles ordering
-//
-//   6. RESYNC_REQUIRED handling
-//      • Server can send RESYNC_REQUIRED for unrecoverable gaps
-//      • Client sets syncStatus = "desynced" and emits resync_required event
-//      • UI layer decides whether to reload or prompt user
-//
-//   7. Backpressure guard
-//      • Outbound send() silently drops if socket not OPEN
-//      • Never throws; always logs via telemetry
-//
-//   8. Observer pattern for metrics
-//      • Callers can subscribe to ConnectionEvent stream
-//      • Used by useSyncStatus hook for real-time UI updates
-//
-// What this class does NOT do:
-//   • Domain logic              (→ reducers)
-//   • Optimistic state          (→ useOptimisticMutation)
-//   • Sequence reconciliation   (→ reconcileIncomingEvent)
-//   • Retry queue / DLQ         (→ future outbox processor)
 // ============================================================================
 
 import { useBoardStore } from "../../store/useBoardStore";
-import { telemetry } from "../../devtools/logEvent";
+import { telemetry }     from "../../devtools/logEvent";
 import type { RealtimeMessage, RealtimeRequest, WsEvent } from "./types";
 import {
-  type ConnectionState,
+  ConnectionFSM,
+  DEFAULT_BACKOFF,
+  type BackoffConfig,
   type ConnectionMetrics,
   type ConnectionEvent,
-  type BackoffConfig,
-  VALID_TRANSITIONS,
-  DEFAULT_BACKOFF,
-  computeBackoffDelay,
 } from "./connectionFsm";
 
 // ============================================================================
-// ⚙️ Internal Constants
+// ⚙️ Constants
 // ============================================================================
 
-/** How often to send PING when connected (ms) */
-const PING_INTERVAL_MS = 25_000;
-
-/**
- * How long to wait for a PONG before considering the connection dead (ms).
- * Must be < PING_INTERVAL_MS.
- */
-const PONG_TIMEOUT_MS = 8_000;
-
-/**
- * How long to wait for the server SUBSCRIBED ACK after sending SUBSCRIBE (ms).
- * If no ACK arrives within this window the handshake is treated as failed.
- */
+const PING_INTERVAL_MS    = 25_000;
+const PONG_TIMEOUT_MS     =  8_000;
 const HANDSHAKE_TIMEOUT_MS = 10_000;
-
-// GAP 5 — Event batching constants
-//
-// Under high-frequency bursts (e.g. 50 domain events in 100 ms) we must not
-// call applyWebsocketEvent() synchronously in the onmessage callback for each
-// one — that blocks the main thread for the full burst duration.
-//
-// Solution: accumulate incoming EVENT messages in a microbatch queue and flush
-// them together via requestAnimationFrame (≈ 16 ms cadence).  Non-EVENT
-// messages (SYSTEM, HEARTBEAT, RESYNC_REQUIRED) are processed immediately
-// because they are low-frequency and time-sensitive.
-//
-// Flush strategy:
-//   • rAF fires at most once per frame (~60 fps)
-//   • All queued events are applied in one Zustand transaction per frame
-//   • BATCH_MAX_SIZE is a safety valve: if the queue grows beyond this before
-//     the next rAF, we flush synchronously to prevent memory growth.
-//
-/** Maximum events to hold before flushing synchronously (backpressure valve) */
-const BATCH_MAX_SIZE = 64;
+const BATCH_MAX_SIZE       = 64;
 
 // ============================================================================
 // 🔌 BoardSocketClient
@@ -112,194 +47,92 @@ const BATCH_MAX_SIZE = 64;
 
 class BoardSocketClient {
   // --------------------------------------------------------------------------
-  // Transport state
+  // FSM — single owner of all transport state
   // --------------------------------------------------------------------------
-  private ws: WebSocket | null = null;
-  private _state: ConnectionState = "idle";
+  private readonly fsm: ConnectionFSM;
 
   // --------------------------------------------------------------------------
   // Session identity
   // --------------------------------------------------------------------------
   private boardId: string | null = null;
-  private token: string | null = null;
-
-  /**
-   * Monotonic counter incremented on every new WebSocket.onopen.
-   * All async callbacks capture `epoch` at birth and bail early if it has
-   * changed — preventing ghost callbacks from stale sockets.
-   */
-  private epoch = 0;
+  private token:   string | null = null;
 
   // --------------------------------------------------------------------------
-  // Reconnect bookkeeping
+  // Raw WebSocket
   // --------------------------------------------------------------------------
-  private reconnectAttempts = 0;
-  private readonly backoff: BackoffConfig;
-  private reconnectTimerId: ReturnType<typeof setTimeout> | null = null;
+  private ws: WebSocket | null = null;
 
   // --------------------------------------------------------------------------
-  // Heartbeat / RTT
+  // Timers
   // --------------------------------------------------------------------------
-  private pingTimerId: ReturnType<typeof setInterval> | null = null;
-  private pongTimerId: ReturnType<typeof setTimeout> | null = null;
-  private pingInFlight = false;
-  private lastPingSentAt = 0;
-  private latencyMs: number | null = null;
-  private lastPongAt: number | null = null;
+  private reconnectTimerId:   ReturnType<typeof setTimeout>  | null = null;
+  private pingTimerId:        ReturnType<typeof setInterval> | null = null;
+  private pongTimerId:        ReturnType<typeof setTimeout>  | null = null;
+  private handshakeTimerId:   ReturnType<typeof setTimeout>  | null = null;
 
   // --------------------------------------------------------------------------
-  // Handshake timeout
-  // --------------------------------------------------------------------------
-  private handshakeTimerId: ReturnType<typeof setTimeout> | null = null;
-
-  // --------------------------------------------------------------------------
-  // GAP 5 — Event batch queue for rAF-based flush
+  // Event batch (backpressure)
   // --------------------------------------------------------------------------
   private _eventBatch: WsEvent[] = [];
-  private _rafHandle: number | null = null;
+  private _rafHandle:  number | null = null;
 
   // --------------------------------------------------------------------------
-  // Observer registry
-  // --------------------------------------------------------------------------
-  private readonly observers = new Set<(event: ConnectionEvent) => void>();
-
-  // --------------------------------------------------------------------------
-  // Server URL
+  // URL
   // --------------------------------------------------------------------------
   private readonly url: string;
 
   constructor(url: string, backoff: BackoffConfig = DEFAULT_BACKOFF) {
     this.url = url;
-    this.backoff = backoff;
+    this.fsm = new ConnectionFSM(backoff);
   }
 
   // ==========================================================================
   // 🌐 Public API
   // ==========================================================================
 
-  /**
-   * Connect (or reconnect) to the board room.
-   *
-   * Idempotent: calling connect() while already connected to the same board
-   * is a no-op.  Calling with a different boardId tears down the old socket
-   * first.
-   */
   public connect(boardId: string, token?: string): void {
-    // ── already connected to this board ──────────────────────────────────────
+    // Idempotent for same boardId while already active
     if (
       this.boardId === boardId &&
-      (this._state === "connected" ||
-        this._state === "connecting" ||
-        this._state === "handshaking")
+      (this.fsm.state === "connected" ||
+       this.fsm.state === "connecting" ||
+       this.fsm.state === "handshaking")
     ) {
       return;
     }
 
-    // ── switching boards ──────────────────────────────────────────────────────
+    // Switching boards — tear down first
     if (this.boardId && this.boardId !== boardId) {
-      this._hardDisconnect(/* intentional */ true);
-    }
-
-    // ── reset from terminal for manual retry ─────────────────────────────────
-    if (this._state === "terminal") {
-      this.reconnectAttempts = 0;
+      this._hardDisconnect(true);
     }
 
     this.boardId = boardId;
     if (token !== undefined) this.token = token;
 
+    this.fsm.onConnectRequested();
     this._openSocket();
   }
 
-  /**
-   * Graceful disconnect.  Sets state → idle, clears all timers, closes socket.
-   * Does NOT schedule reconnect.
-   */
   public disconnect(): void {
-    this._hardDisconnect(/* intentional */ true);
+    this._hardDisconnect(true);
     useBoardStore.setState({ syncStatus: "desynced" });
   }
 
-  /**
-   * Current physical connection state.
-   */
-  public get state(): ConnectionState {
-    return this._state;
-  }
+  public get state()   { return this.fsm.state; }
+  public get metrics(): ConnectionMetrics { return this.fsm.metrics; }
 
-  /**
-   * Current observable metrics snapshot.
-   */
-  public get metrics(): ConnectionMetrics {
-    return {
-      state:             this._state,
-      reconnectAttempts: this.reconnectAttempts,
-      epoch:             this.epoch,
-      latencyMs:         this.latencyMs,
-      lastPongAt:        this.lastPongAt,
-      pingInFlight:      this.pingInFlight,
-    };
-  }
-
-  /**
-   * Subscribe to connection lifecycle events.
-   * Returns an unsubscribe function.
-   */
   public subscribe(cb: (event: ConnectionEvent) => void): () => void {
-    this.observers.add(cb);
-    return () => this.observers.delete(cb);
+    return this.fsm.subscribe(cb);
   }
 
   // ==========================================================================
-  // 🔒 FSM Transition
-  // ==========================================================================
-
-  private _transition(next: ConnectionState): void {
-    const valid = VALID_TRANSITIONS[this._state];
-    if (!valid.includes(next)) {
-      // Invalid transition — log and ignore; never corrupt state.
-      telemetry.log("WS_INGRESS", "INVALID_FSM_TRANSITION", {
-        from: this._state,
-        to:   next,
-      });
-      return;
-    }
-
-    const prev = this._state;
-    this._state = next;
-
-    telemetry.log("WS_INGRESS", "FSM_TRANSITION", {
-      from:  prev,
-      to:    next,
-      epoch: this.epoch,
-    });
-
-    this._emit({ type: "state_changed", state: next, epoch: this.epoch });
-    this._emitMetrics();
-  }
-
-  // ==========================================================================
-  // 🔧 Socket Lifecycle
+  // 🔧 Socket lifecycle
   // ==========================================================================
 
   private _openSocket(): void {
-    this._transition("connecting");
-
-    // GAP 7 FIX: boardSocketClient no longer writes syncStatus directly.
-    // boardRealtimeClient owns syncStatus as the single writer, deriving it
-    // from the FSM observer.  Direct writes here created a dual-write race
-    // where _openSocket() could override the FSM's derived value on fast
-    // state changes (e.g. connect → handshake → connected all within one
-    // microtask batch).
-    //
-    // The transport state_changed observer in boardRealtimeClient will call
-    // clientSyncFsm.send("transport_dropped") which maps to "reconnecting"
-    // via _toLegacy(), and then useBoardStore.setState({ syncStatus }) once.
-
     telemetry.log("WS_INGRESS", "CONNECTING", {
-      url:     this.url,
-      boardId: this.boardId,
-      attempt: this.reconnectAttempts,
+      url: this.url, boardId: this.boardId,
+      attempt: this.fsm.reconnectAttempts,
     });
 
     try {
@@ -320,22 +153,13 @@ class BoardSocketClient {
   // onopen
   // --------------------------------------------------------------------------
   private _handleOpen(): void {
-    // Bump epoch — any callbacks born before this point are now stale.
-    this.epoch += 1;
-    const myEpoch = this.epoch;
-
-    this.reconnectAttempts = 0;
-    this._transition("handshaking");
+    const myEpoch = this.fsm.onSocketOpen();   // bumps epoch, → handshaking
 
     const state = useBoardStore.getState();
-
     telemetry.log("WS_INGRESS", "CONNECTED_SENDING_SUBSCRIBE", {
-      boardId:      this.boardId,
-      lastSequence: state.boardSequence,
-      epoch:        myEpoch,
+      boardId: this.boardId, lastSequence: state.boardSequence, epoch: myEpoch,
     });
 
-    // Send SUBSCRIBE with lastSequence for session recovery / catch-up.
     this._send({
       action:       "subscribe",
       boardId:      this.boardId!,
@@ -343,16 +167,11 @@ class BoardSocketClient {
       token:        this.token ?? undefined,
     });
 
-    // Start handshake timeout — if no SUBSCRIBED ACK arrives, treat as dead.
+    // Handshake timeout — if no SUBSCRIBED ACK arrives
     this.handshakeTimerId = setTimeout(() => {
-      if (this.epoch !== myEpoch) return; // stale callback — different epoch
-      if (this._state !== "handshaking") return;
-
-      telemetry.log("WS_INGRESS", "HANDSHAKE_TIMEOUT", {
-        epoch: myEpoch,
-        boardId: this.boardId,
-      });
-
+      if (this.fsm.isEpochStale(myEpoch)) return;
+      if (this.fsm.state !== "handshaking") return;
+      telemetry.log("WS_INGRESS", "HANDSHAKE_TIMEOUT", { epoch: myEpoch });
       this._handleClose({ code: 4008, reason: "handshake_timeout" } as CloseEvent);
     }, HANDSHAKE_TIMEOUT_MS);
   }
@@ -361,7 +180,7 @@ class BoardSocketClient {
   // onmessage
   // --------------------------------------------------------------------------
   private _handleMessage(raw: MessageEvent): void {
-    const myEpoch = this.epoch;
+    const myEpoch = this.fsm.epoch;
 
     let message: RealtimeMessage;
     try {
@@ -369,29 +188,22 @@ class BoardSocketClient {
     } catch (err: any) {
       telemetry.log("WS_INGRESS", "PARSE_ERROR", {
         rawData: typeof raw.data === "string" ? raw.data.slice(0, 200) : "<binary>",
-        error:   err?.message,
+        error: err?.message,
       });
       return;
     }
 
     switch (message.type) {
 
-      // ── Domain event — GAP 5 FIX: enqueue for rAF batch flush ────────────
+      // Domain event — enqueue for rAF batch flush
       case "EVENT": {
         if (!message.sequence || !message.payload) {
           telemetry.log("WS_INGRESS", "MALFORMED_EVENT", { message });
           return;
         }
-
-        telemetry.timeline(
-          "WS_INGRESS",
-          message.payload.type,
+        telemetry.timeline("WS_INGRESS", message.payload.type,
           { rawPayload: message.payload },
-          {
-            sequence:      message.sequence,
-            correlationId: message.payload.correlationId,
-          },
-        );
+          { sequence: message.sequence, correlationId: message.payload.correlationId });
 
         const wsEvent: WsEvent = {
           sequence: message.sequence,
@@ -399,19 +211,14 @@ class BoardSocketClient {
           payload:  message.payload,
         };
 
-        // Add to microbatch queue
         this._eventBatch.push(wsEvent);
 
-        // Safety valve: if queue exceeds BATCH_MAX_SIZE flush synchronously
-        // to prevent unbounded memory growth under extreme burst.
         if (this._eventBatch.length >= BATCH_MAX_SIZE) {
           this._cancelRaf();
           this._flushBatch();
           return;
         }
 
-        // Schedule a rAF flush if one is not already pending.
-        // All events arriving before the next frame share one flush call.
         if (this._rafHandle === null) {
           this._rafHandle = requestAnimationFrame(() => {
             this._rafHandle = null;
@@ -421,70 +228,39 @@ class BoardSocketClient {
         break;
       }
 
-      // ── System / handshake ACK ─────────────────────────────────────────────
+      // Handshake ACK
       case "SYSTEM": {
         if (message.meta?.reason === "SUBSCRIBED") {
-          if (this.epoch !== myEpoch) return; // stale
-
+          if (this.fsm.isEpochStale(myEpoch)) return;
           this._clearHandshakeTimer();
-          this._transition("connected");
-          // GAP 7 FIX: syncStatus written only via boardRealtimeClient FSM observer.
-          // Removed: useBoardStore.setState({ syncStatus: "healthy" });
+          this.fsm.onHandshakeAck();          // → connected
           this._startHeartbeat();
-
           telemetry.log("WS_INGRESS", "SUBSCRIBED_ACK", {
-            boardId:   this.boardId,
-            epoch:     myEpoch,
+            boardId: this.boardId, epoch: myEpoch,
             sessionId: message.meta?.connectionId,
           });
         }
         break;
       }
 
-      // ── Heartbeat PONG ────────────────────────────────────────────────────
+      // PONG
       case "HEARTBEAT": {
-        if (this.epoch !== myEpoch) return;
-
+        if (this.fsm.isEpochStale(myEpoch)) return;
         this._clearPongTimer();
-        this.pingInFlight = false;
-
-        const rttMs = Math.round(performance.now() - this.lastPingSentAt);
-        this.latencyMs  = rttMs;
-        this.lastPongAt = Date.now();
-
-        telemetry.log("WS_INGRESS", "PONG_RECEIVED", {
-          rttMs,
-          epoch: myEpoch,
-        });
-
-        this._emitMetrics();
+        this.fsm.markPongReceived(this.fsm.lastPingSentAt);
         break;
       }
 
-      // ── Server-ordered full resync ─────────────────────────────────────────
+      // Server-ordered resync
       case "RESYNC_REQUIRED": {
         const reason = message.meta?.reason ?? "unknown";
-
-        telemetry.log("WS_INGRESS", "RESYNC_REQUIRED", {
-          reason,
-          epoch: myEpoch,
-        });
-
-        // GAP 7 FIX: syncStatus written only via boardRealtimeClient FSM observer.
-        // Removed: useBoardStore.setState({ syncStatus: "desynced" });
-        this._emit({ type: "resync_required", reason });
-
-        // Keep the transport alive — the UI layer decides whether to reload.
-        // We do NOT close the socket here because the server may still
-        // deliver events that the UI can queue until a reload occurs.
+        this.fsm.onResyncRequired(reason);    // emits resync_required event
         break;
       }
 
-      default: {
-        telemetry.log("WS_INGRESS", "UNKNOWN_MESSAGE_TYPE", {
-          type: (message as any).type,
-        });
-      }
+      default:
+        telemetry.log("WS_INGRESS", "UNKNOWN_MESSAGE_TYPE",
+          { type: (message as any).type });
     }
   }
 
@@ -492,65 +268,45 @@ class BoardSocketClient {
   // onclose
   // --------------------------------------------------------------------------
   private _handleClose(event: CloseEvent): void {
-    const myEpoch = this.epoch;
-
-    // Code 4000 = intentional disconnect from our own disconnect() call.
-    // In that case _hardDisconnect already transitioned to "idle".
-    if (this._state === "idle") return;
+    if (this.fsm.state === "idle") return; // intentional disconnect handled elsewhere
 
     telemetry.log("WS_INGRESS", "CONNECTION_DROPPED", {
-      code:   event.code,
-      reason: event.reason,
-      epoch:  myEpoch,
-      state:  this._state,
+      code: event.code, reason: event.reason,
+      epoch: this.fsm.epoch, state: this.fsm.state,
     });
 
     this._clearHeartbeat();
     this._clearHandshakeTimer();
     this.ws = null;
-
     this._scheduleReconnect();
   }
 
   // --------------------------------------------------------------------------
-  // onerror — browser always fires onclose after onerror, so we only log here.
+  // onerror — onclose fires after onerror; just log here
   // --------------------------------------------------------------------------
   private _handleError(event: Event): void {
     telemetry.log("WS_INGRESS", "SOCKET_ERROR", {
-      epoch: this.epoch,
+      epoch: this.fsm.epoch,
       type:  (event as ErrorEvent)?.type ?? "unknown",
     });
-    // onclose will fire next and handle reconnect scheduling.
   }
 
   // ==========================================================================
-  // 📦 GAP 5 — Event batch flush
+  // 📦 Batch flush
   // ==========================================================================
 
-  /**
-   * Drain the batch queue into the store in one pass.
-   *
-   * Each event is applied via applyWebsocketEvent() which calls
-   * reconcileIncomingEvent().  The events are already ordered by the WS
-   * server; we apply them in arrival order.
-   *
-   * Called either from requestAnimationFrame (normal path) or synchronously
-   * when BATCH_MAX_SIZE is exceeded (backpressure path).
-   */
   private _flushBatch(): void {
     if (this._eventBatch.length === 0) return;
-
     const batch = this._eventBatch;
     this._eventBatch = [];
 
     telemetry.log("WS_INGRESS", "BATCH_FLUSH", {
-      batchSize: batch.length,
-      epoch:     this.epoch,
+      batchSize: batch.length, epoch: this.fsm.epoch,
     });
 
     const store = useBoardStore.getState();
-    for (const wsEvent of batch) {
-      store.applyWebsocketEvent(wsEvent);
+    for (const ev of batch) {
+      store.applyWebsocketEvent(ev);
     }
   }
 
@@ -567,57 +323,40 @@ class BoardSocketClient {
 
   private _startHeartbeat(): void {
     this._clearHeartbeat();
-
     this.pingTimerId = setInterval(() => {
-      if (this._state !== "connected") {
-        this._clearHeartbeat();
-        return;
-      }
+      if (this.fsm.state !== "connected") { this._clearHeartbeat(); return; }
 
-      const myEpoch = this.epoch;
+      const myEpoch = this.fsm.epoch;
 
-      if (this.pingInFlight) {
-        // Previous ping never got a pong — connection is dead.
-        telemetry.log("WS_INGRESS", "PING_TIMEOUT_DEAD_CONNECTION", {
-          epoch: myEpoch,
-        });
+      if (this.fsm.pingInFlight) {
+        telemetry.log("WS_INGRESS", "PING_TIMEOUT_DEAD_CONNECTION", { epoch: myEpoch });
         this._handleClose({ code: 4007, reason: "ping_timeout" } as CloseEvent);
         return;
       }
 
-      this.pingInFlight    = true;
-      this.lastPingSentAt  = performance.now();
-
+      const sentAt = performance.now();
+      this.fsm.markPingSent(sentAt);
       this._send({ action: "ping", boardId: this.boardId! });
 
       telemetry.log("WS_INGRESS", "PING_SENT", { epoch: myEpoch });
 
-      // Arm pong timeout.
       this.pongTimerId = setTimeout(() => {
-        if (this.epoch !== myEpoch) return; // stale
-        if (!this.pingInFlight) return;     // pong already received
-
+        if (this.fsm.isEpochStale(myEpoch)) return;
+        if (!this.fsm.pingInFlight) return;
         telemetry.log("WS_INGRESS", "PONG_TIMEOUT", { epoch: myEpoch });
         this._handleClose({ code: 4007, reason: "pong_timeout" } as CloseEvent);
       }, PONG_TIMEOUT_MS);
-
     }, PING_INTERVAL_MS);
   }
 
   private _clearHeartbeat(): void {
-    if (this.pingTimerId !== null) {
-      clearInterval(this.pingTimerId);
-      this.pingTimerId = null;
-    }
+    if (this.pingTimerId !== null) { clearInterval(this.pingTimerId); this.pingTimerId = null; }
     this._clearPongTimer();
-    this.pingInFlight = false;
+    this.fsm.clearPingInFlight();
   }
 
   private _clearPongTimer(): void {
-    if (this.pongTimerId !== null) {
-      clearTimeout(this.pongTimerId);
-      this.pongTimerId = null;
-    }
+    if (this.pongTimerId !== null) { clearTimeout(this.pongTimerId); this.pongTimerId = null; }
   }
 
   // ==========================================================================
@@ -625,54 +364,35 @@ class BoardSocketClient {
   // ==========================================================================
 
   private _scheduleReconnect(): void {
-    if (!this.boardId) return;           // board was intentionally cleared
-    if (this._state === "idle") return;  // already cleaned up
+    if (!this.boardId) return;
+    if (this.fsm.state === "idle") return;
 
-    this._transition("reconnecting");
+    const result = this.fsm.onSocketClosed();    // → reconnecting or terminal
 
-    if (this.reconnectAttempts >= this.backoff.maxAttempts) {
-      telemetry.log("WS_INGRESS", "RECONNECT_EXHAUSTED", {
-        attempts: this.reconnectAttempts,
-      });
-      this._transition("terminal");
-      // GAP 7 FIX: removed direct useBoardStore.setState({ syncStatus: "desynced" })
-      // boardRealtimeClient owns syncStatus as the single writer via FSM observer.
-      this._emit({ type: "reconnect_failed", attempts: this.reconnectAttempts });
-      return;
-    }
+    if (result === "terminal" || result === "idle") return;
 
-    const delay     = computeBackoffDelay(this.reconnectAttempts, this.backoff);
-    const attempt   = this.reconnectAttempts + 1;
-    this.reconnectAttempts = attempt;
+    // result === "reconnect"
+    const delay    = this.fsm.consumeReconnectAttempt();
+    const myEpoch  = this.fsm.epoch;
 
     telemetry.log("WS_INGRESS", "RECONNECT_SCHEDULED", {
-      attempt,
-      delayMs: delay,
+      attempt: this.fsm.reconnectAttempts, delayMs: delay,
     });
 
-    const myEpoch = this.epoch;
-
     this.reconnectTimerId = setTimeout(() => {
-      // Epoch guard: if a connect() was called externally during the wait,
-      // epoch will have changed — don't double-open.
-      if (this.epoch !== myEpoch && this._state !== "reconnecting") return;
-      if (this._state === "idle") return; // intentional disconnect during wait
-
-      if (this.boardId) {
-        this._openSocket();
-      }
+      if (this.fsm.isEpochStale(myEpoch) && this.fsm.state !== "reconnecting") return;
+      if (this.fsm.state === "idle") return;
+      if (this.boardId) this._openSocket();
     }, delay);
   }
 
   // ==========================================================================
-  // 🧹 Hard Disconnect (internal — does not schedule reconnect)
+  // 🧹 Hard disconnect
   // ==========================================================================
 
   private _hardDisconnect(intentional: boolean): void {
     this._clearHeartbeat();
     this._clearHandshakeTimer();
-    // GAP 5 FIX: cancel any pending rAF flush and drain the batch queue so
-    // events from a dead socket are not applied after disconnect.
     this._cancelRaf();
     this._eventBatch = [];
 
@@ -682,41 +402,62 @@ class BoardSocketClient {
     }
 
     if (this.ws) {
-      // Remove handlers so we don't react to onclose from our own close().
-      this.ws.onopen    = null;
-      this.ws.onmessage = null;
-      this.ws.onclose   = null;
-      this.ws.onerror   = null;
-
+      this.ws.onopen = null; this.ws.onmessage = null;
+      this.ws.onclose = null; this.ws.onerror = null;
       if (
         this.ws.readyState === WebSocket.OPEN ||
         this.ws.readyState === WebSocket.CONNECTING
       ) {
-        // 4000 = intentional client-side close
         this.ws.close(intentional ? 4000 : 1001, "client_disconnect");
       }
       this.ws = null;
     }
 
     if (intentional) {
-      this.boardId           = null;
-      this.token             = null;
-      this.reconnectAttempts = 0;
-      this._transition("idle");
-
-      telemetry.log("WS_INGRESS", "DISCONNECTED_INTENTIONAL", {
-        epoch: this.epoch,
-      });
+      this.boardId = null;
+      this.token   = null;
+      this.fsm.onIntentionalDisconnect();    // → idle, resets counters
     }
   }
 
+  // ==========================================================================
+  // ⏱️ Handshake timer
+  // ==========================================================================
+
+  private _clearHandshakeTimer(): void {
+    if (this.handshakeTimerId !== null) {
+      clearTimeout(this.handshakeTimerId);
+      this.handshakeTimerId = null;
+    }
+  }
+
+  // ==========================================================================
+  // 📤 Send (backpressure guard)
+  // ==========================================================================
+
+  private _send(payload: RealtimeRequest): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      telemetry.log("WS_INGRESS", "SEND_DROPPED_NOT_OPEN", {
+        action: payload.action, state: this.fsm.state,
+      });
+      return;
+    }
+    try {
+      this.ws.send(JSON.stringify(payload));
+    } catch (err: any) {
+      telemetry.log("WS_INGRESS", "SEND_ERROR", {
+        action: payload.action, error: err?.message ?? String(err),
+      });
+    }
+  }
+}
+
 // ============================================================================
-// 🌍 Singleton Instance
+// 🌍 Singleton
 // ============================================================================
 
 const WS_URL =
-  (typeof process !== "undefined"
-    ? process.env.NEXT_PUBLIC_WS_URL
-    : undefined) ?? "ws://localhost:3001";
+  (typeof process !== "undefined" ? process.env.NEXT_PUBLIC_WS_URL : undefined)
+  ?? "ws://localhost:3001";
 
 export const boardSocket = new BoardSocketClient(WS_URL);

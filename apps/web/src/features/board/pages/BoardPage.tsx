@@ -36,6 +36,7 @@ function SyncIndicator() {
     resyncCount,
     dlqSize,
     canReload,
+    isTabLeader,
   } = useSyncStatus();
 
   const handleReload = useCallback(() => {
@@ -56,7 +57,7 @@ function SyncIndicator() {
         )}
         {process.env.NODE_ENV === "development" && (
           <span className="text-zinc-600 text-xs font-normal ml-1">
-            gaps:{gapCount} resyncs:{resyncCount}
+            gaps:{gapCount} resyncs:{resyncCount} {isTabLeader ? "👑" : "📡"}
           </span>
         )}
       </span>

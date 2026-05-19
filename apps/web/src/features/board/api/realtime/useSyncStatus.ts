@@ -110,6 +110,8 @@ export interface SyncStatusInfo {
   dlqSize:           number;
   /** Whether the user can trigger a reload */
   canReload:         boolean;
+  /** Whether this tab is the outbox-retry leader (multi-tab coordination) */
+  isTabLeader:       boolean;
 }
 
 // ============================================================================
@@ -141,7 +143,8 @@ export function useSyncStatus(): SyncStatusInfo {
           prev.transport.latencyMs         === next.transport.latencyMs         &&
           prev.syncState                   === next.syncState                   &&
           prev.gapCount                    === next.gapCount                    &&
-          prev.dlqSize                     === next.dlqSize
+          prev.dlqSize                     === next.dlqSize                     &&
+          prev.isTabLeader                 === next.isTabLeader
         ) {
           return prev;
         }
@@ -167,7 +170,7 @@ export function useSyncStatus(): SyncStatusInfo {
   }, [handleClientEvent]);
 
   // ── Derive ────────────────────────────────────────────────────────────────
-  const { transport, syncState, gapCount, resyncCount, dlqSize } = clientMetrics;
+  const { transport, syncState, gapCount, resyncCount, dlqSize, isTabLeader } = clientMetrics;
 
   const uiStatus = deriveUiStatus(transport.state, syncState, storeSyncStatus);
 
@@ -181,6 +184,7 @@ export function useSyncStatus(): SyncStatusInfo {
     gapCount,
     resyncCount,
     dlqSize,
+    isTabLeader,
     canReload:
       uiStatus === "offline"             ||
       uiStatus === "resyncing_required"  ||
