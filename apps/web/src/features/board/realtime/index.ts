@@ -5,6 +5,7 @@
 // ── Protocol contracts ────────────────────────────────────────────────────────
 export type {
   ProtocolVersion,
+  ServerCapabilities,
   ClientMessage,
   ClientConnect,
   ClientResume,
@@ -19,10 +20,14 @@ export type {
   ServerNack,
   ServerResyncRequired,
   ServerPong,
+  ServerAuthRequired,
 } from "./protocol";
 
 export {
   PROTOCOL_VERSION,
+  SUPPORTED_PROTOCOL_VERSIONS,
+  DEDUP_WINDOW_MS,
+  BASELINE_CAPABILITIES,
   MAX_BATCH_SIZE,
   CATCH_UP_MAX_EVENTS,
   serializeClientMessage,
@@ -102,6 +107,9 @@ export {
 export type {
   ReducerFn,
   BoardRealtimeConfig,
+  CatchUpSource,
+  CatchUpFrame,
+  RealtimeLogger,
 } from "./board-realtime-client";
 
 export { BoardRealtimeClient } from "./board-realtime-client";
