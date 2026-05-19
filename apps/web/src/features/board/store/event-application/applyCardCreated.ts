@@ -1,8 +1,7 @@
 // apps/web/src/features/board/store/event-application/applyCardCreated.ts
 
-// 🌟 (Fix 1): ایمپورت مستقیماً از ریشه دامین انجام می‌شود
 import type { CardCreatedEvent } from "@repo/domain";
-import type { BoardStoreState } from "../useBoardStore";
+import type { BoardStoreState, CardDto } from "../useBoardStore";
 
 import type { ClientEventEnvelope } from "./types";
 import type { ReducerContext } from "./context";
@@ -15,7 +14,7 @@ import type { ReducerContext } from "./context";
  * Pure Event Reducer
  *
  * Responsibilities:
- * - create card entity
+ * - create card entity from canonical domain payload
  * - insert card into list ordering
  * - preserve replay safety
  * - support optimistic reconciliation
@@ -28,18 +27,23 @@ import type { ReducerContext } from "./context";
  * ✅ Idempotent
  * ✅ Deterministic sorting
  * ✅ Partial state return
+ * ✅ Full payload field extraction (no field drift)
  * ------------------------------------------------------------------
  */
 
 export function applyCardCreated(
-  state: BoardStoreState, // 🌟 به BoardStoreState که در فایل استور تو وجود دارد تغییر یافت
+  state: BoardStoreState,
   envelope: ClientEventEnvelope<CardCreatedEvent>,
   _context: ReducerContext,
 ): Partial<BoardStoreState> {
   const { event } = envelope;
 
+  // 🌟 Full canonical payload destructure — every required field must
+  // map into the runtime DTO. Missing fields cause silent DTO corruption
+  // (see PR #8 follow-up: boardId was being dropped here).
   const {
     cardId,
+    boardId,
     listId,
     title,
     position,
@@ -47,69 +51,47 @@ export function applyCardCreated(
 
   /**
    * --------------------------------------------------------------
-   * Existing Card Detection
+   * Existing Card Detection (Idempotency Gate)
    * --------------------------------------------------------------
-   *
-   * Extremely important for:
-   * - optimistic reconciliation
-   * - websocket replay
+   * Vital for:
+   * - optimistic reconciliation (server reissues create after ACK)
+   * - websocket replay (gap recovery)
    * - offline hydration
-   * - idempotency
    *
-   * If card already exists:
-   * preserve local fields and merge authoritative server data.
+   * If card already exists, we merge: existing local fields are preserved
+   * but server payload is authoritative.
    * --------------------------------------------------------------
    */
-  const existingCard = state.cards[cardId] ?? {};
+  const existingCard = state.cards[cardId];
 
   /**
    * --------------------------------------------------------------
-   * Build Card Entity
+   * Build Canonical Card DTO
    * --------------------------------------------------------------
-   *
-   * Immutable merge.
-   * Server becomes source of truth.
+   * The DTO must be a complete CardDto. Every required field of
+   * CardDto must come either from the payload or from the existing
+   * entity (when merging). No `undefined` slips into state.
    * --------------------------------------------------------------
    */
-  const newCard = {
-    ...existingCard,
-
+  const newCard: CardDto = {
+    ...(existingCard ?? {}),
     id: cardId,
-
+    boardId: boardId ?? existingCard?.boardId ?? "",
     listId,
     title,
     position,
-
-    // 🌟 (Fix 2): جلوگیری از ارور TS در صورتی که اسم فیلد ورژن در دامین متفاوت باشد
-    revision: (event as any).version || (event as any).eventVersion || 0,
-
-    /**
-     * Runtime-only metadata
-     */
+    revision: event.version,
     isOptimistic: envelope.acknowledged
       ? false
-      : envelope.optimistic ?? false,
+      : envelope.optimistic ?? existingCard?.isOptimistic ?? false,
   };
 
   /**
    * --------------------------------------------------------------
-   * Current List Snapshot
+   * Idempotent Insert into Target List
    * --------------------------------------------------------------
    */
   const currentListCards = state.cardsByList[listId] ?? [];
-
-  /**
-   * --------------------------------------------------------------
-   * Idempotent Insert
-   * --------------------------------------------------------------
-   *
-   * Prevent duplicate insertion during:
-   * - websocket replay
-   * - offline replay
-   * - hydration
-   * - optimistic/server reconciliation
-   * --------------------------------------------------------------
-   */
   const nextListCards = currentListCards.includes(cardId)
     ? [...currentListCards]
     : [...currentListCards, cardId];
@@ -118,11 +100,8 @@ export function applyCardCreated(
    * --------------------------------------------------------------
    * Deterministic Stable Sort
    * --------------------------------------------------------------
-   *
-   * Important:
-   * Use newCard.position for the newly inserted entity.
-   * Never trust stale state during reducer execution.
-   * Fallback to ID guarantees total ordering stability.
+   * Use newCard.position for the inserted entity (not stale state).
+   * ID fallback ensures total ordering across all clients.
    * --------------------------------------------------------------
    */
   nextListCards.sort((a, b) => {
@@ -139,17 +118,11 @@ export function applyCardCreated(
     return posA.localeCompare(posB) || a.localeCompare(b);
   });
 
-  /**
-   * --------------------------------------------------------------
-   * Partial Immutable State Return
-   * --------------------------------------------------------------
-   */
   return {
     cards: {
       ...state.cards,
       [cardId]: newCard,
     },
-
     cardsByList: {
       ...state.cardsByList,
       [listId]: nextListCards,

@@ -12,12 +12,13 @@ import CreateCardForm from "./create-card-form"; // 🌟 @ts-ignore حذف شد 
 
 interface ListColumnProps {
   listId: string;
+  boardId: string;
   onDeleteCard: (id: string) => void;
 }
 
 const EMPTY_CARD_IDS: string[] = [];
 
-export const ListColumn = memo(function ListColumn({ listId, onDeleteCard }: ListColumnProps) {
+export const ListColumn = memo(function ListColumn({ listId, boardId, onDeleteCard }: ListColumnProps) {
   // 🌟 (Fix) حذف آرگومان دوم (shallow) برای سازگاری کامل با Zustand v5
   const cardIds = useBoardStore(
     (s: any) => s.cardsByList[listId] ?? EMPTY_CARD_IDS
@@ -99,7 +100,7 @@ export const ListColumn = memo(function ListColumn({ listId, onDeleteCard }: Lis
       </div>
 
       <div className="p-2">
-        <CreateCardForm listId={listId} />
+        <CreateCardForm listId={listId} boardId={boardId} />
       </div>
     </div>
   );

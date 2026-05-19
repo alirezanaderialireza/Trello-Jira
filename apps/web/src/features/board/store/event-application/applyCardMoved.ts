@@ -2,7 +2,7 @@
 
 import type { CardMovedEvent } from "@repo/domain";
 
-import type { BoardStoreState } from "../useBoardStore";
+import type { BoardStoreState, CardDto } from "../useBoardStore";
 
 import type { ClientEventEnvelope } from "./types";
 import type { ReducerContext } from "./context";
@@ -15,8 +15,9 @@ import type { ReducerContext } from "./context";
  * Pure Event Reducer
  *
  * Responsibilities:
- * - move card between lists
+ * - move card between lists (or within same list)
  * - update LexoRank position
+ * - propagate boardId from payload (defensive: payload is source of truth)
  * - maintain deterministic ordering
  * - stay replay-safe
  * - stay immutable
@@ -25,6 +26,7 @@ import type { ReducerContext } from "./context";
  * ✅ Pure
  * ✅ No side-effects
  * ✅ Replay-safe
+ * ✅ Stale-protected (existingCard.revision >= event.version → drop)
  * ✅ Deterministic
  * ✅ Partial state return
  * ------------------------------------------------------------------
@@ -37,8 +39,10 @@ export function applyCardMoved(
 ): Partial<BoardStoreState> {
   const { event } = envelope;
 
+  // 🌟 Full canonical payload — boardId is the source of truth
   const {
     cardId,
+    boardId,
     fromListId,
     toListId,
     newPosition,
@@ -48,13 +52,8 @@ export function applyCardMoved(
    * --------------------------------------------------------------
    * Replay Safety Guard
    * --------------------------------------------------------------
-   *
-   * اگر کارت وجود ندارد:
-   * - ممکن است event قدیمی باشد
-   * - ممکن است کارت حذف شده باشد
-   * - ممکن است replay ناقص باشد
-   *
-   * Reducer نباید crash کند.
+   * Card may not exist (deleted/replay-incomplete). Reducer must
+   * never throw — silently drop.
    * --------------------------------------------------------------
    */
   const existingCard = state.cards[cardId];
@@ -65,21 +64,34 @@ export function applyCardMoved(
 
   /**
    * --------------------------------------------------------------
-   * Build Updated Card
+   * Stale Protection
    * --------------------------------------------------------------
-   *
-   * Immutable entity update.
+   * If our existing card revision is already >= the event's version,
+   * this event is stale (already applied or superseded). Drop it.
+   * Note: event.version may be undefined in test fixtures — in that
+   * case we let the event through (NaN comparison yields false).
    * --------------------------------------------------------------
    */
-  // در فایل applyCardMoved.ts حدود خط 82
-  const updatedCard = {
+  if (existingCard.revision >= event.version) {
+    return {};
+  }
+
+  /**
+   * --------------------------------------------------------------
+   * Build Updated Card (Immutable)
+   * --------------------------------------------------------------
+   * boardId is taken from payload (authoritative). If existingCard had
+   * a stale or empty boardId, this self-heals.
+   * Revision falls back to existing+1 if event.version is missing
+   * (defensive — prevents undefined leaking into state).
+   * --------------------------------------------------------------
+   */
+  const updatedCard: CardDto = {
     ...existingCard,
+    boardId: boardId ?? existingCard.boardId,
     listId: toListId,
     position: newPosition,
-
-    // 🌟 فیکس ارور version:
-    revision: (event as any).version || (event as any).eventVersion || 0,
-
+    revision: event.version ?? existingCard.revision + 1,
     isOptimistic: envelope.acknowledged
       ? false
       : envelope.optimistic ?? existingCard.isOptimistic ?? false,
@@ -95,18 +107,13 @@ export function applyCardMoved(
 
   /**
    * --------------------------------------------------------------
-   * Insert Into Target List
-   * --------------------------------------------------------------
-   *
-   * Important:
-   * We insert first, then perform deterministic sorting.
+   * Insert Into Target List (idempotent)
    * --------------------------------------------------------------
    */
   const nextListCards = [
     ...(state.cardsByList[toListId] ?? []).filter(
       (id: string) => id !== cardId,
     ),
-
     cardId,
   ];
 
@@ -114,18 +121,7 @@ export function applyCardMoved(
    * --------------------------------------------------------------
    * Deterministic Stable Sort
    * --------------------------------------------------------------
-   *
-   * Extremely important.
-   *
-   * We MUST use updatedCard.position
-   * instead of stale state.cards[cardId].position.
-   *
-   * Otherwise:
-   * - optimistic reorder bugs happen
-   * - replay divergence happens
-   * - websocket reconciliation breaks
-   *
-   * Fallback to ID guarantees stable ordering.
+   * MUST use updatedCard.position (not stale state). ID tie-break.
    * --------------------------------------------------------------
    */
   nextListCards.sort((a, b) => {
@@ -144,26 +140,29 @@ export function applyCardMoved(
 
   /**
    * --------------------------------------------------------------
-   * Partial Immutable State Return
+   * Build cardsByList output, handling same-list reorder edge case
    * --------------------------------------------------------------
-   *
-   * Only changed slices are returned.
-   * Zustand merge layer handles composition.
+   * If fromListId === toListId we must not write previousListCards
+   * (which is empty after filter) and overwrite the toListId entry.
    * --------------------------------------------------------------
    */
+  const nextCardsByList =
+    fromListId === toListId
+      ? {
+          ...state.cardsByList,
+          [toListId]: nextListCards,
+        }
+      : {
+          ...state.cardsByList,
+          [fromListId]: previousListCards,
+          [toListId]: nextListCards,
+        };
+
   return {
     cards: {
       ...state.cards,
-
       [cardId]: updatedCard,
     },
-
-    cardsByList: {
-      ...state.cardsByList,
-
-      [fromListId]: previousListCards,
-
-      [toListId]: nextListCards,
-    },
+    cardsByList: nextCardsByList,
   };
 }

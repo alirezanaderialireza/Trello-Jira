@@ -10,46 +10,47 @@ import type { ReducerContext } from "./context";
  * applyCardDeleted
  * ------------------------------------------------------------------
  * Responsibilities:
- * - Deterministic card removal
- * - O(1) targeted list update
+ * - Deterministic card removal from cards dict
+ * - O(1) targeted cardsByList update
  * - Stale event protection (>= version check)
  * - Idempotency (safe against double deletion)
  * ------------------------------------------------------------------
  */
 export function applyCardDeleted(
-  state:BoardStoreState,
+  state: BoardStoreState,
   envelope: ClientEventEnvelope<CardDeletedEvent>,
   _context: ReducerContext,
 ): Partial<BoardStoreState> {
   const { event } = envelope;
+
+  // 🌟 Note: we only need cardId for delete; boardId is in payload but
+  // unused here (no DTO to construct). Tenant guards happen on server.
   const { cardId } = event.payload;
 
   const existingCard = state.cards[cardId];
 
   /**
-   * 🛡️ 1. Idempotency & Stale Guard
-   * اگر کارت وجود ندارد یا قبلاً توسط رویدادی با ورژن بالاتر (مثلاً Recreate) 
-   * مدیریت شده، هیچ تغییری اعمال نمی‌کنیم.
+   * 🛡️ Idempotency & Stale Guard
+   * - Card already removed? Skip.
+   * - Already at revision >= event.version (recreate scenario)? Skip.
    */
   if (!existingCard || existingCard.revision >= event.version) {
     return {};
   }
 
-  // پیدا کردن آیدی لیستی که کارت در آن قرار داشت
   const sourceListId = existingCard.listId;
 
   /**
-   * 🛡️ 2. Referential Integrity Check
-   * اگر کارت در لیستِ ادعا شده وجود نداشته باشد، فقط دیکشنری را پاک می‌کنیم.
-   * این برای سناریوهای Race Condition بین Move و Delete حیاتی است.
+   * 🛡️ Referential Integrity Check
+   * If card was already moved to another list (race with move event),
+   * we still remove it from cards dict but skip cardsByList rewrite.
    */
-  const currentListIds = state.cardsByList[sourceListId] || [];
+  const currentListIds = state.cardsByList[sourceListId] ?? [];
   const isCardInList = currentListIds.includes(cardId);
 
-  // حذف کارت از دیکشنری اصلی
+  // Remove card from main dictionary
   const { [cardId]: _removedCard, ...remainingCards } = state.cards;
 
-  // اگر کارت در لیست نبود، فقط دیکشنری را آپدیت برمی‌گردانیم
   if (!isCardInList) {
     return {
       cards: remainingCards,
@@ -57,8 +58,7 @@ export function applyCardDeleted(
   }
 
   /**
-   * 🚀 3. O(1) Targeted Update
-   * فقط همان لیستی که تحت تاثیر قرار گرفته را فیلتر می‌کنیم.
+   * 🚀 O(1) Targeted Update
    */
   return {
     cards: remainingCards,
