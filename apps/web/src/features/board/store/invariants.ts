@@ -241,7 +241,7 @@ export function assertStoreInvariants(state: BoardStoreState): void {
 
   const message = `Store invariant violations detected:\n${summary}`;
 
-  if (process.env.NODE_ENV === "development") {
+  if (import.meta.env?.DEV ?? process.env.NODE_ENV === "development") {
     throw new Error(message);
   } else {
     console.error("[StoreInvariant]", message);

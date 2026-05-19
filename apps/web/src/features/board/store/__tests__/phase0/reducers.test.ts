@@ -95,10 +95,24 @@ describe("applyCardMoved", () => {
   });
 
   it("✅ deterministic: sort by position then id", () => {
-    // c3 is already in l2 at position "a"; moving c1 to l2 at position "a" → tie → c1 < c3
+    // c3 is at position "a" in l2; c1 moves to l2 at position "z"
+    // Sort: "a" < "z" → c3 first, c1 second
     const r = applyCardMoved(baseState(), movedEvent(), CTX);
-    // c1 moved to "z", c3 stays at "a" → order: c3, c1
     expect(r.cardsByList!["l2"]).toEqual(["c3", "c1"]);
+  });
+
+  it("✅ deterministic tie-breaking: same position → sort by id", () => {
+    // Create a state where c3 is at position "a" in l2
+    // Move c1 to l2 at position "a" (same as c3) → tie → "c1" < "c3"
+    const tieEvent: ClientEventEnvelope<CardMovedEvent> = makeEnvelope({
+      id: "e-tie", type: "card.moved", version: 2,
+      occurredAt: "2024-01-01T00:00:00Z",
+      aggregateId: "c1", aggregateType: "card",
+      payload: { cardId: "c1", fromListId: "l1", toListId: "l2", newPosition: "a", boardId: "b1" },
+    });
+    const r = applyCardMoved(baseState(), tieEvent, CTX);
+    // Both at position "a" → tie-break by id: "c1" < "c3"
+    expect(r.cardsByList!["l2"]).toEqual(["c1", "c3"]);
   });
 
   it("✅ does not mutate original state", () => {

@@ -38,6 +38,17 @@ describe("parseSequence", () => {
     expect(parseSequence("NaN")).toBe(0n);
   });
 
+  it("returns 0n for negative numbers", () => {
+    expect(parseSequence("-1")).toBe(0n);
+    expect(parseSequence("-999")).toBe(0n);
+  });
+
+  it("handles leading zeros (canonical numeric parsing)", () => {
+    expect(parseSequence("00042")).toBe(42n);
+    expect(parseSequence("007")).toBe(7n);
+    expect(parseSequence("0")).toBe(0n);
+  });
+
   it("handles leading/trailing whitespace", () => {
     expect(parseSequence("  42  ")).toBe(42n);
   });

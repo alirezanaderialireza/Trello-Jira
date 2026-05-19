@@ -32,9 +32,12 @@ const SEQ_REGEX = /^\d+$/;
  * Returns 0n for any invalid input (empty string, float, NaN, undefined).
  */
 export function parseSequence(s: string | undefined | null): bigint {
-  if (!s || !SEQ_REGEX.test(s.trim())) return 0n;
+  if (!s) return 0n;
+  const trimmed = s.trim();
+  if (!SEQ_REGEX.test(trimmed)) return 0n;
   try {
-    return BigInt(s.trim());
+    // BigInt("00042") === 42n — handles leading zeros correctly
+    return BigInt(trimmed);
   } catch {
     return 0n;
   }
