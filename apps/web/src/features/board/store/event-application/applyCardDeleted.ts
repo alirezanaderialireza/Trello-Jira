@@ -1,29 +1,21 @@
 // apps/web/src/features/board/store/event-application/applyCardDeleted.ts
+//
+// Phase-0 audit:
+//   ✅ stale-safe      — strictly-greater guard (>) 
+//                        delete event carries version = card.revision + 1.
+//                        If card is already at a higher revision (recreated),
+//                        drop the delete. If equal (normal case), proceed.
+//   ✅ idempotent      — card already absent → {} (no-op)
+//   ✅ deterministic   — pure filter, no randomness
+//   ✅ optimistic-aware — optimistic deletes allowed
 
 import type { CardDeletedEvent } from "@repo/domain";
-import type { BoardStoreState } from "../useBoardStore";
+import type { BoardStoreState }  from "../useBoardStore";
 import type { ClientEventEnvelope } from "./types";
-import type { ReducerContext } from "./context";
+import type { ReducerContext }   from "./context";
 
-/**
- * applyCardDeleted — Pure Event Reducer
- *
- * Fixes applied:
- * ✅ Stale guard direction corrected:
- *    OLD (wrong):  existingCard.revision >= event.version
- *    NEW (correct): existingCard.revision > event.version
- *
- *    Reasoning: a delete event always carries version = card.revision + 1.
- *    If we blocked on >=, a delete at version N would be dropped whenever the
- *    card already sits at revision N-1 (which is the normal case), making
- *    deletes silently no-op. We should only skip if the card has been
- *    superseded by a *newer* confirmed write (revision strictly greater).
- *
- * Rules:
- * - Pure, immutable, replay-safe, idempotent
- */
 export function applyCardDeleted(
-  state: BoardStoreState,
+  state:    BoardStoreState,
   envelope: ClientEventEnvelope<CardDeletedEvent>,
   _context: ReducerContext,
 ): Partial<BoardStoreState> {
@@ -32,39 +24,29 @@ export function applyCardDeleted(
 
   const existingCard = state.cards[cardId];
 
-  // ------------------------------------------------------------------
-  // Idempotency: card already removed
-  // ------------------------------------------------------------------
-  if (!existingCard) {
-    return {};
-  }
+  // ✅ Idempotency: already gone
+  if (!existingCard) return {};
 
-  // ------------------------------------------------------------------
-  // ✅ Stale guard (strictly greater — see fix note above)
-  // Skip only if the card has been updated to a revision HIGHER than
-  // what this delete event targets (e.g. a Recreate arrived later).
-  // ------------------------------------------------------------------
-  if (existingCard.revision > event.version) {
-    return {};
-  }
+  // ✅ Stale guard with strictly-greater: only skip if current > event version
+  // (meaning the card was re-created with a higher revision after this delete
+  //  was originally issued — rare but valid in distributed systems)
+  if (existingCard.revision > event.version) return {};
 
-  const sourceListId = existingCard.listId;
-  const currentListIds = state.cardsByList[sourceListId] ?? [];
-  const isCardInList = currentListIds.includes(cardId);
+  const sourceListId       = existingCard.listId;
+  const currentListCards   = state.cardsByList[sourceListId] ?? [];
 
-  // Remove card from dictionary
   const { [cardId]: _removed, ...remainingCards } = state.cards;
 
-  if (!isCardInList) {
-    // Card was already moved out of this list — only clean up the dict
+  // ✅ Referential integrity: only update the bucket if card is actually there
+  if (!currentListCards.includes(cardId)) {
     return { cards: remainingCards };
   }
 
   return {
-    cards: remainingCards,
+    cards:       remainingCards,
     cardsByList: {
       ...state.cardsByList,
-      [sourceListId]: currentListIds.filter((id: string) => id !== cardId),
+      [sourceListId]: currentListCards.filter((id) => id !== cardId),
     },
   };
 }

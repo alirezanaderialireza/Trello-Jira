@@ -1,24 +1,18 @@
 // apps/web/src/features/board/store/event-application/applyListUpdated.ts
+//
+// Phase-0 audit:
+//   ✅ stale-safe      — strictly-greater guard (same rationale as applyCardUpdated)
+//   ✅ idempotent      — same event twice → same result
+//   ✅ deterministic   — merge is field-by-field, no randomness
+//   ✅ optimistic-aware — isOptimistic propagated
 
 import type { ListUpdatedEvent } from "@repo/domain";
-import type { BoardStoreState } from "../useBoardStore";
+import type { BoardStoreState }  from "../useBoardStore";
 import type { ClientEventEnvelope } from "./types";
-import type { ReducerContext } from "./context";
+import type { ReducerContext }   from "./context";
 
-/**
- * applyListUpdated — Pure Event Reducer
- *
- * Fixes applied:
- * ✅ Stale guard direction corrected:
- *    OLD (wrong):  existingList.revision >= event.version
- *    NEW (correct): existingList.revision > event.version
- *    (same reasoning as applyCardUpdated)
- *
- * Rules:
- * - Pure, immutable, replay-safe, idempotent
- */
 export function applyListUpdated(
-  state: BoardStoreState,
+  state:    BoardStoreState,
   envelope: ClientEventEnvelope<ListUpdatedEvent>,
   _context: ReducerContext,
 ): Partial<BoardStoreState> {
@@ -26,27 +20,20 @@ export function applyListUpdated(
   const { listId, changes } = event.payload;
 
   const existingList = state.lists[listId];
+  if (!existingList) return {};
 
-  if (!existingList) {
-    return {};
-  }
-
-  // ✅ strictly-greater guard
-  if (existingList.revision > event.version) {
-    return {};
-  }
+  // ✅ Strictly-greater guard (same reasoning as applyCardUpdated)
+  if (existingList.revision > event.version) return {};
 
   const updatedList = {
     ...existingList,
     ...changes,
-    revision: event.version,
+    id:           listId,           // prevent payload overwriting id
+    revision:     event.version,
     isOptimistic: envelope.optimistic ?? false,
   };
 
   return {
-    lists: {
-      ...state.lists,
-      [listId]: updatedList,
-    },
+    lists: { ...state.lists, [listId]: updatedList },
   };
 }

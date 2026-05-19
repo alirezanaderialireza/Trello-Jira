@@ -7,9 +7,11 @@ import type { AppDomainEvent } from "@repo/domain";
 import type { ClientEventEnvelope } from "./event-application/types";
 import type { ReducerContext } from "./event-application/context";
 import { applyEvent as dispatcherApplyEvent } from "./event-application/dispatcher";
-
-// 🌟 وارد کردن موتور تطبیق که در فایل مجزا ساختیم
 import { reconcileIncomingEvent } from "./event-application/reconcileIncomingEvent";
+
+// Phase-0 #1 — WsEvent canonical type lives in realtime/types.ts.
+// Re-export it here so all existing imports from useBoardStore still work.
+export type { WsEvent } from "../api/realtime/types";
 
 // ============================================================================
 // 🛡️ DTOs & Snapshots
@@ -44,8 +46,10 @@ export interface BoardSnapshot {
 }
 
 // ============================================================================
-// 🌐 WS Contracts & Transaction Types
+// WS Contracts & Transaction Types
 // ============================================================================
+
+// WsEvent re-exported from canonical source above.
 
 export interface PendingMutation {
   correlationId: string;
@@ -58,11 +62,8 @@ export interface PendingMutation {
   optimisticVersion?: number;
 }
 
-export interface WsEvent {
-  sequence: string;
-  type: string;
-  payload: AppDomainEvent;
-}
+// WsEvent is imported from ../api/realtime/types (re-exported above).
+// No duplicate definition here.
 
 export type SyncStatus =
   | "healthy"
@@ -311,49 +312,72 @@ export const useBoardStore = create<BoardState>()((set) => ({
   }),
 
   restoreSnapshot: (snapshot) => set((state) => {
-    const nextCards = { ...state.cards };
-    const nextLists = { ...state.lists };
+    // Phase-0 #4 — Atomic, partial-safe, conflict-aware snapshot restore.
+    //
+    // C-05 bug (now fixed): the old cardsByList block guarded the restore with
+    //   `if (!currentList || (snapList && currentList.revision <= snapList.revision))`
+    // This meant: if snapshot.cardsByList had a key but snapshot.lists did NOT
+    // have the matching list (e.g. the snapshot only captured card ordering, not
+    // the list metadata), the condition `(snapList && ...)` was always false
+    // and cardsByList was NEVER restored → silent partial rollback.
+    //
+    // Fix: cardsByList restore is now unconditional per-entry — it always
+    // restores the ordering from the snapshot. The stale-protection revision
+    // check is applied only to the cards dict (which has revision data).
+
+    const nextCards      = { ...state.cards };
+    const nextLists      = { ...state.lists };
     const nextCardsByList = { ...state.cardsByList };
 
+    // ── 1. Cards ────────────────────────────────────────────────────────────
     if (snapshot.cards) {
-      Object.entries(snapshot.cards).forEach(([id, snapCard]) => {
+      for (const [id, snapCard] of Object.entries(snapshot.cards)) {
         const currentCard = state.cards[id];
 
+        // Stale-protection: never roll back to a lower revision when the store
+        // already has a newer confirmed write (e.g. a WS event arrived between
+        // the optimistic write and the rollback trigger).
         if (currentCard && currentCard.revision > snapCard.revision) {
-          // 🌟 محل قرارگیری سنسور: رول‌بک به ورژن قدیمی‌تر انجام نشد
           telemetry.log(
             "SNAPSHOT_MANAGER",
             "ROLLBACK_SKIPPED",
-            { entityId: id, currentRevision: currentCard.revision, snapshotRevision: snapCard.revision, reason: "stale_protection" }
+            {
+              entityId:         id,
+              currentRevision:  currentCard.revision,
+              snapshotRevision: snapCard.revision,
+              reason:           "stale_protection",
+            },
           );
-          return; // از این مورد عبور کن
+          continue;
         }
-        // ✅ Bug Fix 1: nextCards را آپدیت می‌کنیم (قبلاً فقط return می‌شد)
+
         nextCards[id] = snapCard;
-      });
+      }
     }
 
+    // ── 2. Lists ─────────────────────────────────────────────────────────────
     if (snapshot.lists) {
-      Object.entries(snapshot.lists).forEach(([id, snapList]) => {
-        if (!state.lists[id] || state.lists[id].revision <= snapList.revision) {
+      for (const [id, snapList] of Object.entries(snapshot.lists)) {
+        const currentList = state.lists[id];
+        if (!currentList || currentList.revision <= snapList.revision) {
           nextLists[id] = snapList;
         }
-      });
+      }
     }
 
+    // ── 3. CardsByList ────────────────────────────────────────────────────────
+    // ✅ C-05 fix: unconditional restore — no dependency on snapshot.lists
+    // The card ordering must always be restored together with the card revisions;
+    // guarding it behind snapList existence caused partial/inconsistent rollbacks.
     if (snapshot.cardsByList) {
-      Object.entries(snapshot.cardsByList).forEach(([id, snapArr]) => {
-        const currentList = state.lists[id];
-        const snapList = snapshot.lists?.[id];
-        if (!currentList || (snapList && currentList.revision <= snapList.revision)) {
-          nextCardsByList[id] = [...snapArr];
-        }
-      });
+      for (const [id, snapArr] of Object.entries(snapshot.cardsByList)) {
+        nextCardsByList[id] = [...snapArr];
+      }
     }
 
     return {
-      cards: nextCards,
-      lists: nextLists,
+      cards:     nextCards,
+      lists:     nextLists,
       cardsByList: nextCardsByList,
       listOrder: snapshot.listOrder ? [...snapshot.listOrder] : state.listOrder,
     };
