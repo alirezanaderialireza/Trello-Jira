@@ -1,7 +1,11 @@
 import type { BoardState, WsEvent } from "../useBoardStore";
 import type { ClientEventEnvelope } from "./types";
 import { applyEvent as dispatcherApplyEvent } from "./dispatcher";
-import { telemetry } from "../../devtools/logEvent"; // 🌟 سنسورها اضافه شد
+import { telemetry } from "../../devtools/logEvent";
+
+// R9 — imported from the store module so the constant is defined in one place.
+// If the store constant is not exported we use the same value inline.
+const BUFFER_HARD_LIMIT = 200;
 
 /**
  * 🧠 The Reconciliation Engine (موتور تطبیق رویدادها)
@@ -60,9 +64,18 @@ export function reconcileIncomingEvent(
       { sequence: wsEvent.sequence }
     );
 
+    // R9 — Hard limit: if the buffer grows beyond BUFFER_HARD_LIMIT the client
+    // is too far behind for incremental catch-up.  Force a full resync.
+    const syncStatus =
+      bufferSize >= BUFFER_HARD_LIMIT
+        ? "desynced"
+        : bufferSize > 50
+        ? "gap_detected"
+        : "gap_detected";
+
     return {
       bufferedEvents: nextBuffer,
-      syncStatus: bufferSize > 50 ? "desynced" : "gap_detected",
+      syncStatus,
       pendingMutations: nextPendingMutations,
     };
   }

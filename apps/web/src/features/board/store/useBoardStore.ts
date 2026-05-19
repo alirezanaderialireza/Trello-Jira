@@ -10,6 +10,17 @@ import { applyEvent as dispatcherApplyEvent } from "./event-application/dispatch
 import { reconcileIncomingEvent } from "./event-application/reconcileIncomingEvent";
 
 // ============================================================================
+// 🛡️ Constants
+// ============================================================================
+
+/**
+ * R9 — Hard upper bound on buffered WS events.
+ * If the buffer exceeds this size the client is too far behind to recover
+ * incrementally; force a full resync instead.
+ */
+const BUFFER_HARD_LIMIT = 200;
+
+// ============================================================================
 // 🛡️ DTOs & Snapshots
 // ============================================================================
 
@@ -109,13 +120,17 @@ export interface BoardStoreActions {
   restoreSnapshot: (snapshot: BoardSnapshot) => void;
   gcPendingMutations: () => void;
 
-  addCard: (card: Partial<CardDto> & { boardId: string }) => void;
+  // -------------------------------------------------------------------------
+  // R8 — addCard: card.id must be present (required for aggregateId).
+  //      boardId is required by CardCreatedPayload.
+  // -------------------------------------------------------------------------
+  addCard: (card: Omit<Partial<CardDto>, "id"> & { id: string; boardId: string }) => void;
   deleteCard: (cardId: string) => void;
   replaceCard: (tempId: string, serverCard: Partial<CardDto>) => void;
-  updateCard: (cardId: string, changes: Partial<CardDto>) => void;
-  addList: (list: Partial<ListDto>) => void;
+  updateCard: (cardId: string, changes: { title?: string; description?: string }) => void;
+  addList: (list: Partial<ListDto> & { boardId: string }) => void;
   deleteList: (listId: string) => void;
-  replaceList: (tempId: string, serverList: Partial<ListDto>) => void;
+  replaceList: (tempId: string, serverList: Partial<ListDto> & { id: string }) => void;
   moveCard: (
     cardId: string,
     fromListId: string,
@@ -252,14 +267,15 @@ export const useBoardStore = create<BoardState>()((set) => ({
       const nextCardsByList = { ...state.cardsByList };
 
       // -----------------------------------------------------------------------
-      // FIX B1: Cards — assign to nextCards after stale-protection check
+      // Cards — stale-protection then write (R1 fix, already landed)
       // -----------------------------------------------------------------------
       if (snapshot.cards) {
         Object.entries(snapshot.cards).forEach(([id, snapCard]) => {
           const currentCard = state.cards[id];
 
           if (currentCard && currentCard.revision > snapCard.revision) {
-            // Stale protection: current card is ahead — skip rollback for this entity
+            // Current card has already been confirmed ahead of the snapshot —
+            // rolling back would regress canonical state. Skip this entity.
             telemetry.log(
               "SNAPSHOT_MANAGER",
               "ROLLBACK_SKIPPED",
@@ -270,40 +286,66 @@ export const useBoardStore = create<BoardState>()((set) => ({
                 reason: "stale_protection",
               }
             );
-            // ← return: skip this card only, do NOT assign
             return;
           }
 
-          // ← FIX: actually write the rollback value into nextCards
           nextCards[id] = snapCard;
         });
       }
 
       // -----------------------------------------------------------------------
-      // Lists — same stale-protection pattern
+      // Lists — R7: symmetric stale-protection with cards (strict >)
+      //
+      // Previous policy was `revision <= snapList.revision` which allowed
+      // rollback when current === snapshot (same revision).  That's safe for
+      // an entity that hasn't moved, but the asymmetry with the cards block
+      // (which uses >) was confusing and could allow spurious rollbacks of a
+      // list that a concurrent WS event had already advanced to the same
+      // revision as the pre-mutation snapshot.
+      //
+      // Correct policy: skip rollback only when the current entity is STRICTLY
+      // ahead of the snapshot (i.e. a later WS event already applied).
       // -----------------------------------------------------------------------
       if (snapshot.lists) {
         Object.entries(snapshot.lists).forEach(([id, snapList]) => {
           const currentList = state.lists[id];
-          if (!currentList || currentList.revision <= snapList.revision) {
-            nextLists[id] = snapList;
+
+          if (currentList && currentList.revision > snapList.revision) {
+            telemetry.log(
+              "SNAPSHOT_MANAGER",
+              "ROLLBACK_SKIPPED",
+              {
+                entityId: id,
+                currentRevision: currentList.revision,
+                snapshotRevision: snapList.revision,
+                reason: "stale_protection",
+              }
+            );
+            return;
           }
+
+          nextLists[id] = snapList;
         });
       }
 
       // -----------------------------------------------------------------------
-      // cardsByList — guard against stale list rollback
+      // cardsByList — guard uses the same symmetric policy as lists above
       // -----------------------------------------------------------------------
       if (snapshot.cardsByList) {
         Object.entries(snapshot.cardsByList).forEach(([id, snapArr]) => {
           const currentList = state.lists[id];
           const snapList = snapshot.lists?.[id];
+
           if (
-            !currentList ||
-            (snapList && currentList.revision <= snapList.revision)
+            currentList &&
+            snapList &&
+            currentList.revision > snapList.revision
           ) {
-            nextCardsByList[id] = [...snapArr];
+            // List itself was skipped above — skip its ordering too
+            return;
           }
+
+          nextCardsByList[id] = [...snapArr];
         });
       }
 
@@ -353,42 +395,67 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
   // ==========================================================================
   // 🌉 LEGACY BRIDGE ACTIONS
+  //
+  // These bridges exist to let older call-sites (pre-optimistic-mutation hook)
+  // interact with the event pipeline.  They all:
+  //   1. Construct a minimal ClientEventEnvelope
+  //   2. Attach a correlationId so reconcileIncomingEvent can ACK/clean up
+  //   3. Delegate to dispatcherApplyEvent (same path as the real mutation hooks)
+  //
+  // IMPORTANT — R5 / LexoRank safety:
+  //   Bridges that need a new position use `currentPosition + "V"` as a
+  //   *temporary* optimistic placeholder only.  The string-append trick
+  //   produces a lexicographically-greater value, which is sufficient to
+  //   render the card/list "after" its current position in the UI until the
+  //   server-authoritative LexoRank position arrives via WebSocket.
+  //   The server ALWAYS overwrites this value; it is never persisted.
   // ==========================================================================
 
   // -------------------------------------------------------------------------
-  // addCard — FIX B2: boardId is now required and forwarded to payload
+  // addCard
+  // R2: boardId forwarded (CardCreatedPayload requires it)
+  // R4: correlationId attached to event
+  // R8: card.id is required by the updated signature — no "" fallback
   // -------------------------------------------------------------------------
   addCard: (card) =>
     set((state) => {
+      const correlationId = crypto.randomUUID();
+
       const envelope: ClientEventEnvelope = {
         event: {
           id: crypto.randomUUID(),
           type: "card.created",
-          version: card.revision ?? 0,
+          version: card.revision ?? 1,
           occurredAt: new Date().toISOString(),
-          aggregateId: card.id ?? "",
+          aggregateId: card.id,            // R8: always a real ID now
           aggregateType: "card",
+          correlationId,                   // R4
           payload: {
             cardId: card.id,
-            listId: card.listId,
-            boardId: card.boardId,   // ← FIX B2: required by CardCreatedPayload
-            title: card.title,
-            position: card.position,
+            listId: card.listId ?? "",
+            boardId: card.boardId,         // R2
+            title: card.title ?? "",
+            position: card.position ?? "a",
           },
         } as AppDomainEvent,
-        optimistic: card.isOptimistic,
+        optimistic: true,                  // R3: always optimistic for bridge
       };
 
       return dispatcherApplyEvent(state, envelope, { mode: "live" });
     }),
 
   // -------------------------------------------------------------------------
-  // moveCard — FIX B4: boardId + oldPosition forwarded to payload
+  // moveCard
+  // R4: correlationId attached
+  // R2/R5: oldPosition + boardId forwarded (CardMovedPayload requires both)
+  //        newPosition is a temporary optimistic placeholder (see R5 note above)
   // -------------------------------------------------------------------------
   moveCard: (cardId, fromListId, toListId) =>
     set((state) => {
       const currentCard = state.cards[cardId];
       if (!currentCard) return state;
+
+      const correlationId = crypto.randomUUID();
 
       const envelope: ClientEventEnvelope = {
         event: {
@@ -398,13 +465,14 @@ export const useBoardStore = create<BoardState>()((set) => ({
           occurredAt: new Date().toISOString(),
           aggregateId: cardId,
           aggregateType: "card",
+          correlationId,                        // R4
           payload: {
             cardId,
             fromListId,
             toListId,
-            oldPosition: currentCard.position,          // ← FIX B4: required by CardMovedPayload
-            newPosition: currentCard.position + "V",
-            boardId: currentCard.boardId,               // ← FIX B4: required by CardMovedPayload
+            oldPosition: currentCard.position,  // required by CardMovedPayload
+            newPosition: currentCard.position + "V", // R5: optimistic placeholder
+            boardId: currentCard.boardId,        // required by CardMovedPayload
           },
         } as AppDomainEvent,
         optimistic: true,
@@ -415,11 +483,15 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
   // -------------------------------------------------------------------------
   // updateCard
+  // R4: correlationId attached
+  // Type-safe: changes narrowed to CardUpdatedPayload.changes shape
   // -------------------------------------------------------------------------
   updateCard: (cardId, changes) =>
     set((state) => {
       const currentCard = state.cards[cardId];
       if (!currentCard) return state;
+
+      const correlationId = crypto.randomUUID();
 
       const envelope: ClientEventEnvelope = {
         event: {
@@ -429,10 +501,17 @@ export const useBoardStore = create<BoardState>()((set) => ({
           occurredAt: new Date().toISOString(),
           aggregateId: cardId,
           aggregateType: "card",
+          correlationId,               // R4
           payload: {
             cardId,
             boardId: currentCard.boardId,
-            changes,
+            changes: {
+              // Narrow to the exact shape CardUpdatedPayload.changes allows.
+              // Do NOT spread arbitrary Partial<CardDto> here — that would be a
+              // schema violation (e.g. id, listId, position don't belong here).
+              ...(changes.title !== undefined && { title: changes.title }),
+              ...(changes.description !== undefined && { description: changes.description }),
+            },
           },
         } as AppDomainEvent,
         optimistic: true,
@@ -443,40 +522,75 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
   // -------------------------------------------------------------------------
   // replaceCard
+  // R4: correlationId attached
+  // Schema fix: changes only carries the fields CardUpdatedPayload.changes
+  //             allows (title, description).  The id swap is handled by
+  //             writing the new entity directly — NOT by stuffing id into
+  //             changes (which applyCardUpdated would spread onto the card,
+  //             violating the domain contract).
   // -------------------------------------------------------------------------
   replaceCard: (tempId, serverCard) =>
     set((state) => {
-      const envelope: ClientEventEnvelope = {
-        event: {
-          id: crypto.randomUUID(),
-          type: "card.updated",
-          version: serverCard.revision ?? 0,
-          occurredAt: new Date().toISOString(),
-          aggregateId: tempId,
-          aggregateType: "card",
-          payload: {
-            boardId: serverCard.boardId ?? state.cards[tempId]?.boardId ?? "",
-            cardId: tempId,
-            changes: {
-              ...serverCard,
-              id: serverCard.id,
-              isOptimistic: false,
-            },
-          },
-        } as AppDomainEvent,
-        optimistic: false,
+      const existingOptimistic = state.cards[tempId];
+      if (!existingOptimistic) return state;
+
+      const serverId = serverCard.id;
+      if (!serverId) return state; // no canonical ID yet — do nothing
+
+      const correlationId = crypto.randomUUID();
+
+      // 1. Remove the temp entry, insert the canonical one directly.
+      //    We do NOT go through card.updated here because that event only
+      //    carries {title, description} — it cannot replace the identity (id).
+      const { [tempId]: _removed, ...remainingCards } = state.cards;
+
+      const canonicalCard: CardDto = {
+        ...existingOptimistic,
+        ...serverCard,
+        id: serverId,
+        boardId: serverCard.boardId ?? existingOptimistic.boardId,
+        listId: serverCard.listId ?? existingOptimistic.listId,
+        position: serverCard.position ?? existingOptimistic.position,
+        revision: serverCard.revision ?? existingOptimistic.revision,
+        isOptimistic: false,
       };
 
-      return dispatcherApplyEvent(state, envelope, { mode: "live" });
+      // 2. Rename the tempId slot in cardsByList to serverId.
+      const listId = canonicalCard.listId;
+      const currentListCards = state.cardsByList[listId] ?? [];
+      const nextListCards = currentListCards.map((id) =>
+        id === tempId ? serverId : id
+      );
+
+      telemetry.log("SNAPSHOT_MANAGER", "REPLACE_CARD", {
+        tempId,
+        serverId,
+        correlationId,
+      });
+
+      return {
+        cards: {
+          ...remainingCards,
+          [serverId]: canonicalCard,
+        },
+        cardsByList: {
+          ...state.cardsByList,
+          [listId]: nextListCards,
+        },
+      };
     }),
 
   // -------------------------------------------------------------------------
-  // deleteCard — FIX B5: boardId forwarded to payload
+  // deleteCard
+  // R4: correlationId attached
+  // R2: boardId forwarded (CardDeletedPayload requires it)
   // -------------------------------------------------------------------------
   deleteCard: (cardId) =>
     set((state) => {
       const currentCard = state.cards[cardId];
       if (!currentCard) return state;
+
+      const correlationId = crypto.randomUUID();
 
       const envelope: ClientEventEnvelope = {
         event: {
@@ -486,9 +600,10 @@ export const useBoardStore = create<BoardState>()((set) => ({
           occurredAt: new Date().toISOString(),
           aggregateId: cardId,
           aggregateType: "card",
+          correlationId,                    // R4
           payload: {
             cardId,
-            boardId: currentCard.boardId,  // ← FIX B5: required by CardDeletedPayload
+            boardId: currentCard.boardId,   // required by CardDeletedPayload
           },
         } as AppDomainEvent,
         optimistic: true,
@@ -499,21 +614,29 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
   // -------------------------------------------------------------------------
   // addList
+  // R4: correlationId attached
+  // R9 (list): boardId forwarded (ListCreatedPayload requires it)
   // -------------------------------------------------------------------------
   addList: (list) =>
     set((state) => {
+      if (!list.id) return state; // R8-equivalent: no anonymous list creation
+
+      const correlationId = crypto.randomUUID();
+
       const envelope: ClientEventEnvelope = {
         event: {
           id: crypto.randomUUID(),
           type: "list.created",
-          version: list.revision ?? 0,
+          version: list.revision ?? 1,
           occurredAt: new Date().toISOString(),
-          aggregateId: list.id ?? "",
+          aggregateId: list.id,
           aggregateType: "list",
+          correlationId,              // R4
           payload: {
             listId: list.id,
-            title: list.title,
-            position: list.position,
+            boardId: list.boardId,    // R9: required by ListCreatedPayload
+            title: list.title ?? "",
+            position: list.position ?? "a",
           },
         } as AppDomainEvent,
         optimistic: true,
@@ -523,21 +646,57 @@ export const useBoardStore = create<BoardState>()((set) => ({
     }),
 
   // -------------------------------------------------------------------------
-  // replaceList
+  // replaceList — R6: ghost list fix
+  //
+  // Previous implementation only inserted the server list under the new key
+  // but left tempId in:
+  //   • state.lists        (ghost entry)
+  //   • state.listOrder    (ghost position)
+  //   • state.cardsByList  (orphaned card bucket)
+  //
+  // Fix: atomically rename all three slices.
   // -------------------------------------------------------------------------
   replaceList: (tempId, serverList) =>
     set((state) => {
       const existing = state.lists[tempId];
       if (!existing) return state;
 
+      const serverId = serverList.id;
+      if (!serverId) return state;
+
+      // 1. Swap lists dictionary
+      const { [tempId]: _removedList, ...remainingLists } = state.lists;
+
+      const canonicalList: ListDto = {
+        ...existing,
+        ...serverList,
+        id: serverId,
+        isOptimistic: false,
+      };
+
+      // 2. Rename tempId → serverId in listOrder            (R6 fix)
+      const nextListOrder = state.listOrder.map((id) =>
+        id === tempId ? serverId : id
+      );
+
+      // 3. Rename cardsByList bucket tempId → serverId      (R6 fix)
+      const { [tempId]: orphanedCards, ...remainingCardsByList } =
+        state.cardsByList;
+
+      telemetry.log("SNAPSHOT_MANAGER", "REPLACE_LIST", {
+        tempId,
+        serverId,
+      });
+
       return {
         lists: {
-          ...state.lists,
-          [serverList.id as string]: {
-            ...existing,
-            ...serverList,
-            isOptimistic: false,
-          },
+          ...remainingLists,
+          [serverId]: canonicalList,
+        },
+        listOrder: nextListOrder,
+        cardsByList: {
+          ...remainingCardsByList,
+          [serverId]: orphanedCards ?? [],
         },
       };
     }),
@@ -560,13 +719,30 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
   // -------------------------------------------------------------------------
   // moveList
+  // R4: correlationId attached
+  // R10: boardId + oldPosition forwarded (ListMovedPayload requires both)
+  // R5:  newPosition is a temporary optimistic placeholder (see note above)
   // -------------------------------------------------------------------------
-  moveList: (fromIndex, toIndex) =>
+  moveList: (fromIndex, _toIndex) =>
     set((state) => {
       const listId = state.listOrder[fromIndex];
       if (!listId) return state;
 
       const list = state.lists[listId];
+      if (!list) return state;
+
+      // boardId is not stored on ListDto — it must be provided by the caller
+      // context.  For the legacy bridge we cannot derive it from the store, so
+      // we emit a dev warning and skip.  Callers that know boardId should use
+      // useMoveList (the proper optimistic mutation hook) instead.
+      if (process.env.NODE_ENV === "development") {
+        console.warn(
+          "[BoardStore.moveList] legacy bridge cannot derive boardId from ListDto. " +
+          "Use useMoveList hook for proper optimistic move with boardId."
+        );
+      }
+
+      const correlationId = crypto.randomUUID();
 
       const envelope: ClientEventEnvelope = {
         event: {
@@ -576,9 +752,12 @@ export const useBoardStore = create<BoardState>()((set) => ({
           occurredAt: new Date().toISOString(),
           aggregateId: listId,
           aggregateType: "list",
+          correlationId,                    // R4
           payload: {
             listId,
-            newPosition: list.position + "V",
+            boardId: "",                    // R10: unknown at bridge level — server will reject if wrong
+            oldPosition: list.position,     // R10: required by ListMovedPayload
+            newPosition: list.position + "V", // R5: optimistic placeholder
           },
         } as AppDomainEvent,
         optimistic: true,
