@@ -335,5 +335,5 @@ export function chainDensityScore(positions: readonly Position[]): {
 // ============================================================================
 // 7.  Re-export config type for DI in tests
 // ============================================================================
-
-export type { RebalanceConfig };
+// Note: RebalanceConfig is already exported at its declaration above (line 85).
+// No need to re-export it here.
