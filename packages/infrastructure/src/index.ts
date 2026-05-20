@@ -30,6 +30,14 @@ export { AnomalyDetector } from "./auth/observability/anomalyDetector";
 export { computeFingerprint, verifyFingerprint } from "./auth/observability/sessionFingerprint";
 export type { FingerprintComponents, FingerprintMismatch, FingerprintResult, RiskLevel } from "./auth/observability/sessionFingerprint";
 
+// Phase 2: Service-to-Service Auth
+export { ServiceTokenService, ServiceAuthError } from "./auth/serviceAuth/serviceTokenService";
+export type { ServiceName, ServiceTokenClaims, ServiceTokenConfig } from "./auth/serviceAuth/serviceTokenService";
+export { ServiceAcl, getServiceAcl } from "./auth/serviceAuth/serviceAcl";
+export type { ServiceScope, ServiceRegistration } from "./auth/serviceAuth/serviceAcl";
+export { InternalAuthMiddleware } from "./auth/serviceAuth/internalAuthMiddleware";
+export type { InternalAuthContext, InternalAuthResult } from "./auth/serviceAuth/internalAuthMiddleware";
+
 export { MembershipCache } from "./redis/membershipCache";
 export type { MembershipEntry } from "./redis/membershipCache";
 
