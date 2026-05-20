@@ -9,7 +9,14 @@ export type LogSource =
   | "RECONCILER" 
   | "MUTATION_ENGINE" 
   | "SNAPSHOT_MANAGER" 
-  | "STORE";
+  | "STORE"
+  // ── Phase 3: Collaboration ─────────────────────────────────────────────
+  | "PRESENCE"
+  | "TYPING"
+  | "CURSOR"
+  | "SELECTION"
+  | "AWARENESS"
+  | "MUTATION_ACK";
 
 export type MutationLifecycleState = 
   | "CREATED"
