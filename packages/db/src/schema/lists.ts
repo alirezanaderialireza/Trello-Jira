@@ -8,6 +8,7 @@ import {
   timestamp,
   index,
   uniqueIndex,
+import { workspaces } from "./workspaces";
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -27,7 +28,7 @@ export const lists = pgTable(
     // =========================================================================
     // 🔹 Multi-Tenant Boundary
     // =========================================================================
-    tenantId: uuid("tenant_id").notNull(),
+    tenantId: uuid("tenant_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
 
     // =========================================================================
     // 🔹 Aggregate Reference

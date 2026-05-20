@@ -1,4 +1,5 @@
 // apps/web/src/app/api/auth/signup/route.ts
+import { rateLimitResponse, SIGNUP_LIMIT } from "@repo/api/middleware/authRateLimit";
 // Custom signup endpoint — creates user + personal workspace.
 
 import { db, users, workspaces, workspaceMembers } from "@repo/db";
@@ -10,6 +11,11 @@ const hasher = new Argon2PasswordHasher();
 
 export async function POST(req: Request) {
   try {
+    // Rate limit check
+    const ip = req.headers.get("x-forwarded-for") || "unknown";
+    const limited = rateLimitResponse(ip, SIGNUP_LIMIT);
+    if (limited) return limited;
+
     const { email, displayName, password } = await req.json();
 
     if (!email || !displayName || !password) {
