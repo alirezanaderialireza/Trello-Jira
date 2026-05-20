@@ -6,6 +6,7 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { Redis } from "ioredis";
 import postgres from "postgres";
+import { getSessionFromToken, type AuthSession } from "@repo/auth";
 
 // ============================================================================
 // Config
@@ -172,7 +173,38 @@ async function subscribeClient(
   token?: string,
   userId?: string,
 ) {
-  // TODO Phase B: validate token / session here
+  // ── Token validation ───────────────────────────────────────────────────────
+  // If AUTH_REQUIRED is enabled, reject connections without a valid JWT.
+  const authRequired = process.env.WS_AUTH_REQUIRED !== "false"; // default: true
+
+  if (authRequired) {
+    if (!token) {
+      send(client, {
+        type: "SYSTEM",
+        meta: { timestamp: new Date().toISOString(), reason: "AUTH_REQUIRED", message: "Token is required." },
+      });
+      client.ws.close(4001, "Unauthorized: no token");
+      return;
+    }
+
+    const session: AuthSession | null = await getSessionFromToken(token);
+    if (!session) {
+      send(client, {
+        type: "SYSTEM",
+        meta: { timestamp: new Date().toISOString(), reason: "AUTH_FAILED", message: "Invalid or expired token." },
+      });
+      client.ws.close(4001, "Unauthorized: invalid token");
+      return;
+    }
+
+    // Set userId and tenantId from verified session
+    client.userId = session.user.id;
+    console.log(`[WS] Auth OK for user ${session.user.id} (tenant: ${session.tenantId})`);
+  } else {
+    // Dev mode: accept userId from message payload
+    client.userId = userId ?? null;
+  }
+
   if (client.boardId) {
     broadcastPresenceLeave(client);
     unsubscribeClient(client);
@@ -180,7 +212,6 @@ async function subscribeClient(
 
   client.boardId = boardId;
   client.lastSequence = lastSequence;
-  client.userId = userId ?? null;
   client.lastPresenceAt = Date.now();
 
   let set = boardClients.get(boardId);

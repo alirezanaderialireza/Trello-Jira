@@ -2,6 +2,9 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { AsyncLocalStorage } from "async_hooks";
 
+// 📦 Auth
+import { getSessionFromRequest, type AuthSession } from "@repo/auth";
+
 // 📦 Database
 import { db } from "@repo/db";
 
@@ -14,7 +17,11 @@ import {
   DrizzleIdempotencyRepository,
   DrizzleSequenceRepository,
   BoardReadModels,
+  boardMembers,
 } from "@repo/db";
+
+// 📦 ORM operators (for board membership guard)
+import { eq, and, isNull } from "drizzle-orm";
 
 // 📦 Infrastructure
 import {
@@ -291,6 +298,22 @@ export async function createContext(opts: {
       startedAt,
     });
 
+  // ── Session resolution ─────────────────────────────────────────────────────
+  // Priority: explicit opts.session > extract from request > null
+  let session: Session | null = opts.session ?? null;
+
+  if (!session && opts.req) {
+    const authSession: AuthSession | null = await getSessionFromRequest(opts.req);
+    if (authSession) {
+      session = {
+        user: authSession.user,
+        tenantId: authSession.tenantId,
+        aclVersion: authSession.aclVersion,
+        roles: authSession.roles,
+      };
+    }
+  }
+
   return {
     // infra
     infra: infrastructure,
@@ -305,7 +328,7 @@ export async function createContext(opts: {
     services,
 
     // auth
-    session: opts.session ?? null,
+    session,
 
     // request abort signal
     reqSignal: opts.req?.signal,
@@ -594,3 +617,83 @@ export const protectedProcedure =
     .use(timeoutGuard)
     .use(isAuthed)
     .use(tenantGuard);
+
+// ============================================================================
+// 🛡️ Board Membership Guard
+// ============================================================================
+// Checks that the authenticated user is an active member of the board
+// specified in the input. Works with any input shape that has a `boardId` field.
+// Adds `boardMembership` to context for downstream role checks.
+// ============================================================================
+
+export const boardMemberGuard = t.middleware(
+  async ({ ctx, next, rawInput }) => {
+    // Extract boardId from input (supports nested and flat shapes)
+    const input = rawInput as Record<string, unknown> | null;
+    const boardId =
+      (input?.boardId as string) ??
+      (input?.id as string) ?? // for getFullBoard which uses `id`
+      null;
+
+    if (!boardId) {
+      // If no boardId in input, skip check (let downstream handle it)
+      return next();
+    }
+
+    const userId = ctx.session?.user?.id;
+    const tenantId = ctx.session?.tenantId;
+
+    if (!userId || !tenantId) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+        message: "Authentication required.",
+      });
+    }
+
+    // Query board_members for active membership
+    const membership = await ctx.infra.db.query.boardMembers.findFirst({
+      where: and(
+        eq(boardMembers.boardId, boardId),
+        eq(boardMembers.userId, userId),
+        eq(boardMembers.tenantId, tenantId),
+        isNull(boardMembers.removedAt),
+      ),
+    });
+
+    if (!membership) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "You are not a member of this board.",
+      });
+    }
+
+    return next({
+      ctx: {
+        ...ctx,
+        boardMembership: {
+          memberId: membership.id,
+          role: membership.role as string,
+          boardId,
+        },
+      },
+    });
+  }
+);
+
+// ============================================================================
+// 🚀 Board-Protected Procedure
+// ============================================================================
+// Use this for any procedure that operates on a specific board.
+// It extends protectedProcedure with board membership validation.
+// After this middleware, ctx.boardMembership is available.
+// ============================================================================
+
+export const boardProtectedProcedure =
+  t.procedure
+    .use(loadSheddingGuard)
+    .use(alsMiddleware)
+    .use(observabilityMiddleware)
+    .use(timeoutGuard)
+    .use(isAuthed)
+    .use(tenantGuard)
+    .use(boardMemberGuard);
