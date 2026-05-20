@@ -21,6 +21,7 @@ import { presenceRouter } from "./routers/realtime/presence.router";
 // 🛠️ Internal & Ops
 import { opsRouter } from "./routers/system/ops.router";
 import { jobsRouter } from "./routers/system/jobs.router";
+import { healthRouter } from "./routers/system/health.router";
 import { webhookRouter } from "./routers/internal/webhooks";
 
 // ============================================================================
@@ -68,6 +69,7 @@ export const appRouter = router({
     system: router({
       ops: opsRouter,
       jobs: jobsRouter,
+      health: healthRouter,
     }),
 
   }),
