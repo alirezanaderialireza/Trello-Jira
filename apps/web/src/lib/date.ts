@@ -73,7 +73,7 @@ export type ParseResult<T> =
  */
 export function getUserTZ(): string {
   try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || TEHRAN_TZ;
   } catch {
     return TEHRAN_TZ;
   }
@@ -141,13 +141,10 @@ export function normalizeToDayUTC(d: UTCDateTime): UTCDateTime {
  * Converts a UTCDateTime to a DateOnly in the given timezone.
  * The "day" depends on the timezone — midnight UTC might be tomorrow in Tehran.
  *
- * @param tz IANA timezone. Default: UTC.
+ * @param tz IANA timezone. Default: TEHRAN_TZ (for Iranian product).
  */
-export function toDateOnlyUTC(d: UTCDateTime, tz?: string): DateOnly {
-  if (tz) {
-    return dayjs.utc(d).tz(tz).format("YYYY-MM-DD") as DateOnly;
-  }
-  return dayjs.utc(d).format("YYYY-MM-DD") as DateOnly;
+export function toDateOnlyUTC(d: UTCDateTime, tz: string = TEHRAN_TZ): DateOnly {
+  return dayjs.utc(d).tz(tz).format("YYYY-MM-DD") as DateOnly;
 }
 
 /**
@@ -252,26 +249,29 @@ export function fromJalaliInput(input: string): ParseResult<DateOnly> {
   const parts = trimmed.split("/");
   const normalized = `${parts[0]}/${parts[1]!.padStart(2, "0")}/${parts[2]!.padStart(2, "0")}`;
 
-  // Parse in Jalali calendar context
-  // @ts-expect-error — jalaliday calendar API
-  dayjs.calendar("jalali");
+  // Parse in Jalali calendar context using object-based API
+  // (jalaliday's correct API for Jalali parsing — NOT customParseFormat)
   let candidate: dayjs.Dayjs;
   try {
-    candidate = dayjs(normalized, JALALI_FMT, true);
+    // @ts-expect-error — jalaliday object-based parse API
+    candidate = dayjs(normalized, { jalali: true, format: JALALI_FMT });
     if (!candidate.isValid()) {
       return { ok: false, error: "INVALID_JALALI_DATE", input };
     }
 
     // Round-trip validation: format back to Jalali and compare
+    // @ts-expect-error — jalaliday calendar API
+    dayjs.calendar("jalali");
     const roundTrip = candidate.format(JALALI_FMT);
+    // @ts-expect-error — restore
+    dayjs.calendar("gregory");
+
     if (roundTrip !== normalized) {
       return { ok: false, error: "INVALID_JALALI_DATE", input };
     }
 
     // Convert to Gregorian DateOnly — NO timezone shift!
-    // @ts-expect-error — restore calendar
-    dayjs.calendar("gregory");
-    const gregDate = candidate.format("YYYY-MM-DD");
+    const gregDate = candidate.calendar("gregory").format("YYYY-MM-DD");
     return { ok: true, value: gregDate as DateOnly };
   } catch {
     return { ok: false, error: "INVALID_JALALI_DATE", input };
@@ -310,24 +310,27 @@ export function fromJalaliDateTimeInput(
   const normalizedDate = `${parts[0]}/${parts[1]!.padStart(2, "0")}/${parts[2]!.padStart(2, "0")}`;
   const fullNormalized = `${normalizedDate} ${timePart}`;
 
-  // @ts-expect-error — jalaliday calendar API
-  dayjs.calendar("jalali");
+  // Parse with object-based API (jalaliday correct parsing method)
   try {
-    const candidate = dayjs(fullNormalized, "YYYY/MM/DD HH:mm", true);
+    // @ts-expect-error — jalaliday object-based parse API
+    const candidate = dayjs(fullNormalized, { jalali: true, format: "YYYY/MM/DD HH:mm" });
     if (!candidate.isValid()) {
       return { ok: false, error: "INVALID_JALALI_DATE", input };
     }
 
     // Round-trip validation (date part only)
+    // @ts-expect-error — jalaliday calendar API
+    dayjs.calendar("jalali");
     const roundTrip = candidate.format(JALALI_FMT);
+    // @ts-expect-error — restore
+    dayjs.calendar("gregory");
+
     if (roundTrip !== normalizedDate) {
       return { ok: false, error: "INVALID_JALALI_DATE", input };
     }
 
     // Convert to Gregorian, apply timezone, then UTC
-    // @ts-expect-error — restore calendar
-    dayjs.calendar("gregory");
-    const gregString = candidate.format("YYYY-MM-DD HH:mm");
+    const gregString = candidate.calendar("gregory").format("YYYY-MM-DD HH:mm");
     const withTz = dayjs.tz(gregString, "YYYY-MM-DD HH:mm", tz);
     return { ok: true, value: withTz.utc().toISOString() as UTCDateTime };
   } catch {
