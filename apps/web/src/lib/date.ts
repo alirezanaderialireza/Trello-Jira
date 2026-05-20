@@ -211,14 +211,14 @@ export function toJalaliDisplay(
   tz: string = TEHRAN_TZ,
   format: string = JALALI_FMT,
 ): string {
-  // @ts-expect-error — jalaliday extends dayjs with .calendar() but TS doesn't know
-  dayjs.calendar("jalali");
-  try {
-    return dayjs.utc(date).tz(tz).format(format);
-  } finally {
-    // @ts-expect-error — restore to Gregorian
-    dayjs.calendar("gregory");
-  }
+  // Strategy: get TZ-aware wall-clock as Gregorian string, then re-parse as
+  // a UTC mirror (same digits, no offset) and use instance .calendar("jalali")
+  // to format. This avoids the static dayjs.calendar() which is no-op in Vite ESM,
+  // and also avoids the utcOffset reset trap of instance .calendar() on tz instances.
+  const wallClock = dayjs.utc(date).tz(tz).format("YYYY-MM-DD HH:mm:ss");
+  const utcMirror = dayjs.utc(wallClock);
+  // @ts-expect-error — jalaliday instance .calendar() method
+  return utcMirror.calendar("jalali").format(format);
 }
 
 // ============================================================================
@@ -259,25 +259,21 @@ export function fromJalaliInput(input: string): ParseResult<DateOnly> {
       return { ok: false, error: "INVALID_JALALI_DATE", input };
     }
 
-    // Round-trip validation: format back to Jalali and compare
-    // @ts-expect-error — jalaliday calendar API
-    dayjs.calendar("jalali");
-    const roundTrip = candidate.format(JALALI_FMT);
-    // @ts-expect-error — restore
-    dayjs.calendar("gregory");
+    // Round-trip validation: format back to Jalali via instance method
+    // (static dayjs.calendar() is no-op in Vite ESM — must use instance)
+    // @ts-expect-error — jalaliday instance .calendar() method
+    const roundTrip = candidate.calendar("jalali").format(JALALI_FMT);
 
     if (roundTrip !== normalized) {
       return { ok: false, error: "INVALID_JALALI_DATE", input };
     }
 
     // Convert to Gregorian DateOnly — NO timezone shift!
+    // @ts-expect-error — jalaliday instance .calendar() method
     const gregDate = candidate.calendar("gregory").format("YYYY-MM-DD");
     return { ok: true, value: gregDate as DateOnly };
   } catch {
     return { ok: false, error: "INVALID_JALALI_DATE", input };
-  } finally {
-    // @ts-expect-error — ensure restore
-    dayjs.calendar("gregory");
   }
 }
 
@@ -318,25 +314,20 @@ export function fromJalaliDateTimeInput(
       return { ok: false, error: "INVALID_JALALI_DATE", input };
     }
 
-    // Round-trip validation (date part only)
-    // @ts-expect-error — jalaliday calendar API
-    dayjs.calendar("jalali");
-    const roundTrip = candidate.format(JALALI_FMT);
-    // @ts-expect-error — restore
-    dayjs.calendar("gregory");
+    // Round-trip validation (date part only) via instance method
+    // @ts-expect-error — jalaliday instance .calendar() method
+    const roundTrip = candidate.calendar("jalali").format(JALALI_FMT);
 
     if (roundTrip !== normalizedDate) {
       return { ok: false, error: "INVALID_JALALI_DATE", input };
     }
 
     // Convert to Gregorian, apply timezone, then UTC
+    // @ts-expect-error — jalaliday instance .calendar() method
     const gregString = candidate.calendar("gregory").format("YYYY-MM-DD HH:mm");
     const withTz = dayjs.tz(gregString, "YYYY-MM-DD HH:mm", tz);
     return { ok: true, value: withTz.utc().toISOString() as UTCDateTime };
   } catch {
     return { ok: false, error: "INVALID_JALALI_DATE", input };
-  } finally {
-    // @ts-expect-error — ensure restore
-    dayjs.calendar("gregory");
   }
 }
