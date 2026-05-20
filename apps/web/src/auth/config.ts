@@ -1,15 +1,22 @@
 // apps/web/src/auth/config.ts
-// Auth.js v5 configuration — credentials provider.
+// Auth.js v5 configuration — Credentials + DrizzleAdapter + Database sessions.
 
 import type { NextAuthConfig } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { db, users } from "@repo/db";
+import { DrizzleAdapter } from "@auth/drizzle-adapter";
+import { db, users, accounts, sessions, verificationTokens } from "@repo/db";
 import { eq, and, isNull } from "drizzle-orm";
 import { Argon2PasswordHasher } from "@repo/infrastructure/auth/argon2Hasher";
 
 const hasher = new Argon2PasswordHasher();
 
 export const authConfig: NextAuthConfig = {
+  adapter: DrizzleAdapter(db as any, {
+    usersTable: users as any,
+    accountsTable: accounts as any,
+    sessionsTable: sessions as any,
+    verificationTokensTable: verificationTokens as any,
+  }),
   providers: [
     Credentials({
       id: "credentials",
@@ -36,15 +43,11 @@ export const authConfig: NextAuthConfig = {
     }),
   ],
   pages: { signIn: "/login", error: "/login" },
+  session: { strategy: "database" },
   callbacks: {
-    session({ session, token }) {
-      if (token?.sub) session.user.id = token.sub;
+    session({ session, user }) {
+      if (user?.id) session.user.id = user.id;
       return session;
     },
-    jwt({ token, user }) {
-      if (user) token.sub = user.id;
-      return token;
-    },
   },
-  session: { strategy: "jwt" },
 };
