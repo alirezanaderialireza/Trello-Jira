@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trello
+      POSTGRES_PASSWORD: trello_dev_123
+      POSTGRES_DB: trello_os
+    ports: ["5432:5432"]
+    volumes: [pg_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trello"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  web:
+    build: { context: ., dockerfile: Dockerfile, target: web }
+    ports: ["3000:3000"]
+    environment:
+      DATABASE_URL: postgresql://trello:trello_dev_123@postgres:5432/trello_os
+      REDIS_URL: redis://redis:6379
+      NEXT_PUBLIC_WS_URL: ws://localhost:3001
+      JWT_SECRET: change-me-in-production
+      NODE_ENV: production
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  ws-server:
+    build: { context: ., dockerfile: Dockerfile, target: ws-server }
+    ports: ["3001:3001"]
+    environment:
+      DATABASE_URL: postgresql://trello:trello_dev_123@postgres:5432/trello_os
+      REDIS_URL: redis://redis:6379
+      WS_PORT: "3001"
+      JWT_SECRET: change-me-in-production
+      WS_AUTH_REQUIRED: "true"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  outbox-worker:
+    build: { context: ., dockerfile: Dockerfile, target: outbox-worker }
+    environment:
+      DATABASE_URL: postgresql://trello:trello_dev_123@postgres:5432/trello_os
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  rebalance-worker:
+    build: { context: ., dockerfile: Dockerfile, target: rebalance-worker }
+    environment:
+      DATABASE_URL: postgresql://trello:trello_dev_123@postgres:5432/trello_os
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+volumes:
+  pg_data:
