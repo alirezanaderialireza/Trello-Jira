@@ -7,3 +7,6 @@ export * from "./idempotency";
 export * from "./sequence";
 export * from "./relations";
 export * from "./boardMembers";
+export * from "./labels";
+export * from "./checklists";
+export * from "./comments";
