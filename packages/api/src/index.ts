@@ -14,6 +14,9 @@ import { commentsRouter } from "./routers/card-features/comments.router";
 import { dueDateRouter } from "./routers/card-features/due-date.router";
 import { activityRouter } from "./routers/card-features/activity.router";
 
+// 🏢 Workspaces
+import { workspacesRouter } from "./routers/workspaces/workspaces.router";
+
 // ⚡ Realtime & Sync
 import { realtimeSyncRouter } from "./routers/realtime/sync.router";
 import { presenceRouter } from "./routers/realtime/presence.router";
@@ -46,6 +49,8 @@ export const appRouter = router({
       comment: commentsRouter,
       dueDate: dueDateRouter,
       activity: activityRouter,
+      // 🏢 Workspaces
+      workspace: workspacesRouter,
     }),
 
     // ------------------------------------------------------------------------
