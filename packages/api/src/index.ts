@@ -2,6 +2,8 @@ import { router } from "./trpc";
 export { createContext } from "./trpc";
 // 📦 Domains
 import { boardRouter } from "./routers/board";
+import { boardManagementRouter } from "./routers/board-management";
+import { boardMembersRouter } from "./routers/board-members";
 import { listRouter } from "./routers/list";
 import { cardRouter } from "./routers/card";
 
@@ -26,6 +28,8 @@ export const appRouter = router({
     // ------------------------------------------------------------------------
     public: router({
       board: boardRouter,
+      boardManagement: boardManagementRouter,
+      boardMembers: boardMembersRouter,
       list: listRouter,
       card: cardRouter,
     }),
