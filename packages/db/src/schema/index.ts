@@ -10,3 +10,8 @@ export * from "./boardMembers";
 export * from "./labels";
 export * from "./checklists";
 export * from "./comments";
+// Auth & Multi-tenant
+export * from "./users";
+export * from "./workspaces";
+export * from "./workspaceMembers";
+export * from "./authTables";
