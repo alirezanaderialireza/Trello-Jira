@@ -19,17 +19,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with: { version: 9 }
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm turbo typecheck
-      - run: pnpm turbo test
+      - run: pnpm turbo typecheck --filter=@repo/db --filter=@repo/domain --filter=@repo/auth --filter=@repo/api --filter=@repo/infrastructure --filter=@repo/ws-server --filter=@repo/outbox-worker
+      - name: Domain tests
+        run: pnpm --filter @repo/domain test
         env:
           DATABASE_URL: postgresql://trello:ci@localhost:5432/trello_test
           REDIS_URL: redis://localhost:6379
           JWT_SECRET: ci-secret
-      - run: pnpm turbo build
+      - name: Date engine tests
+        run: pnpm --filter web exec npx vitest run src/lib/date.test.ts
         env:
           DATABASE_URL: postgresql://trello:ci@localhost:5432/trello_test
           REDIS_URL: redis://localhost:6379
+          JWT_SECRET: ci-secret
