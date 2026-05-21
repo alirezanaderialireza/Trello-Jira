@@ -29,6 +29,13 @@
       "when": 1779371000000,
       "tag": "0003_workspace_role_check",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1779372000000,
+      "tag": "0004_rls_split_policies",
+      "breakpoints": true
     }
   ]
 }
