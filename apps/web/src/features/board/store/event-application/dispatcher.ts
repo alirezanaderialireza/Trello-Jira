@@ -13,7 +13,20 @@ import type {
 } from "@repo/domain";
 
 import type { BoardStoreState } from "../useBoardStore";
-import { telemetry } from "../../devtools/logEvent";
+// Lazy import to avoid pulling zustand into pure unit tests via the devtools store.
+// telemetry is a no-op side-channel — the dispatcher works correctly without it.
+let telemetry: typeof import("../../devtools/logEvent").telemetry;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  telemetry = require("../../devtools/logEvent").telemetry;
+} catch {
+  // test environment — devtools not available
+  telemetry = {
+    log:      () => {},
+    mutation: () => {},
+    timeline: () => {},
+  } as any;
+}
 
 import type { ClientEventEnvelope } from "./types";
 import type { ReducerContext } from "./context";
