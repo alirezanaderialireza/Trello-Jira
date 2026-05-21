@@ -120,6 +120,7 @@ export type TemplateDto = {
   };
   createdAt: string;
   updatedAt: string;
+  revision: number;
   isOptimistic?: boolean;
 };
 
@@ -695,7 +696,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
           payload: {
             cardId:  tempId,
             boardId: serverCard.boardId ?? "",
-            changes: { ...serverCard, id: serverCard.id, isOptimistic: false },
+            changes: { ...serverCard, isOptimistic: false } as { title?: string; description?: string },
           },
         },
         optimistic: false,

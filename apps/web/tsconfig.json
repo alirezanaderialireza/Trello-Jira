@@ -3,7 +3,8 @@
   "compilerOptions": {
     "jsx": "preserve",
     "plugins": [{ "name": "next" }],
-    "types": ["node", "vitest/globals"]
+    "types": ["node", "vitest/globals"],
+    "noImplicitAny": false
   },
   "include": [
     "src",

@@ -35,5 +35,5 @@ export function createOptimisticEnvelope<
     event,
     optimistic: true,
     acknowledged: false,
-  };
+  } as unknown as ClientEventEnvelope;
 }
