@@ -1,52 +1,40 @@
 "use client";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Granular Error Boundaries (Phase 0.2 — checklist 0.5)
+// Granular Error Boundaries (Phase 0.5)
 //
 // Why:  Without these, a runtime error inside a single card renders the whole
 //       board white. With them, the failure is contained to its smallest
 //       reasonable scope and the rest of the UI keeps working.
 //
 // Scopes (matches the architecture map):
-//   • <BoardErrorBoundary>   — outermost; catches anything from the DnD
-//                              context, layout, or sync orchestrator.
+//   • <RootErrorBoundary>    — outermost; catches anything anywhere in the
+//                              tree that no narrower boundary already
+//                              caught. Mounted in app/layout.tsx.
+//   • <BoardErrorBoundary>   — catches the DnD context, layout, and sync
+//                              orchestrator inside a board.
 //   • <ListErrorBoundary>    — wraps each list column.
 //   • <CardErrorBoundary>    — wraps each card item.
 //   • <ModalErrorBoundary>   — wraps the card detail modal.
 //
-// Fingerprint:  every report carries `{ scope, entityKind, entityId, message,
-// componentStack }` so the same broken card across tabs / users surfaces with
-// the same fingerprint in our logs.
+// Reporting flow:
+//   componentDidCatch  →  buildFingerprint  →  reportError
+//                                                 │
+//                                                 ├── dedup
+//                                                 ├── POST /api/errors
+//                                                 └── localStorage queue
+//
+// All transport / dedup logic lives in `@/lib/error/reportError`. This
+// file only owns the React lifecycle plumbing and the per-scope fallback
+// UI.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import React from "react";
+import { buildFingerprint, reportError, type ErrorScope, type ErrorFingerprint } from "@/lib/error/reportError";
 
 // ============================================================================
 // Types
 // ============================================================================
-
-export type ErrorScope =
-  | "Board"
-  | "List"
-  | "Card"
-  | "Modal"
-  | "Unknown";
-
-export interface ErrorFingerprint {
-  scope: ErrorScope;
-  /** Domain entity kind ("board" | "list" | "card" | undefined). */
-  entityKind?: "board" | "list" | "card";
-  /** Specific entity id (boardId, listId, cardId). */
-  entityId?: string;
-  message: string;
-  /** First 500 chars of the React component stack — enough to locate the
-   *  failing component without bloating the log payload. */
-  componentStack?: string;
-  /** ISO-8601 UTC timestamp. */
-  timestamp: string;
-  /** Page URL at the time of the error (best-effort, only in browser). */
-  url?: string;
-}
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -55,8 +43,10 @@ interface ErrorBoundaryProps {
   entityKind?: "board" | "list" | "card";
   /** Specific entity id (boardId/listId/cardId) — used for fingerprinting. */
   entityId?: string;
-  fallback?: React.ReactNode;
+  /** Optional: render-prop fallback that receives the error and a reset fn. */
+  fallback?: React.ReactNode | ((error: Error, reset: () => void) => React.ReactNode);
   showRetry?: boolean;
+  /** Hook for callers that need to react to the error (e.g. close a modal). */
   onError?: (fingerprint: ErrorFingerprint) => void;
 }
 
@@ -69,6 +59,10 @@ interface ErrorBoundaryState {
 // ============================================================================
 // Core class component
 // ============================================================================
+//
+// Intentionally a class component. React still has no hook equivalent of
+// `getDerivedStateFromError` / `componentDidCatch`, so this is the one
+// place in the codebase where we accept a class component.
 
 export class ErrorBoundary extends React.Component<
   ErrorBoundaryProps,
@@ -81,58 +75,47 @@ export class ErrorBoundary extends React.Component<
   };
 
   static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
+    // Pure transition — no side effects. React calls this twice in Strict
+    // Mode; we keep it idempotent by not touching anything outside state.
     return { hasError: true, error };
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    const fingerprint: ErrorFingerprint = {
-      scope: this.props.scope,
+    const fp = buildFingerprint(error, this.props.scope, {
       entityKind: this.props.entityKind,
       entityId: this.props.entityId,
-      message: error.message,
-      componentStack: info.componentStack?.slice(0, 500) ?? undefined,
-      timestamp: new Date().toISOString(),
-      url:
-        typeof window !== "undefined"
-          ? window.location.href
-          : undefined,
-    };
+      componentStack: info.componentStack?.slice(0, 1000) ?? undefined,
+    });
 
-    // Always log structured to console — even in dev, for fast triage.
-    console.error(
-      `[ErrorBoundary:${fingerprint.scope}]`,
-      JSON.stringify(fingerprint),
-      error,
-    );
+    // Centralised dedup + transport lives in reportError.
+    reportError(fp);
 
-    // Best-effort report to backend in production.
-    if (process.env.NODE_ENV === "production" && typeof window !== "undefined") {
-      try {
-        fetch("/api/report-error", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...fingerprint,
-            stack: error.stack?.slice(0, 1000),
-          }),
-          keepalive: true,
-        }).catch(() => {});
-      } catch {
-        // Swallow transport failures — never let logging break the UI.
-      }
-    }
+    // Caller-supplied side-effect hook (e.g. close a modal, reset a store).
+    this.props.onError?.(fp);
 
-    this.props.onError?.(fingerprint);
     this.setState((prev) => ({ errorCount: prev.errorCount + 1 }));
   }
 
   private _handleRetry = () => {
+    // Soft retry: just clear the error flag. The React tree re-renders
+    // children, which usually recovers when the cause was a transient
+    // bug. If it throws again, errorCount climbs and the fallback
+    // disables the retry button at >3 (see `tooManyErrors`).
     this.setState({ hasError: false, error: null });
   };
 
   render() {
     if (!this.state.hasError) return this.props.children;
-    if (this.props.fallback) return this.props.fallback;
+
+    // Caller-supplied fallback wins — render-prop or static node.
+    if (this.props.fallback) {
+      return typeof this.props.fallback === "function"
+        ? (this.props.fallback as (e: Error, r: () => void) => React.ReactNode)(
+            this.state.error!,
+            this._handleRetry,
+          )
+        : this.props.fallback;
+    }
 
     const showRetry = this.props.showRetry !== false;
     const tooManyErrors = this.state.errorCount > 3;
@@ -168,6 +151,82 @@ export class ErrorBoundary extends React.Component<
 // ============================================================================
 // Scope-specific wrappers (cheap to render, easy to drop in)
 // ============================================================================
+
+/**
+ * Top-of-tree boundary for the entire app. Mounted in `app/layout.tsx`.
+ * Catches anything that escaped the per-route / per-feature boundaries —
+ * usually shell crashes (providers, devtools, root navigation).
+ *
+ * Uses a deliberately unstyled / minimal fallback because the design
+ * system itself may be the thing that crashed. The user gets a plain
+ * "Reload" button; everything else is the browser default.
+ */
+export function RootErrorBoundary({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <ErrorBoundary
+      scope="Root"
+      fallback={
+        <div
+          dir="rtl"
+          style={{
+            minHeight: "100vh",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: "#fbfbfd",
+            color: "#1d1d1f",
+            padding: "1rem",
+            fontFamily: "system-ui, -apple-system, sans-serif",
+          }}
+        >
+          <div
+            style={{
+              maxWidth: 480,
+              width: "100%",
+              backgroundColor: "white",
+              padding: "2rem",
+              borderRadius: 16,
+              boxShadow: "0 8px 30px rgba(0,0,0,0.04)",
+              border: "1px solid #f0f0f0",
+              textAlign: "center",
+            }}
+          >
+            <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 8 }}>
+              مشکلی غیرمنتظره پیش آمد
+            </h1>
+            <p style={{ fontSize: 14, color: "#6b7280", marginBottom: 24 }}>
+              صفحه را بارگذاری مجدد کنید. اگر مشکل ادامه داشت با پشتیبانی تماس
+              بگیرید.
+            </p>
+            <button
+              onClick={() => {
+                if (typeof window !== "undefined") window.location.reload();
+              }}
+              style={{
+                padding: "10px 20px",
+                borderRadius: 10,
+                fontSize: 14,
+                fontWeight: 500,
+                color: "white",
+                backgroundColor: "#0A2540",
+                border: "none",
+                cursor: "pointer",
+              }}
+            >
+              بارگذاری مجدد
+            </button>
+          </div>
+        </div>
+      }
+    >
+      {children}
+    </ErrorBoundary>
+  );
+}
 
 /**
  * Outermost boundary for the whole board view. Catches DnD context / sync
@@ -271,3 +330,6 @@ export function ModalErrorBoundary({
     </ErrorBoundary>
   );
 }
+
+// Re-export helper types for consumers who want to write their own hooks.
+export type { ErrorFingerprint, ErrorScope };
