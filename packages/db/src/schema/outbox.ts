@@ -1,72 +1,63 @@
-// packages/db/src/schema/outbox.ts
-//
-// Fixes applied:
-// ✅ BUG-011: sequence changed from integer (32-bit) to bigint.
-//             At 100 events/sec, integer overflows in ~248 days.
-// ✅ BUG-015: aggregateId changed from uuid to varchar(128).
-//             UUID enforces a strict format at DB level. If any aggregate ever
-//             uses cuid2 or a prefixed ID (e.g. "board_abc123"), INSERT fails.
-//             varchar(128) is safe for UUIDs and any future ID format.
-
-import {
-  pgTable,
-  uuid,
-  varchar,
-  bigint,
-  timestamp,
-  jsonb,
-  index,
-} from "drizzle-orm/pg-core";
+import { pgTable, uuid, varchar, integer, timestamp, jsonb, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+
+// ============================================================================
+// 🗄️ Outbox Events Table
+// ============================================================================
+// وظیفه: ذخیره رویدادهای منتشر نشده (یا منتشرشده) برای event sourcing / outbox pattern
+// تضمین می‌کند که تمام تغییرات در Aggregateها با ترتیب و sequence صحیح ثبت شوند.
+// ============================================================================
 
 export const outboxEvents = pgTable(
   "outbox_events",
   {
     // =========================================================================
-    // Identity
+    // 🔹 Identity
     // =========================================================================
     eventId: uuid("event_id").primaryKey().defaultRandom(),
 
     // =========================================================================
-    // Schema Version
+    // 🔹 Schema Version
     // =========================================================================
     eventVersion: varchar("event_version", { length: 32 }).notNull(),
 
     // =========================================================================
-    // ✅ BUG-015: varchar instead of uuid — future-proof for non-UUID aggregate IDs
+    // 🔹 Aggregate Reference
     // =========================================================================
-    aggregateId:   varchar("aggregate_id",   { length: 128 }).notNull(),
-    aggregateType: varchar("aggregate_type", { length: 64  }).notNull(),
+    aggregateId: uuid("aggregate_id").notNull(), // رفرنس به Board, List یا Card
+    aggregateType: varchar("aggregate_type", { length: 64 }).notNull(),
 
     // =========================================================================
-    // Event Metadata
+    // 🔹 Event Metadata
     // =========================================================================
-    type:      varchar("type",     { length: 128 }).notNull(),
-    // ✅ BUG-011: bigint — no 32-bit overflow
-    sequence:  bigint("sequence",  { mode: "number" }).notNull(),
+    type: varchar("type", { length: 128 }).notNull(),
+    sequence: integer("sequence").notNull(),
     occurredAt: timestamp("occurred_at").notNull().defaultNow(),
 
-    causationId:  varchar("causation_id",  { length: 128 }),
+    causationId: varchar("causation_id", { length: 128 }),
     correlationId: varchar("correlation_id", { length: 128 }),
 
     // =========================================================================
-    // Payload
+    // 🔹 Payload
     // =========================================================================
     payload: jsonb("payload").notNull(),
 
     // =========================================================================
-    // Processing State
+    // 🔹 Processing State
     // =========================================================================
-    processedAt: timestamp("processed_at"), // NULL = not yet processed
+    processedAt: timestamp("processed_at"), // نال بودن یعنی هنوز پردازش نشده
   },
   (table) => ({
+    // =========================================================================
+    // 🔹 Indexes
+    // =========================================================================
     unprocessedIdx: index("outbox_unprocessed_idx")
       .on(table.processedAt)
       .where(sql`${table.processedAt} IS NULL`),
 
     aggregateSequenceIdx: index("outbox_agg_seq_idx")
       .on(table.aggregateId, table.sequence),
-  }),
+  })
 );
 
 // =============================================================================

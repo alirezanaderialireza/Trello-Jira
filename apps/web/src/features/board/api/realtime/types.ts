@@ -1,93 +1,78 @@
 // apps/web/src/features/board/api/realtime/types.ts
-//
-// Phase-0 fix #1 — WsEvent unified source of truth.
-//
-// Previously WsEvent was defined twice:
-//   • apps/web/src/features/board/api/realtime/types.ts  (payload: any)
-//   • apps/web/src/features/board/store/useBoardStore.ts (payload: AppDomainEvent)
-//
-// useBoardStore.ts re-exported WsEvent used by reconcileIncomingEvent, but
-// types.ts had `payload: any` which bypassed all type checking at the WS
-// ingress boundary.
-//
-// Fix: canonical WsEvent with payload: AppDomainEvent lives here.
-//      useBoardStore.ts re-exports it from this file (no duplicate).
 
 import type { AppDomainEvent } from "@repo/domain";
 
-// ============================================================================
-// ⭐ Canonical WsEvent — single source of truth
-// ============================================================================
-
 /**
- * A raw message arriving over the WebSocket transport layer.
- *
- * sequence  — bigint-safe decimal string; globally monotonic per board.
- * type      — mirrors the DomainEvent.type — used for quick routing without
- *             deserialising the full payload.
- * payload   — fully typed AppDomainEvent; never `any`.
+ * 📡 WebSocket Message Types
+ * انواع پیام‌هایی که بین کلاینت و سرور رد و بدل می‌شوند.
  */
 export interface WsEvent {
-  readonly sequence: string;        // bigint-safe decimal string e.g. "1042"
-  readonly type:     string;        // mirrors AppDomainEvent.type
-  readonly payload:  AppDomainEvent;
+  sequence: string;
+  type: string;
+  payload: any; // یا AppDomainEvent اگه ایمپورتش کردی
 }
-
-// ============================================================================
-// WebSocket message types (server → client)
-// ============================================================================
-
-export type WsMessageType =
-  | "SUBSCRIBE"       // client subscription request
-  | "UNSUBSCRIBE"     // cancel subscription
-  | "EVENT"           // domain event payload
-  | "SYSTEM"          // system messages (errors, confirmations)
-  | "HEARTBEAT"       // keep-alive
-  | "RESYNC_REQUIRED"; // server ordering gap unrecoverable
+export type WsMessageType = 
+  | "SUBSCRIBE"        // درخواست کلاینت برای گوش دادن به یک بورد
+  | "UNSUBSCRIBE"      // لغو اشتراک
+  | "EVENT"            // رویدادهای دامین (کارت، لیست و غیره)
+  | "SYSTEM"           // پیام‌های سیستمی (خطا، تایید اتصال)
+  | "HEARTBEAT"        // برای زنده نگه داشتن کانکشن
+  | "RESYNC_REQUIRED"; // وقتی Gap غیرقابل جبران باشد
 
 /**
- * Full envelope received from the WebSocket server.
+ * 📦 The Real-time Envelope (Server to Client)
+ * ساختار پیامی که از سمت سرور وب‌ساکت دریافت می‌شود.
  */
 export interface RealtimeMessage {
-  type:      WsMessageType;
+  // نوع پیام برای دیسپچ کردن در کلاینت
+  type: WsMessageType;
+
+  // 🔢 توالی جهانی (Sequence) برای سیستم Gap Detection
+  // این مقدار باید به صورت String باشد چون BigInt در JSON پشتیبانی نمی‌شود.
   sequence?: string;
-  payload?:  AppDomainEvent;
+
+  // ✉️ بدنه اصلی رویداد دامین (اگر نوع پیام EVENT باشد)
+  payload?: AppDomainEvent;
+
+  // دیتای اضافی سیستمی (مثل کد خطا یا پیام متنی)
   meta?: {
-    timestamp:    string;
-    reason?:      string;
+    timestamp: string;
+    reason?: string;
     connectionId?: string;
   };
 }
 
 /**
- * Message sent from client to WebSocket server.
+ * 📥 Client Request Payload
+ * ساختار درخواستی که کلاینت به سمت سرور می‌فرستد.
  */
 export interface RealtimeRequest {
-  action:        "subscribe" | "unsubscribe" | "ping";
-  boardId:       string;
+  action: "subscribe" | "unsubscribe" | "ping";
+  boardId: string;
+  // آخرین توالی که کلاینت دریافت کرده (برای سیستم بازسازی خودکار تاریخچه)
   lastSequence?: string;
-  token?:        string;
+  token?: string;
 }
 
-// ============================================================================
-// Connection status
-// ============================================================================
+/**
+ * 🚦 Connection Health Status
+ * وضعیت فیزیکی و منطقی اتصال به سرور
+ */
+export type RealtimeStatus = 
+  | "CONNECTING"   // در حال تلاش برای برقراری اتصال
+  | "CONNECTED"    // متصل و آماده دریافت
+  | "DISCONNECTED" // قطع شده
+  | "RECONNECTING" // در حال تلاش مجدد خودکار
+  | "SUBSCRIBED"   // متصل به اتاقِ بورد خاص
+  | "ERROR";       // خطای سیستمی
 
-export type RealtimeStatus =
-  | "CONNECTING"
-  | "CONNECTED"
-  | "DISCONNECTED"
-  | "RECONNECTING"
-  | "SUBSCRIBED"
-  | "ERROR";
-
-// ============================================================================
-// Sequence gap analysis
-// ============================================================================
-
+/**
+ * 🛠️ Gap Analysis Result
+ * خروجی سیستم تحلیل توالی پیام‌ها
+ */
 export interface SequenceGap {
-  detected:     boolean;
+  detected: boolean;
   missingCount: number;
-  expectedSeq:  bigint;
-  receivedSeq:  bigint;
+  expectedSeq: bigint;
+  receivedSeq: bigint;
 }
