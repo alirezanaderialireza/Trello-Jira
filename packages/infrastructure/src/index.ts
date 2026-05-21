@@ -28,7 +28,8 @@ export { AuthMetrics } from "./auth/observability/authMetrics";
 export { ReplayAttackDetector } from "./auth/observability/replayAttackDetector";
 export { AnomalyDetector } from "./auth/observability/anomalyDetector";
 export { computeFingerprint, verifyFingerprint } from "./auth/observability/sessionFingerprint";
-export type { FingerprintComponents, FingerprintMismatch, FingerprintResult, RiskLevel } from "./auth/observability/sessionFingerprint";
+export type { FingerprintComponents, FingerprintMismatch, FingerprintResult } from "./auth/observability/sessionFingerprint";
+export type { RiskLevel } from "./auth/observability/anomalyDetector";
 
 // Phase 2: Service-to-Service Auth
 export { ServiceTokenService, ServiceAuthError } from "./auth/serviceAuth/serviceTokenService";

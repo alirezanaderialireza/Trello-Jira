@@ -11,9 +11,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@repo/domain": "workspace:*",
-    "@repo/auth": "workspace:*",
     "@node-rs/argon2": "^2.0.2",
+    "@repo/auth": "workspace:*",
+    "@repo/domain": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "ioredis": "^5.10.1"
   },
   "devDependencies": {

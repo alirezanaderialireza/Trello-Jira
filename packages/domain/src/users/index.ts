@@ -8,8 +8,8 @@ export type NormalizedEmail = string & { readonly __brand: "NormalizedEmail" };
 
 export function normalizeEmail(raw: string): NormalizedEmail {
   const normalized = raw.toLowerCase().trim();
-  if (normalized.length > 254) throw new Error(`Invalid email: too long (${normalized.length} > 254)`);
-  if (!normalized || !normalized.includes("@") || normalized.length > 254) {
+  if (normalized.length >= 254) throw new Error(`Invalid email: too long (${normalized.length} >= 254)`);
+  if (!normalized || !normalized.includes("@")) {
     throw new Error(`Invalid email: "${raw}"`);
   }
   return normalized as NormalizedEmail;

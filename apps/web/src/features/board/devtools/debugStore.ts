@@ -16,7 +16,12 @@ export type LogSource =
   | "CURSOR"
   | "SELECTION"
   | "AWARENESS"
-  | "MUTATION_ACK";
+  | "MUTATION_ACK"
+  | "REALTIME_CLIENT"
+  | "SYNC_FSM"
+  | "CONNECTION_FSM"
+  | "OUTBOX"
+  | "TAB_COORDINATION";
 
 export type MutationLifecycleState = 
   | "CREATED"

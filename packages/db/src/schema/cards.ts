@@ -8,11 +8,11 @@ import {
   jsonb,
   timestamp,
   uniqueIndex,
-import { workspaces } from "./workspaces";
   index,
   integer,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import { workspaces } from "./workspaces";
 
 import { boards } from "./boards";
 import { lists } from "./lists";

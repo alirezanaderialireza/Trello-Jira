@@ -15,3 +15,4 @@ export * from "./users";
 export * from "./workspaces";
 export * from "./workspaceMembers";
 export * from "./authTables";
+export * from "./sessions";

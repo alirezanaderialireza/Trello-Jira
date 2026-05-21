@@ -28,9 +28,9 @@ export const accounts = pgTable(
 );
 
 // ============================================================================
-// Sessions — database sessions (revocable)
+// Sessions — Auth.js database sessions
 // ============================================================================
-export const sessions = pgTable("sessions", {
+export const authSessions = pgTable("auth_sessions", {
   sessionToken: text("session_token").primaryKey(),
   userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
   expires: timestamp("expires", { withTimezone: true }).notNull(),

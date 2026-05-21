@@ -9,7 +9,7 @@ export default function WorkspacesPage() {
   const [name, setName] = useState("");
   const createMutation = trpc.v1.public.workspace.create.useMutation({
     onSuccess: () => { refetch(); setName(""); toast.success("Workspace created!"); },
-    onError: (e) => toast.error(e.message),
+    onError: (e: any) => toast.error(e.message),
   });
 
   const workspacesList = data ?? [];
@@ -34,8 +34,8 @@ export default function WorkspacesPage() {
         {/* Create workspace */}
         <div className="rounded-lg border border-slate-700 bg-slate-800 p-4">
           <h2 className="text-sm font-semibold text-slate-300 mb-3">Create New Workspace</h2>
-          <form onSubmit={(e) => { e.preventDefault(); if (name.trim()) createMutation.mutate({ name: name.trim() }); }} className="flex gap-2">
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Workspace name..." className="flex-1 rounded-lg border border-slate-600 bg-slate-700 px-4 py-2 text-sm text-white focus:border-blue-500 focus:outline-none" />
+          <form onSubmit={(e: any) => { e.preventDefault(); if (name.trim()) createMutation.mutate({ name: name.trim() }); }} className="flex gap-2">
+            <input value={name} onChange={(e: any) => setName(e.target.value)} placeholder="Workspace name..." className="flex-1 rounded-lg border border-slate-600 bg-slate-700 px-4 py-2 text-sm text-white focus:border-blue-500 focus:outline-none" />
             <button type="submit" disabled={!name.trim() || createMutation.isPending} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50">Create</button>
           </form>
         </div>

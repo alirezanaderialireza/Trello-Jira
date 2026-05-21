@@ -12,24 +12,25 @@ module.exports = {
   settings: {
     "boundaries/elements": [
       { type: "app", pattern: "apps/**" },
-      { type: "worker", pattern: "apps/worker/**" },
+      { type: "outbox-worker", pattern: "apps/outbox-worker/**" },
       { type: "api", pattern: "packages/api/**" },
       { type: "db", pattern: "packages/db/**" },
       { type: "domain", pattern: "packages/domain/**" },
-      { type: "ui", pattern: "packages/ui/**" },
-      { type: "validators", pattern: "packages/validators/**" },
-      { type: "time-engine", pattern: "packages/time-engine/**" }
+      { type: "infrastructure", pattern: "packages/infrastructure/**" },
+      { type: "auth", pattern: "packages/auth/**" }
     ],
   },
   rules: {
     "boundaries/element-types": [2, {
       default: "disallow",
       rules: [
-        { from: "app", allow: ["api", "domain", "ui", "validators", "time-engine"] },
-        { from: "worker", allow: ["db", "domain", "api", "time-engine"] },
-        { from: "api", allow: ["domain", "validators", "time-engine"] },
-        { from: "domain", allow: ["time-engine", "validators"] },
-        { from: "db", allow: ["validators"] }
+        { from: "app", allow: ["api", "domain", "infrastructure", "auth", "db"] },
+        { from: "outbox-worker", allow: ["db", "domain", "api", "infrastructure"] },
+        { from: "api", allow: ["domain", "db", "auth", "infrastructure"] },
+        { from: "domain", allow: [] },
+        { from: "db", allow: ["domain"] },
+        { from: "infrastructure", allow: ["domain", "auth"] },
+        { from: "auth", allow: ["domain"] }
       ]
     }],
     "no-restricted-imports": ["error", { patterns: ["../../../../*"] }]

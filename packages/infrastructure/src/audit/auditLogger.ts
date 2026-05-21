@@ -52,9 +52,9 @@ export interface AuditEntry {
 // SIEM event shape (published to Redis)
 // ============================================================================
 
-interface SiemEvent extends AuditEntry {
+interface SiemEvent extends Omit<AuditEntry, "occurredAt"> {
   id: string;
-  occurredAt: string; // ISO string
+  occurredAt: string; // ISO string (serialized from AuditEntry.occurredAt Date)
   schemaVersion: "v1";
 }
 
