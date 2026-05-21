@@ -25,7 +25,7 @@ import { sql } from "drizzle-orm";
 // used to detect replay attacks during rotation.
 // ============================================================================
 
-export const sessions = pgTable(
+export const jwtSessions = pgTable(
   "sessions",
   {
     // -------------------------------------------------------------------------
@@ -124,7 +124,7 @@ export const revokedTokens = pgTable(
 // =============================================================================
 // Types
 // =============================================================================
-export type Session = typeof sessions.$inferSelect;
-export type NewSession = typeof sessions.$inferInsert;
+export type Session = typeof jwtSessions.$inferSelect;
+export type NewSession = typeof jwtSessions.$inferInsert;
 export type RevokedToken = typeof revokedTokens.$inferSelect;
 export type NewRevokedToken = typeof revokedTokens.$inferInsert;

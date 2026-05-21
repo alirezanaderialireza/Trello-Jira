@@ -30,3 +30,9 @@ pnpm-debug.log*
 
 # typescript build artifacts
 *.tsbuildinfo
+
+
+# archives (should not be in version control)
+*.zip
+*.rar
+*.web

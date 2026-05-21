@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with: { version: 9 }
+        with: { version: 10 }
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: pnpm }
       - run: pnpm install --frozen-lockfile
@@ -29,10 +29,7 @@ jobs:
           DATABASE_URL: postgresql://trello:ci@localhost:5432/trello_test
           REDIS_URL: redis://localhost:6379
           JWT_SECRET: ci-secret
-      # Build is currently disabled due to a tRPC v10/v11 peer-dependency
-      # mismatch (`@trpc/client@11` + `@trpc/server@10`). Re-enable after
-      # aligning trpc versions across the monorepo.
-      # - run: pnpm turbo build
-      #   env:
-      #     DATABASE_URL: postgresql://trello:ci@localhost:5432/trello_test
-      #     REDIS_URL: redis://localhost:6379
+      - run: pnpm turbo build
+        env:
+          DATABASE_URL: postgresql://trello:ci@localhost:5432/trello_test
+          REDIS_URL: redis://localhost:6379
