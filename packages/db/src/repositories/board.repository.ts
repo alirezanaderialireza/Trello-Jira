@@ -1,4 +1,14 @@
 // packages/db/src/repositories/board.repository.ts
+//
+// Fixes applied:
+// ✅ BUG-001: findById — query.for("update") return value was discarded.
+//             Drizzle's .for() is immutable — it returns a NEW query object.
+//             Old code: query.for("update") → result thrown away, lock never applied.
+//             Fix: reassign → query = query.for("update")
+// ✅ BUG-008: save() — added expectedRevision OCC guard.
+//             Without it a stale in-memory entity silently overwrites the latest
+//             DB state (lost-update anomaly under concurrent edits).
+//             save() now returns boolean so callers can detect conflicts.
 
 import { eq, and, isNull, sql } from "drizzle-orm";
 import type {
@@ -25,7 +35,7 @@ export class DrizzleBoardRepository implements BoardRepository<DbTx> {
   constructor(private readonly db: DbTx) {}
 
   // ==========================================================================
-  // findById — Tenant-safe, Soft Delete-aware
+  // findById — Tenant-safe, Soft Delete-aware, FOR UPDATE-safe
   // ==========================================================================
 
   async findById(
@@ -33,21 +43,21 @@ export class DrizzleBoardRepository implements BoardRepository<DbTx> {
     options?: FindOptions<DbTx>,
   ): Promise<Board | null> {
     const db = options?.tx ?? this.db;
-    const conditions = [eq(boards.id, id), isNull(boards.deletedAt)];
 
+    const conditions = [eq(boards.id, id), isNull(boards.deletedAt)];
     if (options?.tenantId) {
       conditions.push(eq(boards.tenantId, options.tenantId));
     }
 
-    // ✅ FOR UPDATE — از FindOptions.forUpdate می‌خوانیم نه متد جداگانه
-    const query = db
+    // ✅ BUG-001: reassign so the lock is actually applied
+    let query = db
       .select()
       .from(boards)
       .where(and(...conditions))
       .limit(1);
 
     if (options?.forUpdate) {
-      query.for("update");
+      query = query.for("update");   // ← was: query.for("update") (discarded)
     }
 
     const result = await query;
@@ -55,43 +65,53 @@ export class DrizzleBoardRepository implements BoardRepository<DbTx> {
   }
 
   // ==========================================================================
-  // create — ✅ fix: امضا با interface هماهنگ شد: create(board, tx?)
-  // قبلاً: create(tx, board) — برعکس interface بود
+  // create — aligned with domain port: create(board, tx?)
   // ==========================================================================
 
   async create(board: Board, tx?: DbTx): Promise<void> {
     const db = tx ?? this.db;
-
     await db.insert(boards).values({
-      id: board.id,
-      tenantId: board.tenantId,
-      title: board.title,
-      revision: board.revision,
+      id:         board.id,
+      tenantId:   board.tenantId,
+      title:      board.title,
+      revision:   board.revision,
       aclVersion: board.aclVersion,
       archivedAt: board.archivedAt ?? null,
-      createdAt: board.createdAt,
-      updatedAt: board.updatedAt,
-      deletedAt: board.deletedAt ?? null,
+      createdAt:  board.createdAt,
+      updatedAt:  board.updatedAt,
+      deletedAt:  board.deletedAt ?? null,
     });
   }
 
   // ==========================================================================
   // save — OCC-safe
-  // ✅ fix: expectedRevision حذف شد — interface این پارامتر را ندارد
-  // OCC از طریق WHERE clause روی revision انجام می‌شود اگر board.revision تغییر کرده باشد
+  // ✅ BUG-008: added expectedRevision guard; returns boolean for conflict detection
   // ==========================================================================
 
-  async save(tx: DbTx, board: Board): Promise<void> {
-    await tx
+  async save(tx: DbTx, board: Board, expectedRevision?: number): Promise<boolean> {
+    const conditions: ReturnType<typeof eq>[] = [
+      eq(boards.id, board.id),
+      isNull(boards.deletedAt),
+    ];
+
+    if (expectedRevision !== undefined) {
+      conditions.push(eq(boards.revision, expectedRevision));
+    }
+
+    const result = await tx
       .update(boards)
       .set({
-        title: board.title,
-        revision: board.revision,
+        title:      board.title,
+        revision:   board.revision,
         aclVersion: board.aclVersion,
         archivedAt: board.archivedAt ?? null,
-        updatedAt: new Date(),
+        deletedAt:  board.deletedAt  ?? null,
+        updatedAt:  new Date(),
       })
-      .where(and(eq(boards.id, board.id), isNull(boards.deletedAt)));
+      .where(and(...conditions))
+      .returning({ id: boards.id });
+
+    return result.length > 0;
   }
 
   // ==========================================================================
@@ -102,7 +122,7 @@ export class DrizzleBoardRepository implements BoardRepository<DbTx> {
     const result = await tx
       .update(boards)
       .set({
-        revision: sql`${boards.revision} + 1`,
+        revision:  sql`${boards.revision} + 1`,
         updatedAt: new Date(),
       })
       .where(and(eq(boards.id, boardId), isNull(boards.deletedAt)))
@@ -121,14 +141,14 @@ export class DrizzleBoardRepository implements BoardRepository<DbTx> {
 
   private mapToDomain(row: typeof boards.$inferSelect): Board {
     return {
-      id: row.id as BoardId,
-      tenantId: row.tenantId as TenantId,
-      title: row.title,
-      revision: row.revision as Revision,
+      id:         row.id         as BoardId,
+      tenantId:   row.tenantId   as TenantId,
+      title:      row.title,
+      revision:   row.revision   as Revision,
       aclVersion: row.aclVersion,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      deletedAt: row.deletedAt ?? null,
+      createdAt:  row.createdAt,
+      updatedAt:  row.updatedAt,
+      deletedAt:  row.deletedAt  ?? null,
       archivedAt: row.archivedAt ?? null,
     };
   }
