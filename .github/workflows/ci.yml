@@ -1,0 +1,35 @@
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request: { branches: [main] }
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: trello, POSTGRES_PASSWORD: ci, POSTGRES_DB: trello_test }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U trello" --health-interval 5s --health-timeout 3s --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm turbo typecheck
+      - run: pnpm turbo test
+        env:
+          DATABASE_URL: postgresql://trello:ci@localhost:5432/trello_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: ci-secret
+      - run: pnpm turbo build
+        env:
+          DATABASE_URL: postgresql://trello:ci@localhost:5432/trello_test
+          REDIS_URL: redis://localhost:6379
