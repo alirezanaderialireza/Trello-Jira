@@ -255,6 +255,7 @@ function mapDomainErrorToClient(reason: DomainErrorReason): ClientListMutationRe
   switch (reason) {
     case "STALE_REVISION":
     case "COMMAND_EXPIRED":
+    case "CARD_LOCKED":
       return {
         success: false,
         reason: "SYNC_CONFLICT",
