@@ -1,6 +1,15 @@
 // packages/domain/src/workspaces/__tests__/workspaces.test.ts
 import { describe, it, expect } from "vitest";
-import { validateSlug, generateSlugFromName, createPersonalWorkspace, isValidRole } from "../index";
+import {
+  validateSlug,
+  generateSlugFromName,
+  createPersonalWorkspace,
+  isValidRole,
+  canManageMembers,
+  canDeleteWorkspace,
+  WORKSPACE_ROLES,
+  type WorkspaceRole,
+} from "../index";
 
 describe("Workspace Domain — Slug", () => {
   it("validates correct slug", () => { expect(validateSlug("my-workspace-1")).toBe(true); });
@@ -34,6 +43,36 @@ describe("Workspace Domain — Roles", () => {
   it("validates OWNER", () => { expect(isValidRole("OWNER")).toBe(true); });
   it("validates MEMBER", () => { expect(isValidRole("MEMBER")).toBe(true); });
   it("rejects invalid", () => { expect(isValidRole("SUPERADMIN")).toBe(false); });
+
+  // ── Regression guards: keep DB CHECK constraint in 0003 in lockstep ──
+  it("WORKSPACE_ROLES contains exactly 4 values", () => {
+    expect(WORKSPACE_ROLES).toHaveLength(4);
+  });
+
+  it("WORKSPACE_ROLES holds OWNER, ADMIN, MEMBER, VIEWER (in order)", () => {
+    expect([...WORKSPACE_ROLES]).toEqual(["OWNER", "ADMIN", "MEMBER", "VIEWER"]);
+  });
+
+  it("isValidRole rejects empty string and case-mismatch", () => {
+    expect(isValidRole("")).toBe(false);
+    expect(isValidRole("owner")).toBe(false);
+    expect(isValidRole("Member")).toBe(false);
+  });
+
+  // ── Permission helpers ──────────────────────────────────────────────
+  it("canManageMembers: OWNER and ADMIN only", () => {
+    const truthy: WorkspaceRole[] = ["OWNER", "ADMIN"];
+    const falsy: WorkspaceRole[] = ["MEMBER", "VIEWER"];
+    truthy.forEach((r) => expect(canManageMembers(r)).toBe(true));
+    falsy.forEach((r) => expect(canManageMembers(r)).toBe(false));
+  });
+
+  it("canDeleteWorkspace: OWNER only", () => {
+    expect(canDeleteWorkspace("OWNER")).toBe(true);
+    (["ADMIN", "MEMBER", "VIEWER"] as WorkspaceRole[]).forEach((r) =>
+      expect(canDeleteWorkspace(r)).toBe(false),
+    );
+  });
 });
 
 describe("Workspace Domain — createPersonalWorkspace", () => {
