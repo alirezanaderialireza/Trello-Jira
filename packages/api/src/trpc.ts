@@ -1,7 +1,9 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { AsyncLocalStorage } from "async_hooks";
-import { z } from "zod";
+
+// 📦 Auth
+import { getSessionFromRequest, type AuthSession } from "@repo/auth";
 
 // 📦 Database
 import { db } from "@repo/db";
@@ -15,7 +17,11 @@ import {
   DrizzleIdempotencyRepository,
   DrizzleSequenceRepository,
   BoardReadModels,
+  boardMembers,
 } from "@repo/db";
+
+// 📦 ORM operators (for board membership guard)
+import { eq, and, isNull } from "drizzle-orm";
 
 // 📦 Infrastructure
 import {
@@ -27,21 +33,6 @@ import {
   RedisPresenceStore,
   RedisPubSub,
 } from "@repo/infrastructure";
-
-// 🌟 ACL Engine + Membership Cache
-import { AclEngine } from "@repo/infrastructure/auth/aclEngine";
-import { MembershipCache } from "@repo/infrastructure/redis/membershipCache";
-import type { BoardPermission } from "@repo/infrastructure/auth/aclEngine";
-
-// 🌟 Audit Logger
-import { AuditLogger } from "@repo/infrastructure/audit/auditLogger";
-
-// 🌟 Phase 2: Card-level ACL, Live ACL, Auth Observability
-import { CardAclEngine } from "@repo/infrastructure/auth/cardAclEngine";
-import { AclInvalidationBus } from "@repo/infrastructure/auth/liveAcl/aclInvalidationBus";
-import { AuthMetrics } from "@repo/infrastructure/auth/observability/authMetrics";
-import { AnomalyDetector } from "@repo/infrastructure/auth/observability/anomalyDetector";
-import { ReplayAttackDetector } from "@repo/infrastructure/auth/observability/replayAttackDetector";
 
 // 🌟 Services
 import { BoardService } from "./services/board.service";
@@ -84,22 +75,6 @@ const presenceStore =
 const pubsub = new RedisPubSub(
   redisManager.pubsub
 );
-
-// 🌟 ACL + Membership Cache + Audit
-const aclEngine = new AclEngine(dbInstance, redisManager.client);
-const membershipCache = new MembershipCache(
-  redisManager.client,
-  redisManager.pubsub, // dedicated sub connection
-  dbInstance,
-);
-const auditLogger = new AuditLogger(dbInstance, redisManager.client);
-
-// 🌟 Phase 2: Card-level ACL + Auth Observability
-const cardAclEngine = new CardAclEngine(aclEngine, dbInstance, redisManager.client);
-const aclInvalidationBus = new AclInvalidationBus(redisManager.pubsub);
-const authMetrics = new AuthMetrics(redisManager.client);
-const anomalyDetector = new AnomalyDetector(authMetrics);
-const replayAttackDetector = new ReplayAttackDetector(redisManager.client, authMetrics);
 
 // ============================================================================
 // 🧠 ALS
@@ -162,22 +137,6 @@ const infrastructure = Object.freeze({
   presenceStore,
 
   pubsub,
-
-  aclEngine,
-
-  membershipCache,
-
-  auditLogger,
-
-  cardAclEngine,
-
-  aclInvalidationBus,
-
-  authMetrics,
-
-  anomalyDetector,
-
-  replayAttackDetector,
 });
 
 // ============================================================================
@@ -339,6 +298,22 @@ export async function createContext(opts: {
       startedAt,
     });
 
+  // ── Session resolution ─────────────────────────────────────────────────────
+  // Priority: explicit opts.session > extract from request > null
+  let session: Session | null = opts.session ?? null;
+
+  if (!session && opts.req) {
+    const authSession: AuthSession | null = await getSessionFromRequest(opts.req);
+    if (authSession) {
+      session = {
+        user: authSession.user,
+        tenantId: authSession.tenantId,
+        aclVersion: authSession.aclVersion,
+        roles: authSession.roles,
+      };
+    }
+  }
+
   return {
     // infra
     infra: infrastructure,
@@ -353,7 +328,7 @@ export async function createContext(opts: {
     services,
 
     // auth
-    session: opts.session ?? null,
+    session,
 
     // request abort signal
     reqSignal: opts.req?.signal,
@@ -644,99 +619,81 @@ export const protectedProcedure =
     .use(tenantGuard);
 
 // ============================================================================
-// 🛡️ boardScopedProcedure
-// ----------------------------------------------------------------------------
-// Used for ALL board, list, and card mutations.
-// Requires `boardId` in input (validated as UUID).
-// Injects `boardRole` and `boardAclVersion` into context for downstream use.
-// Rejects if user has NONE role (not a member of the board).
+// 🛡️ Board Membership Guard
+// ============================================================================
+// Checks that the authenticated user is an active member of the board
+// specified in the input. Works with any input shape that has a `boardId` field.
+// Adds `boardMembership` to context for downstream role checks.
 // ============================================================================
 
-/**
- * ACL middleware factory — accepts the permission to enforce.
- * Usage:
- *   export const boardScopedProcedure = makeBoardScopedProcedure("card:create");
- */
-export function makeBoardScopedProcedure(permission: BoardPermission) {
-  return protectedProcedure
-    .input(z.object({ boardId: z.string().uuid() }).passthrough())
-    .use(async ({ ctx, input, next }) => {
-      const { boardId } = input as { boardId: string };
-      const { userId, tenantId } = ctx.session;
+export const boardMemberGuard = t.middleware(
+  async ({ ctx, next, rawInput }) => {
+    // Extract boardId from input (supports nested and flat shapes)
+    const input = rawInput as Record<string, unknown> | null;
+    const boardId =
+      (input?.boardId as string) ??
+      (input?.id as string) ?? // for getFullBoard which uses `id`
+      null;
 
-      const aclResult = await ctx.infra.aclEngine.check({
-        userId,
-        tenantId,
-        boardId,
-        permission,
-        expectedAclVersion: (input as any).expectedAclVersion,
-      });
-
-      if (!aclResult.allowed) {
-        ctx.infra.logger.warn({
-          event: "acl_check_denied",
-          classification: "SENSITIVE",
-          userId,
-          tenantId,
-          boardId,
-          permission,
-          role: aclResult.role,
-          aclVersion: aclResult.aclVersion,
-          traceId: ctx.metadata.traceId,
-        });
-
-        throw new TRPCError({
-          code:
-            aclResult.role === "NONE" ? "FORBIDDEN" : "FORBIDDEN",
-          message: "Insufficient board permissions.",
-        });
-      }
-
-      return next({
-        ctx: {
-          ...ctx,
-          boardRole: aclResult.role,
-          boardAclVersion: aclResult.aclVersion,
-        },
-      });
-    });
-}
-
-// ============================================================================
-// 🛡️ aclVersionGuard middleware
-// ----------------------------------------------------------------------------
-// Standalone middleware that checks if the client's aclVersion matches the
-// current board aclVersion. Attach to any procedure that is sensitive to
-// permission drift (e.g., moveCard, deleteCard).
-// ============================================================================
-
-export const aclVersionGuard = t.middleware(
-  async ({ ctx, input, next }) => {
-    const inp = input as {
-      boardId?: string;
-      expectedAclVersion?: number;
-    } | null;
-
-    if (!inp?.boardId || inp.expectedAclVersion === undefined) {
-      // Guard is a no-op if not provided — callers opt-in
+    if (!boardId) {
+      // If no boardId in input, skip check (let downstream handle it)
       return next();
     }
 
-    const aclResult = await ctx.infra.aclEngine.check({
-      userId: ctx.session!.userId ?? ctx.session!.user.id,
-      tenantId: ctx.session!.tenantId,
-      boardId: inp.boardId,
-      permission: "board:read", // cheapest check — only validates aclVersion
-      expectedAclVersion: inp.expectedAclVersion,
-    });
+    const userId = ctx.session?.user?.id;
+    const tenantId = ctx.session?.tenantId;
 
-    if (!aclResult.allowed) {
+    if (!userId || !tenantId) {
       throw new TRPCError({
-        code: "PRECONDITION_FAILED",
-        message: "ACL version mismatch — permissions changed.",
+        code: "UNAUTHORIZED",
+        message: "Authentication required.",
       });
     }
 
-    return next();
+    // Query board_members for active membership
+    const membership = await ctx.infra.db.query.boardMembers.findFirst({
+      where: and(
+        eq(boardMembers.boardId, boardId),
+        eq(boardMembers.userId, userId),
+        eq(boardMembers.tenantId, tenantId),
+        isNull(boardMembers.removedAt),
+      ),
+    });
+
+    if (!membership) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "You are not a member of this board.",
+      });
+    }
+
+    return next({
+      ctx: {
+        ...ctx,
+        boardMembership: {
+          memberId: membership.id,
+          role: membership.role as string,
+          boardId,
+        },
+      },
+    });
   }
 );
+
+// ============================================================================
+// 🚀 Board-Protected Procedure
+// ============================================================================
+// Use this for any procedure that operates on a specific board.
+// It extends protectedProcedure with board membership validation.
+// After this middleware, ctx.boardMembership is available.
+// ============================================================================
+
+export const boardProtectedProcedure =
+  t.procedure
+    .use(loadSheddingGuard)
+    .use(alsMiddleware)
+    .use(observabilityMiddleware)
+    .use(timeoutGuard)
+    .use(isAuthed)
+    .use(tenantGuard)
+    .use(boardMemberGuard);

@@ -8,10 +8,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@repo/auth": "workspace:*",
     "@repo/domain": "workspace:*",
     "@repo/infrastructure": "workspace:*",
     "ws": "^8.18.0",
-    "ioredis": "^5.10.1"
+    "ioredis": "^5.10.1",
+    "postgres": "latest"
   },
   "devDependencies": {
     "@types/ws": "^8.5.12",
