@@ -1,434 +1,523 @@
 // apps/web/src/features/board/store/sync/syncStateMachine.ts
-// -----------------------------------------------------------------------------
-// Full event-driven Sync State Machine (FSM).
+//
+// ─── Responsibility ──────────────────────────────────────────────────────────
+// Deterministic Finite State Machine for the board synchronization lifecycle.
 //
 // States:
-//   idle        — no board loaded, no WS connection
-//   synced      — WS connected, sequence monotonic, healthy
-//   catching_up — pulling missed events (gap detected), WS connected
-//   resyncing   — full state resync required (gap unrecoverable)
-//   reconnecting— WS disconnected, attempting reconnection
-//   offline     — all reconnect attempts exhausted, user must act
+//   IDLE        — No board loaded yet.
+//   CONNECTING  — WebSocket handshake in progress.
+//   HEALTHY     — Connected, sequence monotonic, no gaps.
+//   GAP         — Sequence gap detected, buffering events, waiting for fill.
+//   REPLAYING   — Incremental replay in progress (catch-up after reconnect).
+//   DESYNCED    — Unrecoverable gap or timeout; full resync required.
+//   RECONNECTING— WS dropped, attempting reconnect with backoff.
 //
-// Design:
-//   - Explicit transition table — only valid transitions are allowed
-//   - Observer pattern — UI and devtools subscribe to state changes
-//   - Multi-tab support — BroadcastChannel coordination
-//   - Deterministic — same events always produce same state
-//   - Testable — pure FSM logic, no side effects in transition function
-// -----------------------------------------------------------------------------
+// Transitions are explicit, typed, and exhaustive — no implicit state changes.
+// Each transition emits a SyncEffect that the effect runner executes.
+//
+// ─── Actor model ─────────────────────────────────────────────────────────────
+// The FSM processes messages via a synchronous mailbox (same pattern as
+// PositioningEngine). This guarantees serialized transitions regardless of
+// concurrent WS callbacks, tab messages, or timer firings.
+//
+// ─── Integration ─────────────────────────────────────────────────────────────
+//   • BoardSocketClient sends messages: WS_CONNECTED, WS_CLOSED, EVENT_RECEIVED
+//   • reconcileIncomingEvent's gap detection maps to: GAP_DETECTED
+//   • replayEngine completion maps to: REPLAY_COMPLETE
+//   • useBoardStore.syncStatus is kept in sync via effect runner
+//
+// ─── Design rules ────────────────────────────────────────────────────────────
+//   • Pure transitions — `transition(state, message)` is a pure function.
+//   • Effects are returned as data — not executed inline (testable).
+//   • No React dependency — pure class.
+//   • Observable — every transition logged to telemetry.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { telemetry } from "../../devtools/logEvent";
 
 // ============================================================================
-// Types
+// 1.  States
 // ============================================================================
 
 export type SyncState =
-  | "idle"
-  | "synced"
-  | "catching_up"
-  | "resyncing"
-  | "reconnecting"
-  | "offline";
+  | "IDLE"
+  | "CONNECTING"
+  | "HEALTHY"
+  | "GAP"
+  | "REPLAYING"
+  | "DESYNCED"
+  | "RECONNECTING";
 
-export type SyncEvent =
-  | { type: "BOARD_LOADED"; boardId: string }
+// ============================================================================
+// 2.  Messages (inputs to the FSM)
+// ============================================================================
+
+export type SyncMessage =
+  | { type: "CONNECT_REQUESTED"; boardId: string }
   | { type: "WS_CONNECTED" }
-  | { type: "WS_DISCONNECTED"; code?: number; reason?: string }
-  | { type: "SUBSCRIBED" }
+  | { type: "WS_CLOSED"; code: number; reason: string }
+  | { type: "WS_ERROR" }
   | { type: "EVENT_RECEIVED"; sequence: string }
-  | { type: "GAP_DETECTED"; expectedSeq: string; receivedSeq: string }
-  | { type: "GAP_RECOVERED" }
-  | { type: "GAP_UNRECOVERABLE" }
-  | { type: "RESYNC_COMPLETE" }
+  | { type: "GAP_DETECTED"; expectedSeq: string; receivedSeq: string; bufferSize: number }
+  | { type: "GAP_FILLED" }
+  | { type: "GAP_TIMEOUT" }
+  | { type: "REPLAY_STARTED" }
+  | { type: "REPLAY_COMPLETE"; finalSequence: string }
+  | { type: "REPLAY_FAILED"; reason: string }
+  | { type: "RESYNC_REQUIRED" }
   | { type: "RECONNECT_ATTEMPT"; attempt: number }
   | { type: "RECONNECT_EXHAUSTED" }
-  | { type: "MANUAL_RECONNECT" }
-  | { type: "BOARD_UNLOADED" }
-  | { type: "TAB_BECAME_LEADER" }
-  | { type: "TAB_LOST_LEADERSHIP" };
+  | { type: "DISCONNECT_REQUESTED" };
 
-export interface SyncContext {
-  boardId: string | null;
-  reconnectAttempts: number;
-  lastSequence: string;
-  gapStart: string | null;
-  gapEnd: string | null;
-  isLeaderTab: boolean;
-  enteredStateAt: number;
-}
-
-export interface SyncTransitionResult {
-  state: SyncState;
-  context: SyncContext;
-  /** Side effects to execute (non-blocking, handled by orchestrator) */
-  effects: SyncEffect[];
-}
+// ============================================================================
+// 3.  Effects (outputs from transitions — executed by the effect runner)
+// ============================================================================
 
 export type SyncEffect =
-  | { type: "CONNECT_WS"; boardId: string; lastSequence: string }
-  | { type: "DISCONNECT_WS" }
-  | { type: "PULL_MISSED_EVENTS"; boardId: string; fromSequence: string }
-  | { type: "REQUEST_FULL_RESYNC"; boardId: string }
+  | { type: "UPDATE_STORE_STATUS"; status: "healthy" | "gap_detected" | "reconnecting" | "desynced" }
+  | { type: "START_GAP_TIMER"; timeoutMs: number }
+  | { type: "CANCEL_GAP_TIMER" }
+  | { type: "REQUEST_CATCH_UP"; fromSequence: string; toSequence: string }
+  | { type: "START_REPLAY"; fromSequence: string }
   | { type: "SCHEDULE_RECONNECT"; attempt: number; delayMs: number }
-  | { type: "NOTIFY_USER_OFFLINE" }
-  | { type: "BROADCAST_TAB_STATE"; state: SyncState }
-  | { type: "LOG"; level: "info" | "warn" | "error"; message: string; data?: Record<string, unknown> };
+  | { type: "CANCEL_RECONNECT" }
+  | { type: "TRIGGER_FULL_RESYNC" }
+  | { type: "LOG"; action: string; data: Record<string, unknown> };
 
 // ============================================================================
-// Transition Table
-// ============================================================================
-// Each row: [currentState, eventType] → [nextState, effects[]]
-// Invalid transitions are rejected (no state change, warning logged).
+// 4.  Transition result
 // ============================================================================
 
-type TransitionFn = (
-  ctx: SyncContext,
-  event: SyncEvent,
-) => SyncTransitionResult | null;
-
-const TRANSITIONS: Record<SyncState, Partial<Record<SyncEvent["type"], TransitionFn>>> = {
-  // --------------------------------------------------------------------------
-  // IDLE — waiting for board to load
-  // --------------------------------------------------------------------------
-  idle: {
-    BOARD_LOADED: (ctx, event) => {
-      if (event.type !== "BOARD_LOADED") return null;
-      const nextCtx: SyncContext = {
-        ...ctx,
-        boardId: event.boardId,
-        reconnectAttempts: 0,
-        enteredStateAt: Date.now(),
-      };
-      return {
-        state: "reconnecting",
-        context: nextCtx,
-        effects: [
-          { type: "CONNECT_WS", boardId: event.boardId, lastSequence: ctx.lastSequence },
-          { type: "BROADCAST_TAB_STATE", state: "reconnecting" },
-        ],
-      };
-    },
-  },
-
-  // --------------------------------------------------------------------------
-  // SYNCED — healthy, receiving events in sequence
-  // --------------------------------------------------------------------------
-  synced: {
-    EVENT_RECEIVED: (ctx, event) => {
-      if (event.type !== "EVENT_RECEIVED") return null;
-      return {
-        state: "synced",
-        context: { ...ctx, lastSequence: event.sequence, enteredStateAt: ctx.enteredStateAt },
-        effects: [],
-      };
-    },
-
-    GAP_DETECTED: (ctx, event) => {
-      if (event.type !== "GAP_DETECTED") return null;
-      return {
-        state: "catching_up",
-        context: {
-          ...ctx,
-          gapStart: event.expectedSeq,
-          gapEnd: event.receivedSeq,
-          enteredStateAt: Date.now(),
-        },
-        effects: [
-          { type: "PULL_MISSED_EVENTS", boardId: ctx.boardId!, fromSequence: event.expectedSeq },
-          { type: "LOG", level: "warn", message: "Gap detected", data: { expected: event.expectedSeq, received: event.receivedSeq } },
-          { type: "BROADCAST_TAB_STATE", state: "catching_up" },
-        ],
-      };
-    },
-
-    WS_DISCONNECTED: (ctx) => ({
-      state: "reconnecting",
-      context: { ...ctx, reconnectAttempts: 0, enteredStateAt: Date.now() },
-      effects: [
-        { type: "SCHEDULE_RECONNECT", attempt: 1, delayMs: 1000 },
-        { type: "BROADCAST_TAB_STATE", state: "reconnecting" },
-      ],
-    }),
-
-    BOARD_UNLOADED: (ctx) => ({
-      state: "idle",
-      context: { ...ctx, boardId: null, enteredStateAt: Date.now() },
-      effects: [{ type: "DISCONNECT_WS" }, { type: "BROADCAST_TAB_STATE", state: "idle" }],
-    }),
-  },
-
-  // --------------------------------------------------------------------------
-  // CATCHING_UP — pulling missed events to close gap
-  // --------------------------------------------------------------------------
-  catching_up: {
-    GAP_RECOVERED: (ctx) => ({
-      state: "synced",
-      context: { ...ctx, gapStart: null, gapEnd: null, enteredStateAt: Date.now() },
-      effects: [
-        { type: "LOG", level: "info", message: "Gap recovered" },
-        { type: "BROADCAST_TAB_STATE", state: "synced" },
-      ],
-    }),
-
-    GAP_UNRECOVERABLE: (ctx) => ({
-      state: "resyncing",
-      context: { ...ctx, enteredStateAt: Date.now() },
-      effects: [
-        { type: "REQUEST_FULL_RESYNC", boardId: ctx.boardId! },
-        { type: "LOG", level: "error", message: "Gap unrecoverable — full resync" },
-        { type: "BROADCAST_TAB_STATE", state: "resyncing" },
-      ],
-    }),
-
-    EVENT_RECEIVED: (ctx, event) => {
-      if (event.type !== "EVENT_RECEIVED") return null;
-      // Buffer events while catching up — sequence tracking continues
-      return {
-        state: "catching_up",
-        context: { ...ctx, lastSequence: event.sequence },
-        effects: [],
-      };
-    },
-
-    WS_DISCONNECTED: (ctx) => ({
-      state: "reconnecting",
-      context: { ...ctx, reconnectAttempts: 0, enteredStateAt: Date.now() },
-      effects: [{ type: "SCHEDULE_RECONNECT", attempt: 1, delayMs: 1000 }],
-    }),
-  },
-
-  // --------------------------------------------------------------------------
-  // RESYNCING — full state resync (wipe + rebuild)
-  // --------------------------------------------------------------------------
-  resyncing: {
-    RESYNC_COMPLETE: (ctx) => ({
-      state: "synced",
-      context: { ...ctx, gapStart: null, gapEnd: null, enteredStateAt: Date.now() },
-      effects: [
-        { type: "LOG", level: "info", message: "Full resync complete" },
-        { type: "BROADCAST_TAB_STATE", state: "synced" },
-      ],
-    }),
-
-    WS_DISCONNECTED: (ctx) => ({
-      state: "reconnecting",
-      context: { ...ctx, reconnectAttempts: 0, enteredStateAt: Date.now() },
-      effects: [{ type: "SCHEDULE_RECONNECT", attempt: 1, delayMs: 1000 }],
-    }),
-  },
-
-  // --------------------------------------------------------------------------
-  // RECONNECTING — WS down, attempting to reconnect
-  // --------------------------------------------------------------------------
-  reconnecting: {
-    WS_CONNECTED: (ctx) => ({
-      state: "synced",
-      context: { ...ctx, reconnectAttempts: 0, enteredStateAt: Date.now() },
-      effects: [{ type: "BROADCAST_TAB_STATE", state: "synced" }],
-    }),
-
-    SUBSCRIBED: (ctx) => ({
-      state: "synced",
-      context: { ...ctx, reconnectAttempts: 0, enteredStateAt: Date.now() },
-      effects: [
-        { type: "LOG", level: "info", message: "Subscribed to board" },
-        { type: "BROADCAST_TAB_STATE", state: "synced" },
-      ],
-    }),
-
-    RECONNECT_ATTEMPT: (ctx, event) => {
-      if (event.type !== "RECONNECT_ATTEMPT") return null;
-      const delay = Math.min(1000 * Math.pow(2, event.attempt - 1), 15000);
-      return {
-        state: "reconnecting",
-        context: { ...ctx, reconnectAttempts: event.attempt, enteredStateAt: Date.now() },
-        effects: [
-          { type: "CONNECT_WS", boardId: ctx.boardId!, lastSequence: ctx.lastSequence },
-          { type: "SCHEDULE_RECONNECT", attempt: event.attempt + 1, delayMs: delay },
-        ],
-      };
-    },
-
-    RECONNECT_EXHAUSTED: (ctx) => ({
-      state: "offline",
-      context: { ...ctx, enteredStateAt: Date.now() },
-      effects: [
-        { type: "NOTIFY_USER_OFFLINE" },
-        { type: "LOG", level: "error", message: "All reconnect attempts exhausted" },
-        { type: "BROADCAST_TAB_STATE", state: "offline" },
-      ],
-    }),
-
-    WS_DISCONNECTED: (ctx) => ({
-      state: "reconnecting",
-      context: ctx,
-      effects: [], // Already reconnecting — ignore duplicate disconnects
-    }),
-  },
-
-  // --------------------------------------------------------------------------
-  // OFFLINE — user must manually reconnect
-  // --------------------------------------------------------------------------
-  offline: {
-    MANUAL_RECONNECT: (ctx) => ({
-      state: "reconnecting",
-      context: { ...ctx, reconnectAttempts: 0, enteredStateAt: Date.now() },
-      effects: [
-        { type: "CONNECT_WS", boardId: ctx.boardId!, lastSequence: ctx.lastSequence },
-        { type: "LOG", level: "info", message: "Manual reconnect triggered" },
-        { type: "BROADCAST_TAB_STATE", state: "reconnecting" },
-      ],
-    }),
-
-    BOARD_UNLOADED: (ctx) => ({
-      state: "idle",
-      context: { ...ctx, boardId: null, enteredStateAt: Date.now() },
-      effects: [{ type: "BROADCAST_TAB_STATE", state: "idle" }],
-    }),
-  },
-};
-
-// ============================================================================
-// Pure Transition Function
-// ============================================================================
-
-export function transition(
-  currentState: SyncState,
-  currentContext: SyncContext,
-  event: SyncEvent,
-): SyncTransitionResult {
-  const stateTransitions = TRANSITIONS[currentState];
-  const handler = stateTransitions?.[event.type];
-
-  if (!handler) {
-    // Invalid transition — log and stay in current state
-    return {
-      state: currentState,
-      context: currentContext,
-      effects: [
-        {
-          type: "LOG",
-          level: "warn",
-          message: `Invalid transition: ${currentState} + ${event.type}`,
-          data: { currentState, event },
-        },
-      ],
-    };
-  }
-
-  const result = handler(currentContext, event);
-  if (!result) {
-    return { state: currentState, context: currentContext, effects: [] };
-  }
-
-  return result;
+export interface TransitionResult {
+  /** The new state after this transition. */
+  readonly nextState: SyncState;
+  /** Effects to execute (in order). */
+  readonly effects: readonly SyncEffect[];
 }
 
 // ============================================================================
-// Initial Context Factory
+// 5.  Constants
 // ============================================================================
 
-export function createInitialSyncContext(): SyncContext {
+const GAP_TIMEOUT_MS            = 10_000;  // 10s before declaring gap unrecoverable
+const MAX_BUFFER_BEFORE_DESYNC  = 50;      // matches reconcileIncomingEvent threshold
+const MAX_RECONNECT_ATTEMPTS    = 7;
+
+// ============================================================================
+// 6.  Pure transition function
+// ============================================================================
+
+/**
+ * Pure, deterministic state transition.
+ * Given current state + message → next state + effects.
+ *
+ * This function NEVER mutates anything. It's the core of the FSM and is
+ * fully testable in isolation.
+ */
+export function transition(
+  current: SyncState,
+  message: SyncMessage,
+): TransitionResult {
+
+  switch (current) {
+    // ──────────────────────────────────────────────────────────────────────────
+    // IDLE
+    // ──────────────────────────────────────────────────────────────────────────
+    case "IDLE": {
+      if (message.type === "CONNECT_REQUESTED") {
+        return {
+          nextState: "CONNECTING",
+          effects: [
+            { type: "UPDATE_STORE_STATUS", status: "reconnecting" },
+            { type: "LOG", action: "FSM_CONNECT_REQUESTED", data: { boardId: message.boardId } },
+          ],
+        };
+      }
+      return noTransition(current, message);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // CONNECTING
+    // ──────────────────────────────────────────────────────────────────────────
+    case "CONNECTING": {
+      if (message.type === "WS_CONNECTED") {
+        return {
+          nextState: "HEALTHY",
+          effects: [
+            { type: "UPDATE_STORE_STATUS", status: "healthy" },
+            { type: "CANCEL_RECONNECT" },
+            { type: "LOG", action: "FSM_CONNECTED", data: {} },
+          ],
+        };
+      }
+      if (message.type === "WS_CLOSED" || message.type === "WS_ERROR") {
+        return {
+          nextState: "RECONNECTING",
+          effects: [
+            { type: "UPDATE_STORE_STATUS", status: "reconnecting" },
+            { type: "SCHEDULE_RECONNECT", attempt: 1, delayMs: 1000 },
+            { type: "LOG", action: "FSM_CONNECT_FAILED", data: { code: (message as any).code } },
+          ],
+        };
+      }
+      if (message.type === "DISCONNECT_REQUESTED") {
+        return { nextState: "IDLE", effects: [{ type: "CANCEL_RECONNECT" }] };
+      }
+      return noTransition(current, message);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // HEALTHY
+    // ──────────────────────────────────────────────────────────────────────────
+    case "HEALTHY": {
+      if (message.type === "EVENT_RECEIVED") {
+        // Normal path — stay healthy.
+        return { nextState: "HEALTHY", effects: [] };
+      }
+      if (message.type === "GAP_DETECTED") {
+        return {
+          nextState: "GAP",
+          effects: [
+            { type: "UPDATE_STORE_STATUS", status: "gap_detected" },
+            { type: "START_GAP_TIMER", timeoutMs: GAP_TIMEOUT_MS },
+            { type: "LOG", action: "FSM_GAP_DETECTED", data: {
+              expectedSeq: message.expectedSeq,
+              receivedSeq: message.receivedSeq,
+              bufferSize:  message.bufferSize,
+            }},
+          ],
+        };
+      }
+      if (message.type === "WS_CLOSED" || message.type === "WS_ERROR") {
+        return {
+          nextState: "RECONNECTING",
+          effects: [
+            { type: "UPDATE_STORE_STATUS", status: "reconnecting" },
+            { type: "SCHEDULE_RECONNECT", attempt: 1, delayMs: 1000 },
+            { type: "LOG", action: "FSM_WS_DROPPED", data: { code: (message as any).code } },
+          ],
+        };
+      }
+      if (message.type === "RESYNC_REQUIRED") {
+        return {
+          nextState: "DESYNCED",
+          effects: [
+            { type: "UPDATE_STORE_STATUS", status: "desynced" },
+            { type: "TRIGGER_FULL_RESYNC" },
+            { type: "LOG", action: "FSM_RESYNC_ORDERED", data: {} },
+          ],
+        };
+      }
+      if (message.type === "DISCONNECT_REQUESTED") {
+        return { nextState: "IDLE", effects: [] };
+      }
+      return noTransition(current, message);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // GAP
+    // ──────────────────────────────────────────────────────────────────────────
+    case "GAP": {
+      if (message.type === "GAP_FILLED") {
+        return {
+          nextState: "HEALTHY",
+          effects: [
+            { type: "UPDATE_STORE_STATUS", status: "healthy" },
+            { type: "CANCEL_GAP_TIMER" },
+            { type: "LOG", action: "FSM_GAP_FILLED", data: {} },
+          ],
+        };
+      }
+      if (message.type === "EVENT_RECEIVED") {
+        // Still in gap — events are being buffered by reconcileIncomingEvent.
+        return { nextState: "GAP", effects: [] };
+      }
+      if (message.type === "GAP_TIMEOUT") {
+        return {
+          nextState: "REPLAYING",
+          effects: [
+            { type: "CANCEL_GAP_TIMER" },
+            { type: "START_REPLAY", fromSequence: "" }, // effect runner fills from store
+            { type: "LOG", action: "FSM_GAP_TIMEOUT_REPLAY", data: {} },
+          ],
+        };
+      }
+      if (message.type === "GAP_DETECTED") {
+        // Additional gap while already in GAP — check buffer overflow.
+        if (message.bufferSize > MAX_BUFFER_BEFORE_DESYNC) {
+          return {
+            nextState: "DESYNCED",
+            effects: [
+              { type: "UPDATE_STORE_STATUS", status: "desynced" },
+              { type: "CANCEL_GAP_TIMER" },
+              { type: "TRIGGER_FULL_RESYNC" },
+              { type: "LOG", action: "FSM_BUFFER_OVERFLOW_DESYNC", data: { bufferSize: message.bufferSize } },
+            ],
+          };
+        }
+        return { nextState: "GAP", effects: [] };
+      }
+      if (message.type === "WS_CLOSED" || message.type === "WS_ERROR") {
+        return {
+          nextState: "RECONNECTING",
+          effects: [
+            { type: "CANCEL_GAP_TIMER" },
+            { type: "UPDATE_STORE_STATUS", status: "reconnecting" },
+            { type: "SCHEDULE_RECONNECT", attempt: 1, delayMs: 1000 },
+          ],
+        };
+      }
+      if (message.type === "DISCONNECT_REQUESTED") {
+        return { nextState: "IDLE", effects: [{ type: "CANCEL_GAP_TIMER" }] };
+      }
+      return noTransition(current, message);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // REPLAYING
+    // ──────────────────────────────────────────────────────────────────────────
+    case "REPLAYING": {
+      if (message.type === "REPLAY_COMPLETE") {
+        return {
+          nextState: "HEALTHY",
+          effects: [
+            { type: "UPDATE_STORE_STATUS", status: "healthy" },
+            { type: "LOG", action: "FSM_REPLAY_COMPLETE", data: { finalSequence: message.finalSequence } },
+          ],
+        };
+      }
+      if (message.type === "REPLAY_FAILED") {
+        return {
+          nextState: "DESYNCED",
+          effects: [
+            { type: "UPDATE_STORE_STATUS", status: "desynced" },
+            { type: "TRIGGER_FULL_RESYNC" },
+            { type: "LOG", action: "FSM_REPLAY_FAILED", data: { reason: message.reason } },
+          ],
+        };
+      }
+      if (message.type === "WS_CLOSED") {
+        return {
+          nextState: "RECONNECTING",
+          effects: [
+            { type: "UPDATE_STORE_STATUS", status: "reconnecting" },
+            { type: "SCHEDULE_RECONNECT", attempt: 1, delayMs: 1000 },
+          ],
+        };
+      }
+      if (message.type === "EVENT_RECEIVED") {
+        // Events arrive during replay — they'll be applied after replay completes.
+        return { nextState: "REPLAYING", effects: [] };
+      }
+      if (message.type === "DISCONNECT_REQUESTED") {
+        return { nextState: "IDLE", effects: [] };
+      }
+      return noTransition(current, message);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // DESYNCED
+    // ──────────────────────────────────────────────────────────────────────────
+    case "DESYNCED": {
+      if (message.type === "REPLAY_COMPLETE") {
+        return {
+          nextState: "HEALTHY",
+          effects: [
+            { type: "UPDATE_STORE_STATUS", status: "healthy" },
+            { type: "LOG", action: "FSM_RESYNC_RECOVERED", data: { finalSequence: message.finalSequence } },
+          ],
+        };
+      }
+      if (message.type === "CONNECT_REQUESTED") {
+        return {
+          nextState: "CONNECTING",
+          effects: [{ type: "UPDATE_STORE_STATUS", status: "reconnecting" }],
+        };
+      }
+      if (message.type === "DISCONNECT_REQUESTED") {
+        return { nextState: "IDLE", effects: [] };
+      }
+      // In DESYNCED, most messages are ignored — the system waits for a manual
+      // resync trigger or a REPLAY_COMPLETE from a full fetch.
+      return noTransition(current, message);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // RECONNECTING
+    // ──────────────────────────────────────────────────────────────────────────
+    case "RECONNECTING": {
+      if (message.type === "WS_CONNECTED") {
+        return {
+          nextState: "HEALTHY",
+          effects: [
+            { type: "UPDATE_STORE_STATUS", status: "healthy" },
+            { type: "CANCEL_RECONNECT" },
+            { type: "LOG", action: "FSM_RECONNECTED", data: {} },
+          ],
+        };
+      }
+      if (message.type === "RECONNECT_ATTEMPT") {
+        if (message.attempt >= MAX_RECONNECT_ATTEMPTS) {
+          return {
+            nextState: "DESYNCED",
+            effects: [
+              { type: "UPDATE_STORE_STATUS", status: "desynced" },
+              { type: "CANCEL_RECONNECT" },
+              { type: "TRIGGER_FULL_RESYNC" },
+              { type: "LOG", action: "FSM_RECONNECT_EXHAUSTED", data: { attempts: message.attempt } },
+            ],
+          };
+        }
+        const delayMs = Math.min(1000 * Math.pow(2, message.attempt - 1), 15000);
+        return {
+          nextState: "RECONNECTING",
+          effects: [
+            { type: "SCHEDULE_RECONNECT", attempt: message.attempt + 1, delayMs },
+            { type: "LOG", action: "FSM_RECONNECT_SCHEDULED", data: { attempt: message.attempt, delayMs } },
+          ],
+        };
+      }
+      if (message.type === "RECONNECT_EXHAUSTED") {
+        return {
+          nextState: "DESYNCED",
+          effects: [
+            { type: "UPDATE_STORE_STATUS", status: "desynced" },
+            { type: "CANCEL_RECONNECT" },
+            { type: "TRIGGER_FULL_RESYNC" },
+          ],
+        };
+      }
+      if (message.type === "DISCONNECT_REQUESTED") {
+        return { nextState: "IDLE", effects: [{ type: "CANCEL_RECONNECT" }] };
+      }
+      if (message.type === "WS_CLOSED" || message.type === "WS_ERROR") {
+        // Already reconnecting — ignore additional close/error events.
+        return { nextState: "RECONNECTING", effects: [] };
+      }
+      return noTransition(current, message);
+    }
+  }
+
+  // TypeScript exhaustiveness — should never reach here.
+  return noTransition(current, message);
+}
+
+// ============================================================================
+// 7.  No-transition helper (for unhandled messages in a given state)
+// ============================================================================
+
+function noTransition(current: SyncState, message: SyncMessage): TransitionResult {
+  // Log at debug level — not an error, just an unhandled message for this state.
   return {
-    boardId: null,
-    reconnectAttempts: 0,
-    lastSequence: "0",
-    gapStart: null,
-    gapEnd: null,
-    isLeaderTab: true,
-    enteredStateAt: Date.now(),
+    nextState: current,
+    effects: [
+      {
+        type: "LOG",
+        action: "FSM_UNHANDLED_MESSAGE",
+        data: { state: current, messageType: message.type },
+      },
+    ],
   };
 }
 
 // ============================================================================
-// Observer Pattern
+// 8.  SyncStateMachine class — wraps the pure transition + effect execution
 // ============================================================================
 
-export type SyncObserver = (state: SyncState, context: SyncContext, event: SyncEvent) => void;
+/**
+ * Stateful wrapper that:
+ *   1. Holds current SyncState.
+ *   2. Processes messages via a FIFO mailbox (serialized).
+ *   3. Executes effects via an injectable EffectRunner.
+ *   4. Logs every transition to telemetry.
+ *
+ * Usage:
+ *   const fsm = new SyncStateMachine(effectRunner);
+ *   fsm.send({ type: "CONNECT_REQUESTED", boardId: "..." });
+ */
+export type EffectRunner = (effect: SyncEffect) => void;
 
 export class SyncStateMachine {
-  private state: SyncState = "idle";
-  private context: SyncContext = createInitialSyncContext();
-  private observers: Set<SyncObserver> = new Set();
-  private effectHandler: ((effect: SyncEffect) => void) | null = null;
+  private _state: SyncState = "IDLE";
+  private readonly _runner: EffectRunner;
+  private readonly _history: Array<{ from: SyncState; to: SyncState; message: SyncMessage["type"]; at: number }> = [];
 
-  // BroadcastChannel for multi-tab coordination
-  private channel: BroadcastChannel | null = null;
+  // ── Mailbox ────────────────────────────────────────────────────────────────
+  private _queue: SyncMessage[] = [];
+  private _processing = false;
 
-  constructor(options?: { enableMultiTab?: boolean }) {
-    if (options?.enableMultiTab && typeof BroadcastChannel !== "undefined") {
-      this.channel = new BroadcastChannel("sync-fsm");
-      this.channel.onmessage = (msg) => this.handleTabMessage(msg.data);
+  constructor(runner: EffectRunner) {
+    this._runner = runner;
+  }
+
+  /** Current FSM state (read-only). */
+  get state(): SyncState {
+    return this._state;
+  }
+
+  /** Transition history (last 50 entries) — for debugging. */
+  get history() {
+    return this._history;
+  }
+
+  /** Send a message to the FSM. Serialized via mailbox. */
+  send(message: SyncMessage): void {
+    this._queue.push(message);
+    if (!this._processing) {
+      this._drain();
     }
   }
 
-  // ==========================================================================
-  // Public API
-  // ==========================================================================
-
-  getState(): SyncState {
-    return this.state;
+  /** Reset FSM to IDLE (e.g. on board unmount). */
+  reset(): void {
+    this._state = "IDLE";
+    this._queue = [];
+    this._history.length = 0;
   }
 
-  getContext(): Readonly<SyncContext> {
-    return this.context;
-  }
+  // ── Internal ─────────────────────────────────────────────────────────────
 
-  send(event: SyncEvent): void {
-    const result = transition(this.state, this.context, event);
+  private _drain(): void {
+    this._processing = true;
 
-    const previousState = this.state;
-    this.state = result.state;
-    this.context = result.context;
+    while (this._queue.length > 0) {
+      const message = this._queue.shift()!;
+      const { nextState, effects } = transition(this._state, message);
 
-    // Notify observers
-    if (previousState !== result.state || result.effects.length > 0) {
-      this.notifyObservers(event);
-    }
+      // Record transition.
+      const from = this._state;
+      this._state = nextState;
 
-    // Execute effects
-    for (const effect of result.effects) {
-      if (effect.type === "BROADCAST_TAB_STATE") {
-        this.channel?.postMessage({ type: "STATE_CHANGE", state: effect.state });
+      if (from !== nextState) {
+        this._history.push({
+          from,
+          to:      nextState,
+          message: message.type,
+          at:      Date.now(),
+        });
+        // Keep history bounded.
+        if (this._history.length > 50) this._history.shift();
+
+        telemetry.log("STORE", "SYNC_FSM_TRANSITION", {
+          from,
+          to:      nextState,
+          trigger: message.type,
+        });
       }
-      this.effectHandler?.(effect);
-    }
-  }
 
-  subscribe(observer: SyncObserver): () => void {
-    this.observers.add(observer);
-    return () => this.observers.delete(observer);
-  }
-
-  onEffect(handler: (effect: SyncEffect) => void): void {
-    this.effectHandler = handler;
-  }
-
-  destroy(): void {
-    this.observers.clear();
-    this.channel?.close();
-    this.channel = null;
-  }
-
-  // ==========================================================================
-  // Private
-  // ==========================================================================
-
-  private notifyObservers(event: SyncEvent): void {
-    for (const observer of this.observers) {
-      try {
-        observer(this.state, this.context, event);
-      } catch {
-        // Observer failure must not crash FSM
+      // Execute effects.
+      for (const effect of effects) {
+        try {
+          this._runner(effect);
+        } catch (err: any) {
+          telemetry.log("STORE", "SYNC_FSM_EFFECT_ERROR", {
+            effectType: effect.type,
+            error:      err.message,
+          });
+        }
       }
     }
-  }
 
-  private handleTabMessage(data: any): void {
-    if (data?.type === "STATE_CHANGE") {
-      // Another tab's state — useful for devtools and UI sync indicators
-      // Does NOT mutate this FSM's state — each tab manages its own FSM
-      this.notifyObservers({ type: "TAB_BECAME_LEADER" });
-    }
+    this._processing = false;
   }
 }
