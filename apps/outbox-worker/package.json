@@ -1,0 +1,24 @@
+{
+  "name": "@repo/outbox-worker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@repo/db": "workspace:*",
+    "@repo/domain": "workspace:*",
+    "@repo/infrastructure": "workspace:*",
+    "ioredis": "^5.10.1",
+    "drizzle-orm": "latest",
+    "postgres": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "tsx": "^4.19.0",
+    "typescript": "latest",
+    "dotenv": "latest"
+  }
+}
