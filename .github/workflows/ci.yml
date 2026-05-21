@@ -22,6 +22,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      # Architecture lint — runs first because it's fastest and most likely
+      # to catch a layering regression. Phase 0.6 enables boundaries on every
+      # `packages/*` and the apps/web client; new violations block CI.
+      - name: Architecture lint
+        run: pnpm lint
       # Typecheck backend packages (web excluded — tRPC v10/v11 mismatch)
       - run: pnpm turbo typecheck --filter=@repo/db --filter=@repo/domain --filter=@repo/auth --filter=@repo/api --filter=@repo/infrastructure --filter=@repo/ws-server --filter=@repo/outbox-worker
       # Tests — domain + date engine (pre-existing chaos/property tests excluded)

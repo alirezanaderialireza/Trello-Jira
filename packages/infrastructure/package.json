@@ -8,7 +8,8 @@
     "./auth/argon2Hasher": "./src/auth/argon2Hasher.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --max-warnings=0"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",
