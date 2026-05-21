@@ -37,6 +37,8 @@ import {
 } from "../actions/board.actions";
 
 import { useBoardStore } from "../store/useBoardStore";
+import { useSyncOrchestrator } from "../store/sync/useSyncOrchestrator";
+import { usePendingGC } from "../store/mutations/core/usePendingGC";
 
 // ============================================================================
 // DTO TYPES
@@ -88,9 +90,11 @@ const customCollisionDetection: CollisionDetection = (
 export default function BoardView({
   data,
   boardId,
+  authToken,
 }: {
   data: FullBoardDto;
   boardId: string;
+  authToken?: string;
 }) {
   const [isMounted, setIsMounted] =
     useState(false);
@@ -126,6 +130,14 @@ export default function BoardView({
     currentContainerId: null,
     optimisticMoved: false,
   });
+
+  // ==========================================================================
+  // SYNC ORCHESTRATOR (mounts FSM + WS + MutationLifecycleManager)
+  // ==========================================================================
+  const { triggerManualReconnect } = useSyncOrchestrator({ boardId, authToken });
+
+  // GC stale pending mutations every 60s
+  usePendingGC(60_000);
 
   // ==========================================================================
   // STORE

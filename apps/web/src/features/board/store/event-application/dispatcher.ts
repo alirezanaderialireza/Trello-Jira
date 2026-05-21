@@ -193,8 +193,8 @@ export function applyEvent(
       context,
     );
 
-    // 🌟 TELEMETRY: ثبتِ موفقیت‌آمیز بودنِ تغییرِ خوش‌بینانه
-    if (context.mode !== "live" && correlationId) {
+    // 🌟 TELEMETRY: optimistic events run in "live" mode
+    if (context.mode === "live" && correlationId && !envelope.acknowledged) {
       telemetry.mutation(correlationId, eventType, "OPTIMISTIC_APPLIED");
     }
 
