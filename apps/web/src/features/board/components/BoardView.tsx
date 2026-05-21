@@ -46,6 +46,9 @@ import {
   ListErrorBoundary,
   ModalErrorBoundary,
 } from "../../../components/error/ErrorBoundary";
+import { ConnectionStatusBanner } from "./realtime/ConnectionStatusBanner";
+import { PresenceAvatars } from "./realtime/PresenceAvatars";
+import { useBoardPresence } from "../hooks/useBoardPresence";
 
 // ============================================================================
 // DTO TYPES
@@ -145,6 +148,10 @@ export default function BoardView({
 
   // GC stale pending mutations every 60s
   usePendingGC(60_000);
+
+  // Presence — starts the heartbeat as soon as the session is hydrated.
+  // Returns the userId so we can hide our own avatar in the bar.
+  const { userId: presenceUserId } = useBoardPresence(boardId);
 
   // ==========================================================================
   // STORE
@@ -763,6 +770,22 @@ export default function BoardView({
 
   return (
     <BoardErrorBoundary boardId={boardId}>
+      {/*
+        Realtime status bar — sits just above the DnD canvas.
+        • <ConnectionStatusBanner> consumes the unified useSyncStatus() hook
+          and shows a small "Live" pill in the happy path, widening into
+          actionable affordances (Reconnect / Reload) when the FSM degrades.
+        • <PresenceAvatars> shows the other users currently on the same
+          board. The local user is filtered out by passing presenceUserId.
+        Both components are intentionally read-only — all the wiring is
+        already done by useSyncOrchestrator + useBoardPresence above; they
+        only render whatever the underlying stores publish.
+      */}
+      <div className="flex items-center justify-between gap-3 px-4 pt-3 pb-1">
+        <ConnectionStatusBanner onManualReconnect={triggerManualReconnect} />
+        <PresenceAvatars currentUserId={presenceUserId} />
+      </div>
+
       <DndContext
         sensors={sensors}
         collisionDetection={
