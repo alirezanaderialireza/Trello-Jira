@@ -35,7 +35,7 @@ import {
   shouldRebalancePosition,
   type Position,
   PositionCollisionError,
-} from "@repo/domain";
+} from "@repo/domain/ordering";
 
 // ============================================================================
 // 1.  computeInsertPosition

@@ -26,6 +26,9 @@ importers:
       eslint-config-next:
         specifier: ^15.5.15
         version: 15.5.15(eslint@9.39.4(jiti@2.6.1))(typescript@6.0.3)
+      eslint-plugin-boundaries:
+        specifier: ^6.0.2
+        version: 6.0.2(@typescript-eslint/parser@8.59.1(eslint@9.39.4(jiti@2.6.1))(typescript@6.0.3))(eslint@9.39.4(jiti@2.6.1))
       prettier:
         specifier: latest
         version: 3.8.3

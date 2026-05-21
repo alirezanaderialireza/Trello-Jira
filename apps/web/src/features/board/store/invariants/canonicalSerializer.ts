@@ -83,7 +83,6 @@ export async function computeChecksum(value: unknown): Promise<string> {
 
   // Node.js crypto path (Node.js < 15 or test environments)
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { createHash } = require("crypto") as typeof import("crypto");
     return createHash("sha256").update(canonical, "utf8").digest("hex");
   } catch {
