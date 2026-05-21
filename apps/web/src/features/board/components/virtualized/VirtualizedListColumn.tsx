@@ -4,6 +4,7 @@ import { useBoardStore } from "../../store/useBoardStore";
 import { computeVisibleCards, computeTotalContentHeight } from "../../store/sync/performance/virtualRenderer";
 import { selectCardIdsInList, selectListById } from "../../store/sync/performance/selectorCache";
 import { VirtualizedCardItem } from "./VirtualizedCardItem";
+import { CardErrorBoundary } from "../../../../components/error/ErrorBoundary";
 
 const CARD_HEIGHT = 72;
 const CARD_GAP = 8;
@@ -39,7 +40,16 @@ export const VirtualizedListColumn = memo(function VirtualizedListColumn({ listI
         <div style={{ height: totalContentHeight, position: "relative" }}>
           {visibleCardIds.map((cardId, idx) => {
             const top = (visibleRange.startIndex + idx) * (CARD_HEIGHT + CARD_GAP);
-            return (<div key={cardId} style={{ position: "absolute", top, left: 0, right: 0, height: CARD_HEIGHT }}><VirtualizedCardItem cardId={cardId} /></div>);
+            return (
+              <div
+                key={cardId}
+                style={{ position: "absolute", top, left: 0, right: 0, height: CARD_HEIGHT }}
+              >
+                <CardErrorBoundary cardId={cardId}>
+                  <VirtualizedCardItem cardId={cardId} />
+                </CardErrorBoundary>
+              </div>
+            );
           })}
         </div>
       </div>
