@@ -4,7 +4,7 @@
 import type { NextAuthConfig } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
-import { db, users, accounts, sessions, verificationTokens } from "@repo/db";
+import { db, users, accounts, authSessions, verificationTokens } from "@repo/db";
 import { eq, and, isNull } from "drizzle-orm";
 import { Argon2PasswordHasher } from "@repo/infrastructure/auth/argon2Hasher";
 
@@ -14,7 +14,7 @@ export const authConfig: NextAuthConfig = {
   adapter: DrizzleAdapter(db as any, {
     usersTable: users as any,
     accountsTable: accounts as any,
-    sessionsTable: sessions as any,
+    sessionsTable: authSessions as any,
     verificationTokensTable: verificationTokens as any,
   }),
   providers: [
