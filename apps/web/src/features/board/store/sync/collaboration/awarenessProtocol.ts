@@ -119,7 +119,7 @@ interface AwarenessStoreState {
   /** All peer vectors keyed by userId. */
   peers: Record<string, AwarenessVector>;
 
-  _setLocal:     (v: AwarenessVector) => void;
+  _setLocal:     (v: AwarenessVector | null) => void;
   _mergePeer:    (incoming: PartialAwarenessVector) => void;
   _removePeer:   (userId: string) => void;
   _sweepExpired: (now: number, expireAfterMs: number) => void;

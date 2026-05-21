@@ -26,3 +26,7 @@ pnpm-debug.log*
 # env files
 .env
 .env*.local
+
+
+# typescript build artifacts
+*.tsbuildinfo

@@ -405,7 +405,7 @@ export class SelectionManager {
       this.sendTimer = setTimeout(() => {
         if (!this.dirty) return;
         const current = useSelectionStore.getState().local?.items ?? [];
-        this._flush(current);
+        this._flush([...current]);
       }, delay);
     }
   }

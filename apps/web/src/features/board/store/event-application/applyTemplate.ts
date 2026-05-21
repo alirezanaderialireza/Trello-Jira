@@ -38,6 +38,7 @@ export function applyTemplateCreated(
     },
     createdAt,
     updatedAt:   createdAt,
+    revision:    envelope.event.version,
     isOptimistic: envelope.optimistic ?? false,
   };
 

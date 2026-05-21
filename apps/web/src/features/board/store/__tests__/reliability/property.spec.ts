@@ -48,8 +48,8 @@ function makeCardCreated(overrides: Partial<CardCreatedEvent> & { payload: CardC
     occurredAt: new Date().toISOString(),
     aggregateId: overrides.payload.cardId,
     aggregateType: "card",
-    payload: overrides.payload,
     ...overrides,
+    payload: overrides.payload,
   } as CardCreatedEvent;
 }
 
