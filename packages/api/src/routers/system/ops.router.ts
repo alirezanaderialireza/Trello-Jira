@@ -43,7 +43,7 @@ interface ComponentHealth {
   details?: string;
 }
 
-interface HealthCheckResponse {
+export interface HealthCheckResponse {
   status: ServiceStatus;
 
   timestamp: number;
