@@ -69,9 +69,7 @@ export interface CardRepository<TTx = unknown> {
   getLastCardInList(params: { listId: ListId; tenantId: TenantId; tx?: TTx }): Promise<Card | null>;
   save(tx: TTx, params: { entity: Card; expectedRevision: number }): Promise<boolean>;
   create(card: Card, tx?: TTx): Promise<void>;
-  // ✅ Fix: return boolean (true = deleted, false = not found / OCC conflict)
-  //         and accept optional expectedRevision for OCC-safe soft-delete.
-  delete(tx: TTx, id: CardId, expectedRevision?: number): Promise<boolean>;
+  delete(tx: TTx, id: CardId): Promise<void>;
   updatePosition?(tx: TTx, params: { id: CardId; listId: ListId; position: string; expectedRevision?: number }): Promise<boolean>;
   bulkUpdatePositions?(tx: TTx, updates: ReadonlyArray<{ id: CardId; position: string }>): Promise<void>;
 }

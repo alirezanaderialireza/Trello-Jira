@@ -29,13 +29,3 @@ export * from "./services";
 
 // 8️⃣ List Use Cases
 export * from "./list/create-list";
-
-// 9️⃣ Card Use Cases (function-based)
-export { createCardUseCase }  from "./card/use-cases/create-card";
-export { updateCardUseCase }  from "./card/use-cases/update-card";
-export { deleteCardUseCase }  from "./card/use-cases/delete-card";
-
-// 🔟 List Use Cases (function-based)
-export { updateListUseCase }  from "./list/use-cases/update-list";
-export { deleteListUseCase }  from "./list/use-cases/delete-list";
-export { moveListUseCase }    from "./list/use-cases/move-list";

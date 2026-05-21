@@ -7,11 +7,9 @@ import type { AppDomainEvent } from "@repo/domain";
 import type { ClientEventEnvelope } from "./event-application/types";
 import type { ReducerContext } from "./event-application/context";
 import { applyEvent as dispatcherApplyEvent } from "./event-application/dispatcher";
-import { reconcileIncomingEvent } from "./event-application/reconcileIncomingEvent";
 
-// Phase-0 #1 — WsEvent canonical type lives in realtime/types.ts.
-// Re-export it here so all existing imports from useBoardStore still work.
-export type { WsEvent } from "../api/realtime/types";
+// 🌟 وارد کردن موتور تطبیق که در فایل مجزا ساختیم
+import { reconcileIncomingEvent } from "./event-application/reconcileIncomingEvent";
 
 // ============================================================================
 // 🛡️ DTOs & Snapshots
@@ -24,16 +22,35 @@ export type CardDto = {
   position: string;
   listId: string;
   description?: string;
+  /**
+   * 🌟 Optimistic version (local source of truth for ordering inserts).
+   * Bumped by every optimistic mutation, then re-aligned to the server
+   * version on ACK. Used by reducers to drop stale optimistic events.
+   */
   revision: number;
+  /**
+   * 🌟 Confirmed (server-canonical) version.
+   * Updated only when an event with envelope.acknowledged === true is
+   * applied. Used by reducers to drop stale SERVER events:
+   *   if (existing.confirmedRevision >= event.version) → drop
+   * This is the only safe way to differentiate:
+   *   - "I already applied this server event" (drop)
+   *   - "I have an optimistic bump but the server's canonical state
+   *      should still override my optimistic position" (apply)
+   */
+  confirmedRevision: number;
   updatedAt?: string | number;
   isOptimistic?: boolean;
 };
 
 export type ListDto = {
   id: string;
+  boardId: string;
   title: string;
   position: string;
   revision: number;
+  /** 🌟 See CardDto.confirmedRevision. */
+  confirmedRevision: number;
   updatedAt?: string | number;
   isOptimistic?: boolean;
 };
@@ -46,10 +63,8 @@ export interface BoardSnapshot {
 }
 
 // ============================================================================
-// WS Contracts & Transaction Types
+// 🌐 WS Contracts & Transaction Types
 // ============================================================================
-
-// WsEvent re-exported from canonical source above.
 
 export interface PendingMutation {
   correlationId: string;
@@ -62,8 +77,11 @@ export interface PendingMutation {
   optimisticVersion?: number;
 }
 
-// WsEvent is imported from ../api/realtime/types (re-exported above).
-// No duplicate definition here.
+export interface WsEvent {
+  sequence: string;
+  type: string;
+  payload: AppDomainEvent;
+}
 
 export type SyncStatus =
   | "healthy"
@@ -129,7 +147,18 @@ export interface BoardStoreActions {
   registerPendingMutation: (mutation: PendingMutation) => void;
   resolvePendingMutation: (correlationId: string) => void;
   updatePendingMutationStatus: (correlationId: string, status: PendingMutation["status"]) => void;
-  restoreSnapshot: (snapshot: BoardSnapshot) => void;
+  /**
+   * 🌟 restoreSnapshot — atomic rollback of a previously taken snapshot.
+   *
+   * @param snapshot   targeted slices to restore (cards, lists, cardsByList, listOrder)
+   * @param aggregateId  OPTIONAL. When provided, optimistic-card cleanup is
+   *                     bound to ONLY this aggregate (the failed mutation's
+   *                     aggregate). Without this, parallel optimistic
+   *                     mutations in the same list would be wrongfully wiped.
+   *                     Tests/integration-paths without a known aggregate
+   *                     fall back to the legacy scope-based cleanup.
+   */
+  restoreSnapshot: (snapshot: BoardSnapshot, aggregateId?: string) => void;
   gcPendingMutations: () => void;
 
   // ==========================================================================
@@ -231,9 +260,12 @@ export const useBoardStore = create<BoardState>()((set) => ({
       sortedLists.forEach((list) => {
         newLists[list.id] = {
           id: list.id,
+          boardId: list.boardId ?? "",
           title: list.title,
           position: list.position,
           revision: list.revision,
+          // 🌟 Hydration: server-supplied data is fully confirmed by definition.
+          confirmedRevision: list.revision,
           updatedAt: list.updatedAt,
         };
 
@@ -248,7 +280,11 @@ export const useBoardStore = create<BoardState>()((set) => ({
         );
 
         sortedCards.forEach((card) => {
-          newCards[card.id] = card;
+          // 🌟 Hydration: confirmedRevision = revision (server is the source).
+          newCards[card.id] = {
+            ...card,
+            confirmedRevision: card.confirmedRevision ?? card.revision,
+          };
 
           newCardsByList[list.id].push(card.id);
         });
@@ -311,73 +347,128 @@ export const useBoardStore = create<BoardState>()((set) => ({
     };
   }),
 
-  restoreSnapshot: (snapshot) => set((state) => {
-    // Phase-0 #4 — Atomic, partial-safe, conflict-aware snapshot restore.
-    //
-    // C-05 bug (now fixed): the old cardsByList block guarded the restore with
-    //   `if (!currentList || (snapList && currentList.revision <= snapList.revision))`
-    // This meant: if snapshot.cardsByList had a key but snapshot.lists did NOT
-    // have the matching list (e.g. the snapshot only captured card ordering, not
-    // the list metadata), the condition `(snapList && ...)` was always false
-    // and cardsByList was NEVER restored → silent partial rollback.
-    //
-    // Fix: cardsByList restore is now unconditional per-entry — it always
-    // restores the ordering from the snapshot. The stale-protection revision
-    // check is applied only to the cards dict (which has revision data).
-
-    const nextCards      = { ...state.cards };
-    const nextLists      = { ...state.lists };
+  restoreSnapshot: (snapshot, aggregateId) => set((state) => {
+    const nextCards = { ...state.cards };
+    const nextLists = { ...state.lists };
     const nextCardsByList = { ...state.cardsByList };
 
-    // ── 1. Cards ────────────────────────────────────────────────────────────
     if (snapshot.cards) {
-      for (const [id, snapCard] of Object.entries(snapshot.cards)) {
+      Object.entries(snapshot.cards).forEach(([id, snapCard]) => {
         const currentCard = state.cards[id];
 
-        // Stale-protection: never roll back to a lower revision when the store
-        // already has a newer confirmed write (e.g. a WS event arrived between
-        // the optimistic write and the rollback trigger).
-        if (currentCard && currentCard.revision > snapCard.revision) {
+        // 🌟 Stale Protection علیه server events:
+        // اگر کارت در حال حاضر isOptimistic نیست و revision آن جلوتر از snapshot است،
+        // یعنی یک رویداد سرور (یا کاربر دیگر) داده‌ی جدیدتری برای ما فرستاده.
+        // در این حالت rollback نمی‌کنیم تا کار درست شده‌ی دیگران را نشکنیم.
+        // اما اگر کارت هنوز isOptimistic باشد (یعنی revision آن ساختگی است)،
+        // rollback را اجرا می‌کنیم چون هنوز توسط سرور تایید نشده.
+        if (
+          currentCard &&
+          !currentCard.isOptimistic &&
+          currentCard.revision > snapCard.revision
+        ) {
           telemetry.log(
             "SNAPSHOT_MANAGER",
             "ROLLBACK_SKIPPED",
-            {
-              entityId:         id,
-              currentRevision:  currentCard.revision,
-              snapshotRevision: snapCard.revision,
-              reason:           "stale_protection",
-            },
+            { entityId: id, currentRevision: currentCard.revision, snapshotRevision: snapCard.revision, reason: "stale_protection" }
           );
-          continue;
+          return;
         }
 
+        // 🌟 Rollback واقعی: مقدار snapshot را برمی‌گردانیم
         nextCards[id] = snapCard;
+      });
+
+      // 🌟 پاکسازی کارت‌های optimistic که مربوط به همین mutation بوده‌اند ولی در snapshot نبودند.
+      //
+      // دو حالت:
+      // 1) aggregateId داده شده (production path از useOptimisticMutation):
+      //    فقط کارتی که id == aggregateId بود را پاک می‌کنیم. این یعنی
+      //    optimistic create که aggregateId همان tempId است → پاک می‌شود،
+      //    در حالی که سایر کارت‌های optimistic (mutationهای موازی) دست‌نخورده باقی می‌مانند.
+      //
+      // 2) aggregateId داده نشده (legacy / test path):
+      //    fall back به منطق قبلی scope-based: همه‌ی کارت‌های optimistic در
+      //    listهای داخل snapshot.cardsByList که در snapshot.cards نبودند پاک می‌شوند.
+      if (aggregateId) {
+        const target = state.cards[aggregateId];
+        if (
+          target?.isOptimistic &&
+          !snapshot.cards[aggregateId]
+        ) {
+          delete nextCards[aggregateId];
+          telemetry.log(
+            "SNAPSHOT_MANAGER",
+            "OPTIMISTIC_CARD_PURGED",
+            { aggregateId, reason: "aggregate_bound_cleanup" }
+          );
+        }
+      } else if (snapshot.cardsByList) {
+        const targetListIds = new Set(Object.keys(snapshot.cardsByList));
+        Object.keys(state.cards).forEach((id) => {
+          const card = state.cards[id];
+          if (
+            card?.isOptimistic &&
+            !snapshot.cards![id] &&
+            targetListIds.has(card.listId)
+          ) {
+            delete nextCards[id];
+          }
+        });
       }
     }
 
-    // ── 2. Lists ─────────────────────────────────────────────────────────────
     if (snapshot.lists) {
-      for (const [id, snapList] of Object.entries(snapshot.lists)) {
+      Object.entries(snapshot.lists).forEach(([id, snapList]) => {
         const currentList = state.lists[id];
-        if (!currentList || currentList.revision <= snapList.revision) {
-          nextLists[id] = snapList;
+        // همان منطق Stale Protection برای لیست‌ها
+        if (
+          currentList &&
+          !currentList.isOptimistic &&
+          currentList.revision > snapList.revision
+        ) {
+          return;
+        }
+        nextLists[id] = snapList;
+      });
+
+      // پاکسازی aggregate-bound برای لیست‌ها (مشابه کارت‌ها)
+      if (aggregateId) {
+        const targetList = state.lists[aggregateId];
+        if (
+          targetList?.isOptimistic &&
+          !snapshot.lists[aggregateId]
+        ) {
+          delete nextLists[aggregateId];
+          telemetry.log(
+            "SNAPSHOT_MANAGER",
+            "OPTIMISTIC_LIST_PURGED",
+            { aggregateId, reason: "aggregate_bound_cleanup" }
+          );
         }
       }
     }
 
-    // ── 3. CardsByList ────────────────────────────────────────────────────────
-    // ✅ C-05 fix: unconditional restore — no dependency on snapshot.lists
-    // The card ordering must always be restored together with the card revisions;
-    // guarding it behind snapList existence caused partial/inconsistent rollbacks.
     if (snapshot.cardsByList) {
-      for (const [id, snapArr] of Object.entries(snapshot.cardsByList)) {
+      Object.entries(snapshot.cardsByList).forEach(([id, snapArr]) => {
+        const currentList = state.lists[id];
+        const snapList = snapshot.lists?.[id];
+        // اگر لیست از سرور به‌روز شده، آرایه ترتیب کارت‌ها را override نمی‌کنیم
+        if (
+          currentList &&
+          !currentList.isOptimistic &&
+          snapList &&
+          currentList.revision > snapList.revision
+        ) {
+          return;
+        }
         nextCardsByList[id] = [...snapArr];
-      }
+      });
     }
 
     return {
-      cards:     nextCards,
-      lists:     nextLists,
+      cards: nextCards,
+      lists: nextLists,
       cardsByList: nextCardsByList,
       listOrder: snapshot.listOrder ? [...snapshot.listOrder] : state.listOrder,
     };
@@ -432,8 +523,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
           payload: {
             cardId: card.id,
-            // ✅ Bug Fix 2: boardId required است در CardCreatedPayload
-            boardId: card.boardId ?? "",
+            boardId: card.boardId,
             listId: card.listId,
             title: card.title,
             position: card.position,
@@ -481,8 +571,10 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
           payload: {
             cardId,
+            boardId: currentCard.boardId,
             fromListId,
             toListId,
+            oldPosition: currentCard.position,
             newPosition:
               currentCard.position + "V",
           },
@@ -525,6 +617,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
           payload: {
             cardId,
+            boardId: currentCard.boardId,
             changes,
           },
         } as AppDomainEvent,
@@ -539,48 +632,104 @@ export const useBoardStore = create<BoardState>()((set) => ({
       );
     }),
 
-  replaceCard: (tempId, serverCard) => set((state) => {
-    // ✅ Fix: replaceCard must atomically:
-    //    1. Remove the tempId key from cards dict
-    //    2. Insert under the real server id
-    //    3. Update cardsByList to replace tempId with real id
-    //
-    // The old approach used a card.updated event which only merges fields
-    // but keeps the tempId as the key — the card is forever inaccessible
-    // by its real id, and WS reconciliation breaks because the server event
-    // carries the real id which doesn't match anything in the store.
+  /**
+   * 🌟 replaceCard — Identity Migration (tempId → serverId)
+   * 
+   * این یک "update" نیست! سرور پاسخ مرورگر مدت optimistic رو تأیید کرده
+   * و یک serverId واقعی برگردونده. باید:
+   *  1. tempId رو از همه‌ی indexها (cards, cardsByList) پاک کنیم
+   *  2. یک entity جدید با serverId و دیتای کامل بسازیم
+   *  3. در همان موقعیت آرایه (همان ترتیب) قرار بدیم
+   *
+   * این یک atomic state transition است، نه domain event.
+   * dispatcher pipeline برای این کار مناسب نیست چون هیچ `card.id_changed` event وجود ندارد.
+   */
+  replaceCard: (tempId, serverCard) =>
+    set((state) => {
+      const optimisticCard = state.cards[tempId];
 
-    const existingCard = state.cards[tempId];
-    if (!existingCard) return state;
+      // اگر tempId وجود ندارد (مثلاً rollback قبلاً اتفاق افتاده)، no-op
+      if (!optimisticCard) {
+        telemetry.log(
+          "REPLACE_CARD",
+          "TEMP_NOT_FOUND",
+          { tempId, serverId: serverCard.id }
+        );
+        return state;
+      }
 
-    const realId = serverCard.id ?? tempId;
+      const serverId = serverCard.id;
+      if (!serverId) {
+        telemetry.log(
+          "REPLACE_CARD",
+          "INVALID_SERVER_ID",
+          { tempId }
+        );
+        return state;
+      }
 
-    // Build the final card: start from optimistic, override with server data
-    const finalCard = {
-      ...existingCard,
-      ...serverCard,
-      id:           realId,
-      boardId:      serverCard.boardId ?? existingCard.boardId,
-      isOptimistic: false,
-    };
+      // اگر serverId از قبل در state وجود دارد (race condition با websocket event)،
+      // فقط tempId رو پاک کنیم و چیز جدیدی نسازیم
+      const serverAlreadyExists = !!state.cards[serverId];
 
-    // Remove tempId, insert under realId
-    const { [tempId]: _removed, ...remainingCards } = state.cards;
-    const nextCards = { ...remainingCards, [realId]: finalCard };
+      // ساخت entity جدید با merge: optimistic local fields + server authoritative fields
+      const finalCard: CardDto = serverAlreadyExists
+        ? state.cards[serverId]
+        : {
+            ...optimisticCard,
+            ...serverCard,
+            id: serverId,
+            boardId: serverCard.boardId ?? optimisticCard.boardId,
+            listId: serverCard.listId ?? optimisticCard.listId,
+            title: serverCard.title ?? optimisticCard.title,
+            position: serverCard.position ?? optimisticCard.position,
+            revision: serverCard.revision ?? optimisticCard.revision,
+            // 🌟 Server-confirmed identity migration → confirmedRevision aligns with server.
+            confirmedRevision:
+              serverCard.confirmedRevision ?? serverCard.revision ?? optimisticCard.revision,
+            isOptimistic: false,
+          };
 
-    // Replace tempId with realId in the list bucket
-    const listId = finalCard.listId;
-    const currentBucket = state.cardsByList[listId] ?? [];
-    const nextBucket = currentBucket.map((id) => (id === tempId ? realId : id));
+      // پاکسازی tempId و درج serverId در dictionary
+      const { [tempId]: _removed, ...cardsWithoutTemp } = state.cards;
+      const nextCards: Record<string, CardDto> = {
+        ...cardsWithoutTemp,
+        [serverId]: finalCard,
+      };
 
-    return {
-      cards: nextCards,
-      cardsByList: {
-        ...state.cardsByList,
-        [listId]: nextBucket,
-      },
-    };
-  }),
+      // در cardsByList، tempId را با serverId جایگزین کنیم (در همان index)
+      const targetListId = finalCard.listId;
+      const currentListIds = state.cardsByList[targetListId] ?? [];
+      const tempIndex = currentListIds.indexOf(tempId);
+      const serverIndex = currentListIds.indexOf(serverId);
+
+      let nextListIds: string[];
+      if (tempIndex !== -1 && serverIndex !== -1) {
+        // race: هر دو وجود دارند → tempId رو حذف کن
+        nextListIds = currentListIds.filter((id) => id !== tempId);
+      } else if (tempIndex !== -1) {
+        // عادی: tempId رو با serverId جایگزین کن
+        nextListIds = [
+          ...currentListIds.slice(0, tempIndex),
+          serverId,
+          ...currentListIds.slice(tempIndex + 1),
+        ];
+      } else if (serverIndex !== -1) {
+        // already migrated by websocket
+        nextListIds = currentListIds;
+      } else {
+        // هیچ‌کدام نیست (state inconsistent) → push
+        nextListIds = [...currentListIds, serverId];
+      }
+
+      return {
+        cards: nextCards,
+        cardsByList: {
+          ...state.cardsByList,
+          [targetListId]: nextListIds,
+        },
+      };
+    }),
 
   deleteCard: (cardId) =>
     set((state) => {
@@ -609,6 +758,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
           payload: {
             cardId,
+            boardId: currentCard.boardId,
           },
         } as AppDomainEvent,
 
@@ -641,6 +791,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
           payload: {
             listId: list.id,
+            boardId: list.boardId,
             title: list.title,
             position: list.position,
           },
@@ -656,54 +807,150 @@ export const useBoardStore = create<BoardState>()((set) => ({
       );
     }),
 
-  replaceList: (
-    tempId,
-    serverList
-  ) =>
+  /**
+   * 🌟 replaceList — Identity Migration (tempId → serverId)
+   *
+   * مشابه replaceCard، اما با scope وسیع‌تر:
+   *  1. tempId از state.lists پاک می‌شود
+   *  2. cardsByList[tempId] (که شامل کارت‌های child است) به cardsByList[serverId] منتقل می‌شود
+   *  3. در listOrder، tempId با serverId جایگزین می‌شود (در همان index)
+   *  4. تمام کارت‌هایی که listId آن‌ها tempId است → listId آن‌ها به serverId به‌روز می‌شود
+   */
+  replaceList: (tempId, serverList) =>
     set((state) => {
-      const existing =
-        state.lists[tempId];
+      const optimisticList = state.lists[tempId];
 
-      if (!existing) {
+      if (!optimisticList) {
+        telemetry.log(
+          "REPLACE_LIST",
+          "TEMP_NOT_FOUND",
+          { tempId, serverId: serverList.id }
+        );
         return state;
       }
 
-      return {
-        lists: {
-          ...state.lists,
+      const serverId = serverList.id;
+      if (!serverId) {
+        telemetry.log(
+          "REPLACE_LIST",
+          "INVALID_SERVER_ID",
+          { tempId }
+        );
+        return state;
+      }
 
-          [serverList.id as string]: {
-            ...existing,
+      const serverAlreadyExists = !!state.lists[serverId];
 
+      const finalList: ListDto = serverAlreadyExists
+        ? state.lists[serverId]
+        : {
+            ...optimisticList,
             ...serverList,
-
+            id: serverId,
+            boardId: serverList.boardId ?? optimisticList.boardId,
+            title: serverList.title ?? optimisticList.title,
+            position: serverList.position ?? optimisticList.position,
+            revision: serverList.revision ?? optimisticList.revision,
+            // 🌟 Server-confirmed identity migration → confirmedRevision aligns with server.
+            confirmedRevision:
+              serverList.confirmedRevision ?? serverList.revision ?? optimisticList.revision,
             isOptimistic: false,
-          },
-        },
+          };
+
+      // پاکسازی tempId از lists dictionary
+      const { [tempId]: _removedList, ...listsWithoutTemp } = state.lists;
+      const nextLists: Record<string, ListDto> = {
+        ...listsWithoutTemp,
+        [serverId]: finalList,
+      };
+
+      // در listOrder، tempId را با serverId جایگزین کنیم (در همان index)
+      const tempOrderIndex = state.listOrder.indexOf(tempId);
+      const serverOrderIndex = state.listOrder.indexOf(serverId);
+
+      let nextListOrder: string[];
+      if (tempOrderIndex !== -1 && serverOrderIndex !== -1) {
+        nextListOrder = state.listOrder.filter((id) => id !== tempId);
+      } else if (tempOrderIndex !== -1) {
+        nextListOrder = [
+          ...state.listOrder.slice(0, tempOrderIndex),
+          serverId,
+          ...state.listOrder.slice(tempOrderIndex + 1),
+        ];
+      } else if (serverOrderIndex !== -1) {
+        nextListOrder = state.listOrder;
+      } else {
+        nextListOrder = [...state.listOrder, serverId];
+      }
+
+      // انتقال cardsByList[tempId] به cardsByList[serverId]
+      const { [tempId]: tempCardIds, ...cardsByListWithoutTemp } =
+        state.cardsByList;
+      const existingServerCardIds = state.cardsByList[serverId] ?? [];
+      // merge بدون duplicate
+      const mergedCardIds = Array.from(
+        new Set([...(tempCardIds ?? []), ...existingServerCardIds])
+      );
+      const nextCardsByList: Record<string, string[]> = {
+        ...cardsByListWithoutTemp,
+        [serverId]: mergedCardIds,
+      };
+
+      // به‌روزرسانی listId در همه‌ی کارت‌هایی که parent آن‌ها tempId بوده
+      const nextCards: Record<string, CardDto> = { ...state.cards };
+      let cardsChanged = false;
+      Object.entries(state.cards).forEach(([cardId, card]) => {
+        if (card.listId === tempId) {
+          nextCards[cardId] = { ...card, listId: serverId };
+          cardsChanged = true;
+        }
+      });
+
+      return {
+        lists: nextLists,
+        listOrder: nextListOrder,
+        cardsByList: nextCardsByList,
+        ...(cardsChanged ? { cards: nextCards } : {}),
       };
     }),
 
   deleteList: (listId) =>
     set((state) => {
-      const { [listId]: _, ...remainingLists } =
-        state.lists;
+      const list = state.lists[listId];
 
-      const {
-        [listId]: __,
-        ...remainingCardsByList
-      } = state.cardsByList;
+      // Idempotency: deleting a missing list is a safe no-op
+      if (!list) {
+        return state;
+      }
 
-      return {
-        lists: remainingLists,
+      const envelope: ClientEventEnvelope = {
+        event: {
+          id: crypto.randomUUID(),
 
-        cardsByList:
-          remainingCardsByList,
+          type: "list.deleted",
 
-        listOrder:
-          state.listOrder.filter(
-            (id) => id !== listId
-          ),
+          version: list.revision + 1,
+
+          occurredAt: new Date().toISOString(),
+
+          aggregateId: listId,
+
+          aggregateType: "list",
+
+          payload: {
+            listId,
+            boardId: list.boardId,
+          },
+        } as AppDomainEvent,
+
+        optimistic: true,
       };
+
+      return dispatcherApplyEvent(
+        state,
+        envelope,
+        { mode: "live" }
+      );
     }),
 
   moveList: (fromIndex, toIndex) =>
@@ -736,7 +983,8 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
           payload: {
             listId,
-
+            boardId: list.boardId,
+            oldPosition: list.position,
             newPosition:
               list.position + "V",
           },
