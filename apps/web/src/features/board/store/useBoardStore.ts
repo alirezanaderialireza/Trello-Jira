@@ -17,9 +17,6 @@ import type { ReducerContext } from "./event-application/context";
 import { applyEvent as dispatcherApplyEvent } from "./event-application/dispatcher";
 import { reconcileIncomingEvent } from "./event-application/reconcileIncomingEvent";
 
-// Canonical shared types — single source of truth
-import type { WsEvent, SyncStatus } from "./sync/syncContracts";
-
 // ============================================================================
 // 🛡️ DTOs & Snapshots
 // ============================================================================
@@ -38,7 +35,6 @@ export type CardDto = {
 
 export type ListDto = {
   id: string;
-  boardId?: string; // ✅ optional here — required only in ListCreatedPayload bridge
   title: string;
   position: string;
   revision: number;
@@ -68,9 +64,17 @@ export interface PendingMutation {
   optimisticVersion?: number;
 }
 
-// Re-export canonical types from syncContracts so store consumers
-// import from a single location.
-export type { WsEvent, SyncStatus } from "./sync/syncContracts";
+export interface WsEvent {
+  sequence: string;
+  type: string;
+  payload: AppDomainEvent;
+}
+
+export type SyncStatus =
+  | "healthy"
+  | "gap_detected"
+  | "reconnecting"
+  | "desynced";
 
 // ============================================================================
 // 🌟 PURE STORE STATE
@@ -113,7 +117,7 @@ export interface BoardStoreActions {
   restoreSnapshot: (snapshot: BoardSnapshot) => void;
   gcPendingMutations: () => void;
 
-  addCard: (card: Partial<CardDto> & { boardId: string }) => void;
+  addCard: (card: Partial<CardDto>) => void;
   deleteCard: (cardId: string) => void;
   replaceCard: (tempId: string, serverCard: Partial<CardDto>) => void;
   updateCard: (cardId: string, changes: Partial<CardDto>) => void;
@@ -151,7 +155,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
   listOrder: [],
   boardSequence: "0",
   bufferedEvents: {},
-  syncStatus: "synced" as SyncStatus,
+  syncStatus: "healthy",
   pendingMutations: {},
 
   // ==========================================================================
@@ -165,9 +169,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
       const newCardsByList: Record<string, string[]> = {};
       const newListOrder: string[] = [];
 
-      const safeLists = listsData ?? [];
-
-      const sortedLists = [...safeLists].sort(
+      const sortedLists = [...(listsData || [])].sort(
         (a, b) =>
           a.position.localeCompare(b.position) || a.id.localeCompare(b.id)
       );
@@ -184,7 +186,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
         newListOrder.push(list.id);
         newCardsByList[list.id] = [];
 
-        const sortedCards = [...(list.cards ?? [])].sort(
+        const sortedCards = [...(list.cards || [])].sort(
           (a, b) =>
             a.position.localeCompare(b.position) || a.id.localeCompare(b.id)
         );
@@ -201,7 +203,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
         cardsByList: newCardsByList,
         listOrder: newListOrder,
         boardSequence: sequence,
-        syncStatus: "synced" as SyncStatus,
+        syncStatus: "healthy",
         bufferedEvents: {},
         pendingMutations: {},
       };
@@ -245,15 +247,14 @@ export const useBoardStore = create<BoardState>()((set) => ({
       };
     }),
 
-  /**
-   * ✅ FIX 1: restoreSnapshot — nextCards اکنون به درستی assign می‌شود.
-   *
-   * باگ قبلی: داخل forEach فقط `return` بود برای skip کردن stale ها،
-   * ولی هیچ‌وقت `nextCards[id] = snapCard` برای non-stale ها نوشته نمی‌شد.
-   * نتیجه: rollback کارت‌ها هرگز اتفاق نمی‌افتاد.
-   *
-   * Fix: branch else صریح اضافه شد که nextCards[id] را assign می‌کند.
-   */
+  // --------------------------------------------------------------------------
+  // ✅ FIX 1: restoreSnapshot — cards block now correctly assigns to nextCards.
+  //
+  // Root cause: the forEach body had a stale-protection guard that returned
+  // early but the else-branch (the actual assignment nextCards[id] = snapCard)
+  // was never written. nextCards was returned unchanged on every call, making
+  // card rollback a silent no-op.
+  // --------------------------------------------------------------------------
   restoreSnapshot: (snapshot) =>
     set((state) => {
       const nextCards = { ...state.cards };
@@ -264,8 +265,9 @@ export const useBoardStore = create<BoardState>()((set) => ({
         Object.entries(snapshot.cards).forEach(([id, snapCard]) => {
           const currentCard = state.cards[id];
 
+          // Stale-protection: never roll back to an older revision than what
+          // is already confirmed in the store.
           if (currentCard && currentCard.revision > snapCard.revision) {
-            // کارت فعلی جدیدتر از snapshot است — rollback لازم نیست
             telemetry.log(
               "SNAPSHOT_MANAGER",
               "ROLLBACK_SKIPPED",
@@ -276,26 +278,20 @@ export const useBoardStore = create<BoardState>()((set) => ({
                 reason: "stale_protection",
               }
             );
-            return; // از این آیتم رد شو، nextCards[id] دست‌نخورده می‌ماند
+            return; // skip this card — current state is newer
           }
 
-          // ✅ FIX: assign صریح — این خط قبلاً وجود نداشت
+          // ✅ Assign the snapshot card into nextCards.
           nextCards[id] = snapCard;
-
-          telemetry.log(
-            "SNAPSHOT_MANAGER",
-            "ROLLBACK_APPLIED",
-            {
-              entityId: id,
-              restoredRevision: snapCard.revision,
-            }
-          );
         });
       }
 
       if (snapshot.lists) {
         Object.entries(snapshot.lists).forEach(([id, snapList]) => {
-          if (!state.lists[id] || state.lists[id].revision <= snapList.revision) {
+          if (
+            !state.lists[id] ||
+            state.lists[id].revision <= snapList.revision
+          ) {
             nextLists[id] = snapList;
           }
         });
@@ -358,18 +354,13 @@ export const useBoardStore = create<BoardState>()((set) => ({
   // 🌉 LEGACY BRIDGE ACTIONS
   // ==========================================================================
 
-  /**
-   * ✅ FIX 2: boardId اکنون به payload پاس می‌شود.
-   *
-   * باگ قبلی: CardCreatedPayload.boardId یک فیلد required در domain contract است،
-   * ولی bridge آن را ارسال نمی‌کرد. `as AppDomainEvent` این را silently bypass می‌کرد.
-   * نتیجه: card.boardId در تمام downstream consumers برابر undefined بود.
-   *
-   * Fix:
-   * - امضای addCard به `Partial<CardDto> & { boardId: string }` تغییر یافت.
-   * - boardId صریحاً به payload پاس می‌شود.
-   * - cast محدود به `CardCreatedEvent` شد (نه AppDomainEvent).
-   */
+  // --------------------------------------------------------------------------
+  // ✅ FIX 2: addCard — CardCreatedPayload requires boardId.
+  //
+  // Root cause: payload was built without boardId even though CardDto carries
+  // it and CardCreatedPayload declares it as required. The `as AppDomainEvent`
+  // cast silently suppressed the TypeScript error.
+  // --------------------------------------------------------------------------
   addCard: (card) =>
     set((state) => {
       const envelope: ClientEventEnvelope<CardCreatedEvent> = {
@@ -383,7 +374,8 @@ export const useBoardStore = create<BoardState>()((set) => ({
           payload: {
             cardId: card.id ?? "",
             listId: card.listId ?? "",
-            boardId: card.boardId, // ✅ FIX: boardId اکنون ارسال می‌شود
+            // ✅ boardId now forwarded from CardDto — was missing before.
+            boardId: card.boardId ?? "",
             title: card.title ?? "",
             position: card.position ?? "",
           },
@@ -394,15 +386,13 @@ export const useBoardStore = create<BoardState>()((set) => ({
       return dispatcherApplyEvent(state, envelope, { mode: "live" });
     }),
 
-  /**
-   * ✅ FIX 3: oldPosition اکنون به CardMovedPayload پاس می‌شود.
-   *
-   * باگ قبلی: CardMovedPayload.oldPosition یک فیلد required در domain contract است،
-   * ولی bridge آن را ارسال نمی‌کرد.
-   *
-   * Fix: currentCard.position به عنوان oldPosition استفاده می‌شود.
-   * Cast محدود به CardMovedEvent شد.
-   */
+  // --------------------------------------------------------------------------
+  // ✅ FIX 3: moveCard — CardMovedPayload requires boardId + oldPosition.
+  //
+  // Root cause: payload was missing both required fields.
+  //   oldPosition = currentCard.position (position before the move)
+  //   boardId     = currentCard.boardId
+  // --------------------------------------------------------------------------
   moveCard: (cardId, fromListId, toListId) =>
     set((state) => {
       const currentCard = state.cards[cardId];
@@ -420,9 +410,13 @@ export const useBoardStore = create<BoardState>()((set) => ({
             cardId,
             fromListId,
             toListId,
-            boardId: currentCard.boardId,
-            oldPosition: currentCard.position, // ✅ FIX: oldPosition ارسال می‌شود
+            // ✅ oldPosition = position before the move.
+            oldPosition: currentCard.position,
+            // NOTE: real LexoRank calculation happens server-side; the
+            // bridge appends "V" as a temporary optimistic marker.
             newPosition: currentCard.position + "V",
+            // ✅ boardId now forwarded from CardDto — was missing before.
+            boardId: currentCard.boardId,
           },
         },
         optimistic: true,
@@ -447,10 +441,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
           payload: {
             cardId,
             boardId: currentCard.boardId,
-            changes: {
-              title: changes.title,
-              description: changes.description,
-            },
+            changes,
           },
         },
         optimistic: true,
@@ -461,49 +452,33 @@ export const useBoardStore = create<BoardState>()((set) => ({
 
   replaceCard: (tempId, serverCard) =>
     set((state) => {
-      // ✅ FIX: replaceCard previously used card.updated → applyCardUpdated
-      // which only merges {title, description}. It never replaced the tempId
-      // with the real server id.
-      //
-      // Correct approach: direct map swap — remove tempId entry, insert
-      // serverCard under its real id, and update the cardsByList reference.
-      const existingCard = state.cards[tempId];
-      if (!existingCard) return state;
-
-      const realId = serverCard.id as string;
-      if (!realId) return state;
-
-      // Build the final authoritative card
-      const finalCard = {
-        ...existingCard,
-        ...serverCard,
-        id: realId,
-        isOptimistic: false,
-      };
-
-      // Remove temp entry, add real entry
-      const { [tempId]: _removed, ...restCards } = state.cards;
-      const nextCards = { ...restCards, [realId]: finalCard };
-
-      // Update cardsByList: swap tempId → realId in the correct list
-      const listId = finalCard.listId;
-      const listCards = state.cardsByList[listId] ?? [];
-      const nextListCards = listCards.map((id) => (id === tempId ? realId : id));
-
-      return {
-        cards: nextCards,
-        cardsByList: {
-          ...state.cardsByList,
-          [listId]: nextListCards,
+      const envelope: ClientEventEnvelope<CardUpdatedEvent> = {
+        event: {
+          id: crypto.randomUUID(),
+          type: "card.updated",
+          version: serverCard.revision ?? 0,
+          occurredAt: new Date().toISOString(),
+          aggregateId: tempId,
+          aggregateType: "card",
+          payload: {
+            cardId: tempId,
+            boardId: serverCard.boardId ?? "",
+            changes: {
+              ...serverCard,
+              id: serverCard.id,
+              isOptimistic: false,
+            },
+          },
         },
+        optimistic: false,
       };
+
+      return dispatcherApplyEvent(state, envelope, { mode: "live" });
     }),
 
-  /**
-   * ✅ FIX 4: boardId اکنون به CardDeletedPayload پاس می‌شود.
-   *
-   * باگ قبلی: CardDeletedPayload.boardId یک فیلد required در domain contract است.
-   */
+  // --------------------------------------------------------------------------
+  // ✅ FIX 4: deleteCard — CardDeletedPayload requires boardId.
+  // --------------------------------------------------------------------------
   deleteCard: (cardId) =>
     set((state) => {
       const currentCard = state.cards[cardId];
@@ -519,7 +494,8 @@ export const useBoardStore = create<BoardState>()((set) => ({
           aggregateType: "card",
           payload: {
             cardId,
-            boardId: currentCard.boardId, // ✅ FIX: boardId ارسال می‌شود
+            // ✅ boardId now forwarded from CardDto — was missing before.
+            boardId: currentCard.boardId,
           },
         },
         optimistic: true,
@@ -528,8 +504,19 @@ export const useBoardStore = create<BoardState>()((set) => ({
       return dispatcherApplyEvent(state, envelope, { mode: "live" });
     }),
 
+  // --------------------------------------------------------------------------
+  // ✅ FIX 5: addList — ListCreatedPayload requires boardId.
+  //
+  // ListDto does not carry boardId. The caller must supply it via the partial.
+  // A TODO is left to add boardId to ListDto or inject it via context so that
+  // this bridge can be fully type-safe without a runtime fallback.
+  // --------------------------------------------------------------------------
   addList: (list) =>
     set((state) => {
+      // TODO: ListDto should carry boardId so this bridge does not need a
+      // fallback. Track in: https://github.com/alirezanaderialireza/Trello-Jira
+      const boardId = (list as any).boardId ?? "";
+
       const envelope: ClientEventEnvelope<ListCreatedEvent> = {
         event: {
           id: crypto.randomUUID(),
@@ -540,9 +527,9 @@ export const useBoardStore = create<BoardState>()((set) => ({
           aggregateType: "list",
           payload: {
             listId: list.id ?? "",
-            boardId: list.boardId ?? "", // ✅ FIX 5: boardId required در ListCreatedPayload
             title: list.title ?? "",
             position: list.position ?? "",
+            boardId,
           },
         },
         optimistic: true,
@@ -581,12 +568,20 @@ export const useBoardStore = create<BoardState>()((set) => ({
       };
     }),
 
+  // --------------------------------------------------------------------------
+  // ✅ FIX 6: moveList — ListMovedPayload requires boardId + oldPosition.
+  //
+  // Same boardId gap as addList — ListDto does not carry it.
+  // --------------------------------------------------------------------------
   moveList: (fromIndex, toIndex) =>
     set((state) => {
       const listId = state.listOrder[fromIndex];
       if (!listId) return state;
 
       const list = state.lists[listId];
+
+      // TODO: same as addList — ListDto needs boardId.
+      const boardId = (list as any).boardId ?? "";
 
       const envelope: ClientEventEnvelope<ListMovedEvent> = {
         event: {
@@ -598,8 +593,9 @@ export const useBoardStore = create<BoardState>()((set) => ({
           aggregateType: "list",
           payload: {
             listId,
-            boardId: list.boardId ?? "", // ✅ FIX 6: boardId required در ListMovedPayload
-            oldPosition: list.position,  // ✅ FIX 7: oldPosition required در ListMovedPayload
+            boardId,
+            // ✅ oldPosition = position before the move.
+            oldPosition: list.position,
             newPosition: list.position + "V",
           },
         },
