@@ -63,6 +63,11 @@ export function applyCardMoved(
     return {};
   }
 
+  // ✅ Stale guard: skip if current state is already at or ahead of this event
+  if (existingCard.revision >= event.version) {
+    return {};
+  }
+
   /**
    * --------------------------------------------------------------
    * Build Updated Card

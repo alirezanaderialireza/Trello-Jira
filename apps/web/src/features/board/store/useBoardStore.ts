@@ -516,42 +516,47 @@ export const useBoardStore = create<BoardState>()((set) => ({
     }),
 
   replaceCard: (tempId, serverCard) => set((state) => {
-  const envelope: ClientEventEnvelope = {
-    event: {
-      id: crypto.randomUUID(),
+    // ✅ Fix: replaceCard must atomically:
+    //    1. Remove the tempId key from cards dict
+    //    2. Insert under the real server id
+    //    3. Update cardsByList to replace tempId with real id
+    //
+    // The old approach used a card.updated event which only merges fields
+    // but keeps the tempId as the key — the card is forever inaccessible
+    // by its real id, and WS reconciliation breaks because the server event
+    // carries the real id which doesn't match anything in the store.
 
-      type: "card.updated",
+    const existingCard = state.cards[tempId];
+    if (!existingCard) return state;
 
-      version: serverCard.revision ?? 0,
+    const realId = serverCard.id ?? tempId;
 
-      occurredAt: new Date().toISOString(),
+    // Build the final card: start from optimistic, override with server data
+    const finalCard = {
+      ...existingCard,
+      ...serverCard,
+      id:           realId,
+      boardId:      serverCard.boardId ?? existingCard.boardId,
+      isOptimistic: false,
+    };
 
-      aggregateId: tempId,
+    // Remove tempId, insert under realId
+    const { [tempId]: _removed, ...remainingCards } = state.cards;
+    const nextCards = { ...remainingCards, [realId]: finalCard };
 
-      aggregateType: "card",
+    // Replace tempId with realId in the list bucket
+    const listId = finalCard.listId;
+    const currentBucket = state.cardsByList[listId] ?? [];
+    const nextBucket = currentBucket.map((id) => (id === tempId ? realId : id));
 
-      payload: {
-        boardId: serverCard.boardId,
-
-        cardId: tempId,
-
-        changes: {
-          ...serverCard,
-          id: serverCard.id,
-          isOptimistic: false,
-        },
+    return {
+      cards: nextCards,
+      cardsByList: {
+        ...state.cardsByList,
+        [listId]: nextBucket,
       },
-    } as AppDomainEvent,
-
-    optimistic: false,
-  };
-
-  return dispatcherApplyEvent(
-    state,
-    envelope,
-    { mode: "live" }
-  );
-}),
+    };
+  }),
 
   deleteCard: (cardId) =>
     set((state) => {

@@ -1,27 +1,21 @@
 // packages/api/src/routers/realtime/sync.router.ts
 //
 // Fixes applied:
-// ✅ #S-01: ctx.infra.db.query.outboxEvents.findMany() — Drizzle's relational
-//           query API requires the db instance to have `query` registered via
-//           `drizzle(client, { schema })`. Since dbInstance is typed as `any`
-//           in the DI container, this WILL work at runtime only if BoardReadModels
-//           already uses db.query successfully (which it does in board-read-models.ts).
-//           However, the inline field-accessor lambda signatures were wrong:
-//           Drizzle passes the TABLE COLUMNS object, not a free Record<string,unknown>.
-//           Fixed to use the imported `outboxEvents` table columns directly via
-//           the `where` / `orderBy` helpers pattern that matches Drizzle v0.29+.
-// ✅ #S-02: row mapping now uses explicit field names from outboxEvents schema
-//           instead of generic `event.field` — prevents silent undefined reads
-//           if Drizzle returns camelCase (eventId, aggregateId, etc.).
-// ✅ #S-03: validateSequenceDrift threshold corrected — old code divided by 1000
-//           inside the guard but multiplied by 1000 in the check, making it
-//           always pass; simplified to a single constant.
-// ✅ #S-04: ensureBoardAccess now receives the full board object with proper type.
+// ✅ #S-01: Drizzle query now uses the imported `outboxEvents` table object
+//           with proper column references (outboxEvents.aggregateId, etc.)
+//           instead of db.query.outboxEvents.aggregateId which is a QueryBuilder
+//           proxy, not a column object — causes runtime crash.
+// ✅ #S-02: row mapping uses explicit field names from outboxEvents schema.
+// ✅ #S-03: sequence drift threshold simplified.
+// ✅ #S-04: ensureBoardAccess typed properly.
 
 import { performance } from "node:perf_hooks";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { eq, gt, and } from "drizzle-orm";
+
+// ✅ #S-01: import the table object directly for column references
+import { outboxEvents } from "@repo/db";
 
 import { router, protectedProcedure } from "../../trpc";
 import type { BoardId } from "@repo/domain";
@@ -143,8 +137,10 @@ export const realtimeSyncRouter = router({
         //           We use the relational API here to stay consistent.
         const db = ctx.infra.db;
 
-        // ✅ #S-01: use `eq` / `gt` / `and` helpers imported from drizzle-orm
-        //           to avoid the broken inline-lambda field accessor pattern.
+        // ✅ #S-01: use imported `outboxEvents` table object with proper column refs.
+        //           db.query.outboxEvents is a QueryBuilder proxy — NOT a column object.
+        //           eq(db.query.outboxEvents.aggregateId, ...) → runtime crash.
+        //           Fix: import { outboxEvents } from "@repo/db" and use table columns.
         const rows: Array<{
           eventId:       string;
           type:          string;
@@ -154,27 +150,17 @@ export const realtimeSyncRouter = router({
           correlationId?: string | null;
           causationId?:  string | null;
           eventVersion:  string;
-        }> = await db.query.outboxEvents.findMany({
-          where: and(
-            eq(db.query.outboxEvents.aggregateId, input.boardId),
-            gt(db.query.outboxEvents.sequence,    input.lastSeenSequence),
-          ),
-          orderBy: [db.query.outboxEvents.sequence],
-          limit:   input.limit + 1,
-        }).catch(() => {
-          // Fallback for Drizzle versions that require the full table reference
-          return db
-            .select()
-            .from({ outboxEvents: db._.fullSchema?.outboxEvents ?? {} })
-            .where(
-              and(
-                eq({ aggregateId: input.boardId } as any, input.boardId),
-                gt({ sequence: input.lastSeenSequence } as any, input.lastSeenSequence),
-              ),
-            )
-            .orderBy({ sequence: "asc" } as any)
-            .limit(input.limit + 1);
-        });
+        }> = await db
+          .select()
+          .from(outboxEvents)
+          .where(
+            and(
+              eq(outboxEvents.aggregateId, input.boardId),
+              gt(outboxEvents.sequence,    input.lastSeenSequence),
+            ),
+          )
+          .orderBy(outboxEvents.sequence)
+          .limit(input.limit + 1);
 
         // ── 4. Pagination ──────────────────────────────────────────────────
         const hasMore  = rows.length > input.limit;

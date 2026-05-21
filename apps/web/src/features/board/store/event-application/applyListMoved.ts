@@ -30,6 +30,11 @@ export function applyListMoved(
     return {};
   }
 
+  // ✅ Stale guard: skip if current state is already at or ahead of this event
+  if (existingList.revision >= event.version) {
+    return {};
+  }
+
   const updatedList = {
     ...existingList,
     position: newPosition,
