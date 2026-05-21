@@ -75,13 +75,45 @@ export class PinoLogger implements Logger {
 // ============================================================================
 // ⚡ 2. Drizzle Transaction Manager (Serializable Isolation)
 // ============================================================================
+//
+// `applyTenantContext` is the RLS hook. When the tRPC layer wires this
+// constructor (see packages/api/src/trpc.ts), it passes a callback that reads
+// the request's tenantId/userId from `tenantContextALS` (defined in
+// `@repo/db/middleware/tenantContext`) and runs `SET LOCAL app.current_tenant_id
+// = ...` on every transaction this manager opens.
+//
+// The result: services that use `txManager.serializable(...)` to do their own
+// transactional work — which gets a fresh connection from the pool with no
+// GUC set — automatically inherit the request's tenant context, so the third
+// defence layer (Postgres RLS) keeps fire-ing even for service-driven queries.
+//
+// The hook is OPTIONAL by design: workers (outbox processor, rebalance worker)
+// construct a `TransactionManager` without the hook because they intentionally
+// run cross-tenant — they connect with a `BYPASSRLS` role and operate on the
+// whole queue. Tests that don't care about RLS likewise omit it.
+//
+// `applyTenantContext` is a `function | undefined` (not a method) so the
+// concrete class still satisfies the bare `TransactionManager<TTx>` port
+// from `@repo/domain/ports`.
+// ============================================================================
 export class TransactionManager implements ITransactionManager<any> {
-  constructor(private readonly db: any) {}
+  constructor(
+    private readonly db: any,
+    private readonly applyTenantContext?: (tx: any) => Promise<void>,
+  ) {}
 
   async serializable<T>(callback: (tx: any) => Promise<T>): Promise<T> {
     // 🌟 بالاترین سطح ایزولاسیون دیتابیس برای جلوگیری از باگ‌های همزمانی (Race Conditions)
     return await this.db.transaction(
       async (tx: any) => {
+        // RLS hook — set tenant/user GUCs before the user callback runs.
+        // Anything thrown here surfaces as a normal transaction failure
+        // and rolls everything back, which is the correct behaviour: a
+        // service tx that cannot establish tenant context MUST fail
+        // closed rather than leak rows across tenants.
+        if (this.applyTenantContext) {
+          await this.applyTenantContext(tx);
+        }
         return await callback(tx);
       },
       { isolationLevel: "serializable" }
