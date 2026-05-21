@@ -1,7 +1,7 @@
 // apps/web/src/features/board/store/event-application/applyCardUpdated.ts
 
 import type { CardUpdatedEvent } from "@repo/domain";
-import type { BoardStoreState, CardDto } from "../useBoardStore";
+import type { BoardStoreState } from "../useBoardStore";
 import type { ClientEventEnvelope } from "./types";
 import type { ReducerContext } from "./context";
 
@@ -9,10 +9,20 @@ import type { ReducerContext } from "./context";
  * ------------------------------------------------------------------
  * applyCardUpdated
  * ------------------------------------------------------------------
+ *
+ * Pure Event Reducer
+ *
  * Responsibilities:
- * - apply title/description changes from payload
- * - propagate boardId from payload (defensive self-healing)
- * - stale protection via version check
+ * - apply title / description changes to an existing card
+ * - enforce stale-event protection
+ * - preserve replay safety and idempotency
+ *
+ * Rules:
+ * ✅ Pure
+ * ✅ Immutable
+ * ✅ Replay-safe
+ * ✅ Idempotent
+ * ✅ Partial state return
  * ------------------------------------------------------------------
  */
 export function applyCardUpdated(
@@ -21,9 +31,7 @@ export function applyCardUpdated(
   _context: ReducerContext,
 ): Partial<BoardStoreState> {
   const { event } = envelope;
-
-  // 🌟 Full canonical payload destructure
-  const { cardId, boardId, changes } = event.payload;
+  const { cardId, changes } = event.payload;
 
   const existingCard = state.cards[cardId];
 
@@ -31,38 +39,38 @@ export function applyCardUpdated(
     return {};
   }
 
-  /**
-   * 🛡️ Stale Protection — dual-revision aware
-   *
-   * For server events: compare against confirmedRevision (canonical).
-   * For optimistic events: compare against revision (local optimistic).
-   * Without this distinction, an ACK with version === optimistic-revision
-   * would be wrongly dropped, leaving the client diverged from the server.
-   */
-  if (envelope.acknowledged) {
-    if (existingCard.confirmedRevision >= event.version) {
-      return {};
-    }
-  } else {
-    if (existingCard.revision >= event.version) {
-      return {};
-    }
+  // -------------------------------------------------------------------------
+  // R8 fix — Stale Protection Guard: strict > instead of >=
+  //
+  // Previous policy: existingCard.revision >= event.version
+  //   → DROP the event if card.revision equals event.version
+  //
+  // Problem: for a brand-new optimistic card (revision = 1) the first
+  // server-confirmed update also carries version = 1.  With >= that
+  // legitimate update was silently dropped, leaving the card perpetually
+  // in its optimistic state.
+  //
+  // Correct policy: drop only when the current entity is STRICTLY AHEAD of
+  // the incoming event (i.e. a newer event has already been applied).
+  // This mirrors the same fix already applied to applyCardDeleted (B6).
+  // -------------------------------------------------------------------------
+  if (existingCard.revision > event.version) {
+    return {};
   }
 
-  // 🌟 boardId from payload is authoritative; if missing (e.g. legacy/test
-  // fixtures), fall back to the existing entity's boardId.
-  const updatedCard: CardDto = {
+  // -------------------------------------------------------------------------
+  // CardUpdatedPayload.changes is narrowly typed as { title?, description? }.
+  // Spread only what the domain contract allows — do NOT spread arbitrary
+  // Partial<CardDto> fields (id, listId, position, boardId, etc.) here.
+  // Those identity fields are managed by dedicated events (card.created,
+  // card.moved) and by replaceCard (which directly writes the canonical entry).
+  // -------------------------------------------------------------------------
+  const updatedCard = {
     ...existingCard,
-    boardId: boardId ?? existingCard.boardId,
     ...(changes.title !== undefined && { title: changes.title }),
     ...(changes.description !== undefined && { description: changes.description }),
     revision: event.version,
-    confirmedRevision: envelope.acknowledged
-      ? event.version
-      : existingCard.confirmedRevision,
-    isOptimistic: envelope.acknowledged
-      ? false
-      : envelope.optimistic ?? existingCard.isOptimistic ?? false,
+    isOptimistic: envelope.optimistic ?? existingCard.isOptimistic ?? false,
   };
 
   return {

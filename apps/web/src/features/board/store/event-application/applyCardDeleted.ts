@@ -10,61 +10,50 @@ import type { ReducerContext } from "./context";
  * applyCardDeleted
  * ------------------------------------------------------------------
  * Responsibilities:
- * - Deterministic card removal from cards dict
- * - O(1) targeted cardsByList update
+ * - Deterministic card removal
+ * - O(1) targeted list update
  * - Stale event protection (>= version check)
  * - Idempotency (safe against double deletion)
  * ------------------------------------------------------------------
  */
 export function applyCardDeleted(
-  state: BoardStoreState,
+  state:BoardStoreState,
   envelope: ClientEventEnvelope<CardDeletedEvent>,
   _context: ReducerContext,
 ): Partial<BoardStoreState> {
   const { event } = envelope;
-
-  // 🌟 Note: we only need cardId for delete; boardId is in payload but
-  // unused here (no DTO to construct). Tenant guards happen on server.
   const { cardId } = event.payload;
 
   const existingCard = state.cards[cardId];
 
-  // 🛡️ Idempotency: deleting an absent card is a safe no-op.
-  if (!existingCard) {
+  /**
+   * 🛡️ 1. Idempotency & Stale Guard
+   * اگر کارت وجود ندارد یا قبلاً توسط رویدادی با ورژن بالاتر (مثلاً Recreate) 
+   * مدیریت شده، هیچ تغییری اعمال نمی‌کنیم.
+   */
+  // FIX B6: stale guard uses strict > so that an event with the same version
+  // as the current card is still applied (idempotent delete is safe).
+  // Using >= would incorrectly drop a legitimate first-time delete whose
+  // version equals the card's current revision.
+  if (!existingCard || existingCard.revision > event.version) {
     return {};
   }
 
-  /**
-   * 🛡️ Idempotency & Stale Guard — dual-revision aware
-   *
-   * For server events: compare against confirmedRevision.
-   * For optimistic events: compare against revision.
-   * Use STRICT '>' (not '>=') because deletion is a terminal state:
-   * if existing.X === event.version we still apply the delete.
-   */
-  if (envelope.acknowledged) {
-    if (existingCard.confirmedRevision > event.version) {
-      return {};
-    }
-  } else {
-    if (existingCard.revision > event.version) {
-      return {};
-    }
-  }
-
+  // پیدا کردن آیدی لیستی که کارت در آن قرار داشت
   const sourceListId = existingCard.listId;
 
   /**
-   * 🛡️ Referential Integrity Check
-   * If card was already moved to another list (race with move event),
-   * we still remove it from cards dict but skip cardsByList rewrite.
+   * 🛡️ 2. Referential Integrity Check
+   * اگر کارت در لیستِ ادعا شده وجود نداشته باشد، فقط دیکشنری را پاک می‌کنیم.
+   * این برای سناریوهای Race Condition بین Move و Delete حیاتی است.
    */
-  const currentListIds = state.cardsByList[sourceListId] ?? [];
+  const currentListIds = state.cardsByList[sourceListId] || [];
   const isCardInList = currentListIds.includes(cardId);
 
-  // Remove card from main dictionary
+  // حذف کارت از دیکشنری اصلی
   const { [cardId]: _removedCard, ...remainingCards } = state.cards;
 
+  // اگر کارت در لیست نبود، فقط دیکشنری را آپدیت برمی‌گردانیم
   if (!isCardInList) {
     return {
       cards: remainingCards,
@@ -72,7 +61,8 @@ export function applyCardDeleted(
   }
 
   /**
-   * 🚀 O(1) Targeted Update
+   * 🚀 3. O(1) Targeted Update
+   * فقط همان لیستی که تحت تاثیر قرار گرفته را فیلتر می‌کنیم.
    */
   return {
     cards: remainingCards,
