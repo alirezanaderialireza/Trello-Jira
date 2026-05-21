@@ -299,18 +299,37 @@ export async function createContext(opts: {
     });
 
   // ── Session resolution ─────────────────────────────────────────────────────
-  // Priority: explicit opts.session > extract from request > null
+  // Priority: explicit opts.session > extract from Auth.js > extract from @repo/auth > null
   let session: Session | null = opts.session ?? null;
 
   if (!session && opts.req) {
-    const authSession: AuthSession | null = await getSessionFromRequest(opts.req);
-    if (authSession) {
-      session = {
-        user: authSession.user,
-        tenantId: authSession.tenantId,
-        aclVersion: authSession.aclVersion,
-        roles: authSession.roles,
-      };
+    // Try Auth.js session first (from next-auth cookie)
+    try {
+      const { auth } = await import("../../../apps/web/src/auth");
+      const authSession = await (auth as any)();
+      if (authSession?.user?.id) {
+        session = {
+          user: { id: authSession.user.id },
+          tenantId: "", // Will be resolved from workspace context per-request
+          aclVersion: 1,
+          roles: [],
+        };
+      }
+    } catch {
+      // Auth.js not available (e.g. in worker context) — fall through
+    }
+
+    // Fallback to @repo/auth JWT (for WS server and API-key clients)
+    if (!session) {
+      const authSession: AuthSession | null = await getSessionFromRequest(opts.req);
+      if (authSession) {
+        session = {
+          user: authSession.user,
+          tenantId: authSession.tenantId,
+          aclVersion: authSession.aclVersion,
+          roles: authSession.roles,
+        };
+      }
     }
   }
 

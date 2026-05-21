@@ -9,6 +9,7 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import { workspaces } from "./workspaces";
 
 export const boards = pgTable(
   "boards",
@@ -23,7 +24,9 @@ export const boards = pgTable(
     // =========================================================================
     // 🔹 Multi-Tenant Isolation
     // =========================================================================
-    tenantId: uuid("tenant_id").notNull(),
+    tenantId: uuid("tenant_id")
+      .references(() => workspaces.id, { onDelete: "cascade" })
+      .notNull(),
 
     // =========================================================================
     // 🔹 Core Board Data

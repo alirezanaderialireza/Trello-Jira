@@ -3,11 +3,17 @@
   "version": "1.0.0",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./auth/argon2Hasher": "./src/auth/argon2Hasher.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@repo/domain": "workspace:*",
+    "@repo/auth": "workspace:*",
+    "@node-rs/argon2": "^2.0.2",
     "ioredis": "^5.10.1"
   },
   "devDependencies": {
