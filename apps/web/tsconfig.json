@@ -4,7 +4,9 @@
     "jsx": "preserve",
     "plugins": [{ "name": "next" }],
     "types": ["node", "vitest/globals"],
-    "noImplicitAny": false
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": [
     "src",

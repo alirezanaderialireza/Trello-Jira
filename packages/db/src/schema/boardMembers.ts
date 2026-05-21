@@ -5,6 +5,7 @@ import {
   uuid,
   varchar,
   timestamp,
+import { workspaces } from "./workspaces";
   uniqueIndex,
   index,
   integer,
@@ -19,7 +20,7 @@ export const boardMembers = pgTable(
   "board_members",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    tenantId: uuid("tenant_id").notNull(),
+    tenantId: uuid("tenant_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
     boardId: uuid("board_id").references(() => boards.id, { onDelete: "cascade" }).notNull(),
     userId: varchar("user_id", { length: 128 }).notNull(),
     role: varchar("role", { length: 32 }).notNull().default("MEMBER"),

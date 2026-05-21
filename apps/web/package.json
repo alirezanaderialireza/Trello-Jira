@@ -17,6 +17,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@repo/api": "workspace:*",
     "@repo/db": "workspace:*",
+    "drizzle-orm": "latest",
     "@repo/domain": "workspace:*",
     "@repo/infrastructure": "workspace:*",
     "dayjs": "^1.11.13",

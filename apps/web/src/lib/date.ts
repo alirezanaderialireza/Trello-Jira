@@ -217,7 +217,6 @@ export function toJalaliDisplay(
   // and also avoids the utcOffset reset trap of instance .calendar() on tz instances.
   const wallClock = dayjs.utc(date).tz(tz).format("YYYY-MM-DD HH:mm:ss");
   const utcMirror = dayjs.utc(wallClock);
-  // @ts-expect-error — jalaliday instance .calendar() method
   return utcMirror.calendar("jalali").format(format);
 }
 
@@ -253,7 +252,6 @@ export function fromJalaliInput(input: string): ParseResult<DateOnly> {
   // (jalaliday's correct API for Jalali parsing — NOT customParseFormat)
   let candidate: dayjs.Dayjs;
   try {
-    // @ts-expect-error — jalaliday object-based parse API
     candidate = dayjs(normalized, { jalali: true, format: JALALI_FMT });
     if (!candidate.isValid()) {
       return { ok: false, error: "INVALID_JALALI_DATE", input };
@@ -261,7 +259,6 @@ export function fromJalaliInput(input: string): ParseResult<DateOnly> {
 
     // Round-trip validation: format back to Jalali via instance method
     // (static dayjs.calendar() is no-op in Vite ESM — must use instance)
-    // @ts-expect-error — jalaliday instance .calendar() method
     const roundTrip = candidate.calendar("jalali").format(JALALI_FMT);
 
     if (roundTrip !== normalized) {
@@ -269,7 +266,6 @@ export function fromJalaliInput(input: string): ParseResult<DateOnly> {
     }
 
     // Convert to Gregorian DateOnly — NO timezone shift!
-    // @ts-expect-error — jalaliday instance .calendar() method
     const gregDate = candidate.calendar("gregory").format("YYYY-MM-DD");
     return { ok: true, value: gregDate as DateOnly };
   } catch {
@@ -308,14 +304,12 @@ export function fromJalaliDateTimeInput(
 
   // Parse with object-based API (jalaliday correct parsing method)
   try {
-    // @ts-expect-error — jalaliday object-based parse API
     const candidate = dayjs(fullNormalized, { jalali: true, format: "YYYY/MM/DD HH:mm" });
     if (!candidate.isValid()) {
       return { ok: false, error: "INVALID_JALALI_DATE", input };
     }
 
     // Round-trip validation (date part only) via instance method
-    // @ts-expect-error — jalaliday instance .calendar() method
     const roundTrip = candidate.calendar("jalali").format(JALALI_FMT);
 
     if (roundTrip !== normalizedDate) {
@@ -323,7 +317,6 @@ export function fromJalaliDateTimeInput(
     }
 
     // Convert to Gregorian, apply timezone, then UTC
-    // @ts-expect-error — jalaliday instance .calendar() method
     const gregString = candidate.calendar("gregory").format("YYYY-MM-DD HH:mm");
     const withTz = dayjs.tz(gregString, "YYYY-MM-DD HH:mm", tz);
     return { ok: true, value: withTz.utc().toISOString() as UTCDateTime };
