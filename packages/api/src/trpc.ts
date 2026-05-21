@@ -629,8 +629,10 @@ export const protectedProcedure =
 // ============================================================================
 
 export const boardMemberGuard = t.middleware(
-  async ({ ctx, next, rawInput }) => {
+  async ({ ctx, next, getRawInput }) => {
     // Extract boardId from input (supports nested and flat shapes)
+    // tRPC v11: rawInput is now an async getter (`getRawInput`).
+    const rawInput = await getRawInput();
     const input = rawInput as Record<string, unknown> | null;
     const boardId =
       (input?.boardId as string) ??
