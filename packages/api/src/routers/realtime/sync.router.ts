@@ -166,7 +166,7 @@ export const realtimeSyncRouter = router({
         const hasMore = rows.length > input.limit;
         const pageRows = hasMore ? rows.slice(0, input.limit) : rows;
 
-        const events: SyncEventDTO[] = pageRows.map((row) => ({
+        const events: SyncEventDTO[] = pageRows.map((row: any) => ({
           eventId: row.eventId,
           type: row.type,
           sequence: String(row.sequence),

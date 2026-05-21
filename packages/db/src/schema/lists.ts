@@ -8,11 +8,11 @@ import {
   timestamp,
   index,
   uniqueIndex,
-import { workspaces } from "./workspaces";
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 import { boards } from "./boards";
+import { workspaces } from "./workspaces";
 
 // ============================================================================
 // 🃏 Lists Table Schema (Enterprise-Grade)

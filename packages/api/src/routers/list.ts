@@ -154,7 +154,7 @@ export const listRouter = router({
           });
         }
 
-        const lagMs = Date.now() - projection.lastUpdatedTs;
+        const lagMs = Date.now() - (projection.lastUpdatedTs ?? Date.now());
 
         return {
           lists: projection.data,

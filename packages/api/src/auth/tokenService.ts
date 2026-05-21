@@ -81,8 +81,8 @@ const REVOKE_CHANNEL = "auth:revoke";
 // ============================================================================
 
 export class TokenService {
-  private readonly privateKey: Promise<jose.KeyLike>;
-  private readonly publicKey:  Promise<jose.KeyLike>;
+  private readonly privateKey: Promise<any>;
+  private readonly publicKey:  Promise<any>;
 
   constructor(
     /** PEM-encoded PKCS8 private key (RS256) */

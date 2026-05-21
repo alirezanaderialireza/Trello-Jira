@@ -5,13 +5,13 @@ import {
   uuid,
   varchar,
   timestamp,
-import { workspaces } from "./workspaces";
   uniqueIndex,
   index,
   integer,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { boards } from "./boards";
+import { workspaces } from "./workspaces";
 
 // ============================================================================
 // 🏷️ Board Members Table Schema
