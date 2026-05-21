@@ -32,6 +32,7 @@ export type DomainErrorReason =
   | "NOT_FOUND"
   | "BOARD_ARCHIVED"
   | "LIST_LIMIT_REACHED"
+  | "CARD_LOCKED"
 
   // ===========================================================================
   // Request / Command Validation
@@ -70,6 +71,7 @@ export const DomainErrorCodes: Record<DomainErrorReason, DomainErrorReason> = {
   NOT_FOUND: "NOT_FOUND",
   BOARD_ARCHIVED: "BOARD_ARCHIVED",
   LIST_LIMIT_REACHED: "LIST_LIMIT_REACHED",
+  CARD_LOCKED: "CARD_LOCKED",
   INVALID_REQUEST_PAYLOAD: "INVALID_REQUEST_PAYLOAD",
   COMMAND_EXPIRED: "COMMAND_EXPIRED",
   DEADLOCK_DETECTED: "DEADLOCK_DETECTED",
