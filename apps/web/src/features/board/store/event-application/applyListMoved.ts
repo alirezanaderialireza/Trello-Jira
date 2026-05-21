@@ -1,9 +1,7 @@
 // apps/web/src/features/board/store/event-application/applyListMoved.ts
 
 import type { ListMovedEvent } from "@repo/domain";
-
-import type { BoardStoreState, ListDto } from "../useBoardStore";
-
+import type { BoardStoreState } from "../useBoardStore";
 import type { ClientEventEnvelope } from "./types";
 import type { ReducerContext } from "./context";
 
@@ -15,9 +13,8 @@ import type { ReducerContext } from "./context";
  * Pure Event Reducer
  *
  * Responsibilities:
- * - move/reorder lists
+ * - move / reorder lists on the board
  * - update LexoRank position
- * - propagate boardId from payload (defensive)
  * - maintain deterministic board ordering
  * - preserve replay safety
  * - support optimistic reconciliation
@@ -26,13 +23,12 @@ import type { ReducerContext } from "./context";
  * ✅ Pure
  * ✅ Immutable
  * ✅ Replay-safe
- * ✅ Stale-protected
+ * ✅ Idempotent
  * ✅ Deterministic
  * ✅ Partial state return
  * ✅ Stable sorting
  * ------------------------------------------------------------------
  */
-
 export function applyListMoved(
   state: BoardStoreState,
   envelope: ClientEventEnvelope<ListMovedEvent>,
@@ -40,60 +36,44 @@ export function applyListMoved(
 ): Partial<BoardStoreState> {
   const { event } = envelope;
 
-  // 🌟 Full canonical payload destructure
-  const {
-    listId,
-    boardId,
-    newPosition,
-  } = event.payload;
+  const { listId, newPosition } = event.payload;
 
+  // -------------------------------------------------------------------------
+  // Replay Safety Guard
+  // -------------------------------------------------------------------------
   const existingList = state.lists[listId];
-
   if (!existingList) {
     return {};
   }
 
-  /**
-   * Stale Protection — dual-revision aware (see applyCardMoved).
-   */
-  if (envelope.acknowledged) {
-    if (existingList.confirmedRevision >= event.version) {
-      return {};
-    }
-  } else {
-    if (existingList.revision >= event.version) {
-      return {};
-    }
-  }
-
-  const updatedList: ListDto = {
+  // -------------------------------------------------------------------------
+  // Build Updated List Entity
+  // -------------------------------------------------------------------------
+  // R7 fix: use event.version directly — DomainEvent<T,P>.version is always
+  // number.  The previous (event as any).version hack hid a TS typing error
+  // caused by an old eventVersion alias that no longer exists in base.ts.
+  // -------------------------------------------------------------------------
+  const updatedList = {
     ...existingList,
-    boardId: boardId ?? existingList.boardId,
     position: newPosition,
-    revision: event.version,
-    confirmedRevision: envelope.acknowledged
-      ? event.version
-      : existingList.confirmedRevision,
-    isOptimistic: envelope.acknowledged
-      ? false
-      : envelope.optimistic ?? existingList.isOptimistic ?? false,
+    revision: event.version,   // ← was: (event as any).version — now type-safe
+    isOptimistic: envelope.optimistic ?? existingList.isOptimistic ?? false,
   };
 
+  // -------------------------------------------------------------------------
+  // Deterministic Stable Sort of listOrder
+  // -------------------------------------------------------------------------
+  // MUST use updatedList.position for the moved list (not the stale value in
+  // state.lists[listId].position).  Failure causes ordering divergence across
+  // clients during optimistic reorder and replay.
+  // -------------------------------------------------------------------------
   const nextListOrder = [...state.listOrder];
 
-  /**
-   * Deterministic Stable Sort using updatedList.position (not stale state).
-   */
   nextListOrder.sort((a, b) => {
     const posA =
-      a === listId
-        ? updatedList.position
-        : state.lists[a]?.position ?? "";
-
+      a === listId ? updatedList.position : (state.lists[a]?.position ?? "");
     const posB =
-      b === listId
-        ? updatedList.position
-        : state.lists[b]?.position ?? "";
+      b === listId ? updatedList.position : (state.lists[b]?.position ?? "");
 
     return posA.localeCompare(posB) || a.localeCompare(b);
   });

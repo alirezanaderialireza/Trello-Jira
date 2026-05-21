@@ -1,218 +1,463 @@
 // apps/web/src/features/board/api/realtime/boardSocketClient.ts
+//
+// ============================================================================
+// 🔌 BoardSocketClient — Pure WebSocket Transport (Phase 2)
+// ============================================================================
+//
+// Phase 2 change: all FSM state has been extracted into ConnectionFSM.
+// BoardSocketClient is now a thin transport layer that:
+//   1. Owns the WebSocket object lifecycle (create / close)
+//   2. Routes raw WS events → ConnectionFSM triggers
+//   3. Reads FSM state to guard stale callbacks (epoch)
+//   4. Manages heartbeat timer and batch event queue
+//   5. Exposes boardSocket.subscribe() / boardSocket.metrics via the FSM
+//
+// What is NO longer here:
+//   • _state field (→ fsm.state)
+//   • epoch field (→ fsm.epoch)
+//   • reconnectAttempts / backoff inline (→ fsm.reconnectAttempts / fsm.backoff)
+//   • latencyMs / lastPongAt / pingInFlight (→ fsm.*)
+//   • VALID_TRANSITIONS logic (→ fsm._transition)
+//
+// ============================================================================
 
 import { useBoardStore } from "../../store/useBoardStore";
+import { telemetry }     from "../../devtools/logEvent";
 import type { RealtimeMessage, RealtimeRequest, WsEvent } from "./types";
-import { telemetry } from "../../devtools/logEvent"; // 🌟 ایمپورت لایه مانیتورینگ
+import {
+  ConnectionFSM,
+  DEFAULT_BACKOFF,
+  type BackoffConfig,
+  type ConnectionMetrics,
+  type ConnectionEvent,
+} from "./connectionFsm";
+
+// ============================================================================
+// ⚙️ Constants
+// ============================================================================
+
+const PING_INTERVAL_MS    = 25_000;
+const PONG_TIMEOUT_MS     =  8_000;
+const HANDSHAKE_TIMEOUT_MS = 10_000;
+const BATCH_MAX_SIZE       = 64;
+
+// ============================================================================
+// 🔌 BoardSocketClient
+// ============================================================================
 
 class BoardSocketClient {
-  private ws: WebSocket | null = null;
-  private url: string;
+  // --------------------------------------------------------------------------
+  // FSM — single owner of all transport state
+  // --------------------------------------------------------------------------
+  private readonly fsm: ConnectionFSM;
+
+  // --------------------------------------------------------------------------
+  // Session identity
+  // --------------------------------------------------------------------------
   private boardId: string | null = null;
-  private token: string | null = null;
-  
-  // تنظیمات Reconnection
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 7;
-  private reconnectTimeoutId: NodeJS.Timeout | null = null;
-  
-  // تنظیمات Heartbeat (Ping/Pong)
-  private pingIntervalId: NodeJS.Timeout | null = null;
-  private readonly PING_INTERVAL_MS = 30000; // ۳۰ ثانیه
+  private token:   string | null = null;
 
-  constructor(url: string) {
+  // --------------------------------------------------------------------------
+  // Raw WebSocket
+  // --------------------------------------------------------------------------
+  private ws: WebSocket | null = null;
+
+  // --------------------------------------------------------------------------
+  // Timers
+  // --------------------------------------------------------------------------
+  private reconnectTimerId:   ReturnType<typeof setTimeout>  | null = null;
+  private pingTimerId:        ReturnType<typeof setInterval> | null = null;
+  private pongTimerId:        ReturnType<typeof setTimeout>  | null = null;
+  private handshakeTimerId:   ReturnType<typeof setTimeout>  | null = null;
+
+  // --------------------------------------------------------------------------
+  // Event batch (backpressure)
+  // --------------------------------------------------------------------------
+  private _eventBatch: WsEvent[] = [];
+  private _rafHandle:  number | null = null;
+
+  // --------------------------------------------------------------------------
+  // URL
+  // --------------------------------------------------------------------------
+  private readonly url: string;
+
+  constructor(url: string, backoff: BackoffConfig = DEFAULT_BACKOFF) {
     this.url = url;
+    this.fsm = new ConnectionFSM(backoff);
   }
 
   // ==========================================================================
-  // 🔌 Connection Management
+  // 🌐 Public API
   // ==========================================================================
 
-  public connect(boardId: string, token?: string) {
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
-      if (this.boardId === boardId) return;
-      this.disconnect(); 
-    }
-
-    this.boardId = boardId;
-    if (token) this.token = token;
-
-    useBoardStore.setState({ syncStatus: "reconnecting" });
-
-    // 🌟 TELEMETRY: ثبت تلاش برای اتصال
-    telemetry.log("WS_INGRESS", "CONNECTING", { url: this.url, boardId });
-
-    try {
-      this.ws = new WebSocket(this.url);
-
-      this.ws.onopen = this.handleOpen.bind(this);
-      this.ws.onmessage = this.handleMessage.bind(this);
-      this.ws.onclose = this.handleClose.bind(this);
-      this.ws.onerror = this.handleError.bind(this);
-    } catch (error: any) {
-      console.error("[WebSocket] Failed to construct WebSocket", error);
-      telemetry.log("WS_INGRESS", "CONSTRUCTOR_ERROR", { error: error.message });
-      this.scheduleReconnect();
-    }
-  }
-
-  public disconnect() {
-    this.clearTimers();
-    this.boardId = null;
-    this.reconnectAttempts = 0;
-
-    if (this.ws) {
-      if (this.ws.readyState === WebSocket.OPEN && this.boardId) {
-        this.send({ action: "unsubscribe", boardId: this.boardId });
-      }
-      this.ws.close();
-      this.ws = null;
-      
-      // 🌟 TELEMETRY: ثبت خروج ارادی
-      telemetry.log("WS_INGRESS", "DISCONNECTED_BY_CLIENT", {});
-    }
-
-    useBoardStore.setState({ syncStatus: "desynced" });
-  }
-
-  // ==========================================================================
-  // 📡 Event Handlers
-  // ==========================================================================
-
-  private handleOpen() {
-    console.log(`[WebSocket] Connected. Authenticating & Subscribing to board: ${this.boardId}`);
-    
-    this.reconnectAttempts = 0;
-    const state = useBoardStore.getState();
-
-    // 🌟 TELEMETRY: اتصال موفق و ارسال درخواست سابسکریب
-    telemetry.log("WS_INGRESS", "CONNECTED", { lastSequence: state.boardSequence });
-
-    const subscribeReq: RealtimeRequest = {
-      action: "subscribe",
-      boardId: this.boardId!,
-      lastSequence: state.boardSequence,
-      token: this.token || undefined,
-    };
-
-    this.send(subscribeReq);
-    this.startHeartbeat();
-  }
-
-  private handleMessage(event: MessageEvent) {
-    try {
-      const message: RealtimeMessage = JSON.parse(event.data);
-
-      switch (message.type) {
-        case "EVENT":
-          if (message.sequence && message.payload) {
-            
-            // 🌟 TELEMETRY: مهم‌ترین سنسور! شکار ایونت خام در بدو ورود به کلاینت
-            telemetry.timeline(
-              "WS_INGRESS",
-              message.payload.type,
-              { rawPayload: message.payload },
-              { sequence: message.sequence, correlationId: message.payload.correlationId }
-            );
-
-            const wsEvent: WsEvent = {
-              sequence: message.sequence,
-              type: message.payload.type,
-              payload: message.payload,
-            };
-            useBoardStore.getState().applyWebsocketEvent(wsEvent);
-          }
-          break;
-
-        case "SYSTEM":
-          if (message.meta?.reason === "SUBSCRIBED") {
-            // 🌟 TELEMETRY: تاییدیه سرور
-            telemetry.log("WS_INGRESS", "SUBSCRIBED_ACK", { boardId: this.boardId });
-            useBoardStore.setState({ syncStatus: "healthy" });
-          }
-          break;
-
-        case "RESYNC_REQUIRED":
-          console.warn("[WebSocket] Resync required by server.");
-          // 🌟 TELEMETRY: هشدار مرگبار! سرور می‌گوید گپ دیتای ما غیرقابل جبران است
-          telemetry.log("WS_INGRESS", "FATAL_RESYNC_ORDERED", { reason: message.meta?.reason });
-          useBoardStore.setState({ syncStatus: "desynced" });
-          break;
-      }
-    } catch (error: any) {
-      console.error("[WebSocket] Message parsing error:", error);
-      telemetry.log("WS_INGRESS", "PARSE_ERROR", { rawData: event.data });
-    }
-  }
-
-  private handleClose(event: CloseEvent) {
-    console.warn(`[WebSocket] Closed: ${event.code} - ${event.reason}`);
-    
-    // 🌟 TELEMETRY: مانیتورینگ قطعی‌های ناگهانی اینترنت
-    telemetry.log("WS_INGRESS", "CONNECTION_DROPPED", { code: event.code, reason: event.reason });
-    
-    this.clearTimers();
-    this.ws = null;
-    this.scheduleReconnect();
-  }
-
-  private handleError(error: Event) {
-    console.error("[WebSocket] Error occurred", error);
-    // onclose معمولاً بعد از onError صدا زده می‌شود
-  }
-
-  // ==========================================================================
-  // ⚙️ Internal Utilities
-  // ==========================================================================
-
-  private send(payload: RealtimeRequest) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(payload));
-    }
-  }
-
-  private scheduleReconnect() {
-    if (!this.boardId) return; 
-    
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error("[WebSocket] Max reconnect attempts reached. Giving up.");
-      telemetry.log("WS_INGRESS", "RECONNECT_GIVEN_UP", { attempts: this.reconnectAttempts });
-      useBoardStore.setState({ syncStatus: "desynced" });
+  public connect(boardId: string, token?: string): void {
+    // Idempotent for same boardId while already active
+    if (
+      this.boardId === boardId &&
+      (this.fsm.state === "connected" ||
+       this.fsm.state === "connecting" ||
+       this.fsm.state === "handshaking")
+    ) {
       return;
     }
 
-    useBoardStore.setState({ syncStatus: "reconnecting" });
+    // Switching boards — tear down first
+    if (this.boardId && this.boardId !== boardId) {
+      this._hardDisconnect(true);
+    }
 
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 15000);
-    this.reconnectAttempts++;
+    this.boardId = boardId;
+    if (token !== undefined) this.token = token;
 
-    // 🌟 TELEMETRY: مانیتورینگ طوفانِ ریکانکت (Reconnect Storm)
-    telemetry.log("WS_INGRESS", "RECONNECT_SCHEDULED", { attempt: this.reconnectAttempts, delayMs: delay });
+    this.fsm.onConnectRequested();
+    this._openSocket();
+  }
 
-    console.log(`[WebSocket] Reconnecting in ${delay}ms... (Attempt ${this.reconnectAttempts})`);
-    
-    this.reconnectTimeoutId = setTimeout(() => {
-      if (this.boardId) this.connect(this.boardId, this.token || undefined);
+  public disconnect(): void {
+    this._hardDisconnect(true);
+    useBoardStore.setState({ syncStatus: "desynced" });
+  }
+
+  public get state()   { return this.fsm.state; }
+  public get metrics(): ConnectionMetrics { return this.fsm.metrics; }
+
+  public subscribe(cb: (event: ConnectionEvent) => void): () => void {
+    return this.fsm.subscribe(cb);
+  }
+
+  // ==========================================================================
+  // 🔧 Socket lifecycle
+  // ==========================================================================
+
+  private _openSocket(): void {
+    telemetry.log("WS_INGRESS", "CONNECTING", {
+      url: this.url, boardId: this.boardId,
+      attempt: this.fsm.reconnectAttempts,
+    });
+
+    try {
+      this.ws = new WebSocket(this.url);
+      this.ws.onopen    = this._handleOpen.bind(this);
+      this.ws.onmessage = this._handleMessage.bind(this);
+      this.ws.onclose   = this._handleClose.bind(this);
+      this.ws.onerror   = this._handleError.bind(this);
+    } catch (err: any) {
+      telemetry.log("WS_INGRESS", "CONSTRUCTOR_ERROR", {
+        error: err?.message ?? String(err),
+      });
+      this._scheduleReconnect();
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // onopen
+  // --------------------------------------------------------------------------
+  private _handleOpen(): void {
+    const myEpoch = this.fsm.onSocketOpen();   // bumps epoch, → handshaking
+
+    const state = useBoardStore.getState();
+    telemetry.log("WS_INGRESS", "CONNECTED_SENDING_SUBSCRIBE", {
+      boardId: this.boardId, lastSequence: state.boardSequence, epoch: myEpoch,
+    });
+
+    this._send({
+      action:       "subscribe",
+      boardId:      this.boardId!,
+      lastSequence: state.boardSequence,
+      token:        this.token ?? undefined,
+    });
+
+    // Handshake timeout — if no SUBSCRIBED ACK arrives
+    this.handshakeTimerId = setTimeout(() => {
+      if (this.fsm.isEpochStale(myEpoch)) return;
+      if (this.fsm.state !== "handshaking") return;
+      telemetry.log("WS_INGRESS", "HANDSHAKE_TIMEOUT", { epoch: myEpoch });
+      this._handleClose({ code: 4008, reason: "handshake_timeout" } as CloseEvent);
+    }, HANDSHAKE_TIMEOUT_MS);
+  }
+
+  // --------------------------------------------------------------------------
+  // onmessage
+  // --------------------------------------------------------------------------
+  private _handleMessage(raw: MessageEvent): void {
+    const myEpoch = this.fsm.epoch;
+
+    let message: RealtimeMessage;
+    try {
+      message = JSON.parse(raw.data as string) as RealtimeMessage;
+    } catch (err: any) {
+      telemetry.log("WS_INGRESS", "PARSE_ERROR", {
+        rawData: typeof raw.data === "string" ? raw.data.slice(0, 200) : "<binary>",
+        error: err?.message,
+      });
+      return;
+    }
+
+    switch (message.type) {
+
+      // Domain event — enqueue for rAF batch flush
+      case "EVENT": {
+        if (!message.sequence || !message.payload) {
+          telemetry.log("WS_INGRESS", "MALFORMED_EVENT", { message });
+          return;
+        }
+        telemetry.timeline("WS_INGRESS", message.payload.type,
+          { rawPayload: message.payload },
+          { sequence: message.sequence, correlationId: message.payload.correlationId });
+
+        const wsEvent: WsEvent = {
+          sequence: message.sequence,
+          type:     message.payload.type,
+          payload:  message.payload,
+        };
+
+        this._eventBatch.push(wsEvent);
+
+        if (this._eventBatch.length >= BATCH_MAX_SIZE) {
+          this._cancelRaf();
+          this._flushBatch();
+          return;
+        }
+
+        if (this._rafHandle === null) {
+          this._rafHandle = requestAnimationFrame(() => {
+            this._rafHandle = null;
+            this._flushBatch();
+          });
+        }
+        break;
+      }
+
+      // Handshake ACK
+      case "SYSTEM": {
+        if (message.meta?.reason === "SUBSCRIBED") {
+          if (this.fsm.isEpochStale(myEpoch)) return;
+          this._clearHandshakeTimer();
+          this.fsm.onHandshakeAck();          // → connected
+          this._startHeartbeat();
+          telemetry.log("WS_INGRESS", "SUBSCRIBED_ACK", {
+            boardId: this.boardId, epoch: myEpoch,
+            sessionId: message.meta?.connectionId,
+          });
+        }
+        break;
+      }
+
+      // PONG
+      case "HEARTBEAT": {
+        if (this.fsm.isEpochStale(myEpoch)) return;
+        this._clearPongTimer();
+        this.fsm.markPongReceived(this.fsm.lastPingSentAt);
+        break;
+      }
+
+      // Server-ordered resync
+      case "RESYNC_REQUIRED": {
+        const reason = message.meta?.reason ?? "unknown";
+        this.fsm.onResyncRequired(reason);    // emits resync_required event
+        break;
+      }
+
+      default:
+        telemetry.log("WS_INGRESS", "UNKNOWN_MESSAGE_TYPE",
+          { type: (message as any).type });
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // onclose
+  // --------------------------------------------------------------------------
+  private _handleClose(event: CloseEvent): void {
+    if (this.fsm.state === "idle") return; // intentional disconnect handled elsewhere
+
+    telemetry.log("WS_INGRESS", "CONNECTION_DROPPED", {
+      code: event.code, reason: event.reason,
+      epoch: this.fsm.epoch, state: this.fsm.state,
+    });
+
+    this._clearHeartbeat();
+    this._clearHandshakeTimer();
+    this.ws = null;
+    this._scheduleReconnect();
+  }
+
+  // --------------------------------------------------------------------------
+  // onerror — onclose fires after onerror; just log here
+  // --------------------------------------------------------------------------
+  private _handleError(event: Event): void {
+    telemetry.log("WS_INGRESS", "SOCKET_ERROR", {
+      epoch: this.fsm.epoch,
+      type:  (event as ErrorEvent)?.type ?? "unknown",
+    });
+  }
+
+  // ==========================================================================
+  // 📦 Batch flush
+  // ==========================================================================
+
+  private _flushBatch(): void {
+    if (this._eventBatch.length === 0) return;
+    const batch = this._eventBatch;
+    this._eventBatch = [];
+
+    telemetry.log("WS_INGRESS", "BATCH_FLUSH", {
+      batchSize: batch.length, epoch: this.fsm.epoch,
+    });
+
+    const store = useBoardStore.getState();
+    for (const ev of batch) {
+      store.applyWebsocketEvent(ev);
+    }
+  }
+
+  private _cancelRaf(): void {
+    if (this._rafHandle !== null) {
+      cancelAnimationFrame(this._rafHandle);
+      this._rafHandle = null;
+    }
+  }
+
+  // ==========================================================================
+  // 💓 Heartbeat
+  // ==========================================================================
+
+  private _startHeartbeat(): void {
+    this._clearHeartbeat();
+    this.pingTimerId = setInterval(() => {
+      if (this.fsm.state !== "connected") { this._clearHeartbeat(); return; }
+
+      const myEpoch = this.fsm.epoch;
+
+      if (this.fsm.pingInFlight) {
+        telemetry.log("WS_INGRESS", "PING_TIMEOUT_DEAD_CONNECTION", { epoch: myEpoch });
+        this._handleClose({ code: 4007, reason: "ping_timeout" } as CloseEvent);
+        return;
+      }
+
+      const sentAt = performance.now();
+      this.fsm.markPingSent(sentAt);
+      this._send({ action: "ping", boardId: this.boardId! });
+
+      telemetry.log("WS_INGRESS", "PING_SENT", { epoch: myEpoch });
+
+      this.pongTimerId = setTimeout(() => {
+        if (this.fsm.isEpochStale(myEpoch)) return;
+        if (!this.fsm.pingInFlight) return;
+        telemetry.log("WS_INGRESS", "PONG_TIMEOUT", { epoch: myEpoch });
+        this._handleClose({ code: 4007, reason: "pong_timeout" } as CloseEvent);
+      }, PONG_TIMEOUT_MS);
+    }, PING_INTERVAL_MS);
+  }
+
+  private _clearHeartbeat(): void {
+    if (this.pingTimerId !== null) { clearInterval(this.pingTimerId); this.pingTimerId = null; }
+    this._clearPongTimer();
+    this.fsm.clearPingInFlight();
+  }
+
+  private _clearPongTimer(): void {
+    if (this.pongTimerId !== null) { clearTimeout(this.pongTimerId); this.pongTimerId = null; }
+  }
+
+  // ==========================================================================
+  // 🔁 Reconnect
+  // ==========================================================================
+
+  private _scheduleReconnect(): void {
+    if (!this.boardId) return;
+    if (this.fsm.state === "idle") return;
+
+    const result = this.fsm.onSocketClosed();    // → reconnecting or terminal
+
+    if (result === "terminal" || result === "idle") return;
+
+    // result === "reconnect"
+    const delay    = this.fsm.consumeReconnectAttempt();
+    const myEpoch  = this.fsm.epoch;
+
+    telemetry.log("WS_INGRESS", "RECONNECT_SCHEDULED", {
+      attempt: this.fsm.reconnectAttempts, delayMs: delay,
+    });
+
+    this.reconnectTimerId = setTimeout(() => {
+      if (this.fsm.isEpochStale(myEpoch) && this.fsm.state !== "reconnecting") return;
+      if (this.fsm.state === "idle") return;
+      if (this.boardId) this._openSocket();
     }, delay);
   }
 
-  private startHeartbeat() {
-    if (this.pingIntervalId) clearInterval(this.pingIntervalId);
-    
-    this.pingIntervalId = setInterval(() => {
-      this.send({ action: "ping", boardId: this.boardId! });
-    }, this.PING_INTERVAL_MS);
+  // ==========================================================================
+  // 🧹 Hard disconnect
+  // ==========================================================================
+
+  private _hardDisconnect(intentional: boolean): void {
+    this._clearHeartbeat();
+    this._clearHandshakeTimer();
+    this._cancelRaf();
+    this._eventBatch = [];
+
+    if (this.reconnectTimerId !== null) {
+      clearTimeout(this.reconnectTimerId);
+      this.reconnectTimerId = null;
+    }
+
+    if (this.ws) {
+      this.ws.onopen = null; this.ws.onmessage = null;
+      this.ws.onclose = null; this.ws.onerror = null;
+      if (
+        this.ws.readyState === WebSocket.OPEN ||
+        this.ws.readyState === WebSocket.CONNECTING
+      ) {
+        this.ws.close(intentional ? 4000 : 1001, "client_disconnect");
+      }
+      this.ws = null;
+    }
+
+    if (intentional) {
+      this.boardId = null;
+      this.token   = null;
+      this.fsm.onIntentionalDisconnect();    // → idle, resets counters
+    }
   }
 
-  private clearTimers() {
-    if (this.pingIntervalId) clearInterval(this.pingIntervalId);
-    if (this.reconnectTimeoutId) clearTimeout(this.reconnectTimeoutId);
-    this.pingIntervalId = null;
-    this.reconnectTimeoutId = null;
+  // ==========================================================================
+  // ⏱️ Handshake timer
+  // ==========================================================================
+
+  private _clearHandshakeTimer(): void {
+    if (this.handshakeTimerId !== null) {
+      clearTimeout(this.handshakeTimerId);
+      this.handshakeTimerId = null;
+    }
+  }
+
+  // ==========================================================================
+  // 📤 Send (backpressure guard)
+  // ==========================================================================
+
+  private _send(payload: RealtimeRequest): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      telemetry.log("WS_INGRESS", "SEND_DROPPED_NOT_OPEN", {
+        action: payload.action, state: this.fsm.state,
+      });
+      return;
+    }
+    try {
+      this.ws.send(JSON.stringify(payload));
+    } catch (err: any) {
+      telemetry.log("WS_INGRESS", "SEND_ERROR", {
+        action: payload.action, error: err?.message ?? String(err),
+      });
+    }
   }
 }
 
 // ============================================================================
-// 🌍 Singleton Instance
+// 🌍 Singleton
 // ============================================================================
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3001";
+
+const WS_URL =
+  (typeof process !== "undefined" ? process.env.NEXT_PUBLIC_WS_URL : undefined)
+  ?? "ws://localhost:3001";
+
 export const boardSocket = new BoardSocketClient(WS_URL);
