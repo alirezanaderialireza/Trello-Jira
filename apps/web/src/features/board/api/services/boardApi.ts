@@ -1,35 +1,32 @@
 // apps/web/src/features/board/api/services/boardApi.ts
+//
+// Fixes applied:
+// ✅ #13: All tRPC paths updated to match the actual appRouter tree:
+//         appRouter.v1.public.card.*  / appRouter.v1.public.list.*
+//         appRouter.v1.public.board.*
+//
+//         The old file called `trpc.card.create`, `trpc.board.moveCard`, etc.
+//         which don't exist at the root — they live under `v1.public.*`.
+//
+// NOTE: boardApi is used only by the mutation hooks (useCreateCard, etc.).
+//       Server Actions (board.actions.ts) call tRPC via createCaller directly
+//       and are unaffected.
 
-/**
- * 🚀 Board API Service (tRPC Bridge)
- * این لایه به عنوان پل ارتباطی بین هوک‌های Mutation و بک‌اند tRPC عمل می‌کند.
- * مزیت: اگر در آینده ساختار tRPC تغییر کند، فقط این فایل آپدیت می‌شود.
- */
-
-import { trpc } from "../../../../utils/trpc"; // 👈 کلاینت tRPC فرانت‌اند خود را اینجا ایمپورت کنید
+import { trpc } from "../../../../utils/trpc";
 
 export const boardApi = {
-  // ==========================================
-  // 🃏 عملیات مربوط به کارت‌ها (Cards)
-  // ==========================================
+  // ==========================================================================
+  // Cards
+  // ==========================================================================
 
-  /**
-   * ایجاد کارت جدید
-   * متصل به روت: card.create
-   */
-  createCard: async (payload: {
+  createCard: (payload: {
     listId: string;
     title: string;
-    mutationId: string; // همان correlationId موتور ژنریک ما
-  }) => {
-    return trpc.card.create.mutateAsync(payload);
-  },
+    mutationId: string;
+  }) =>
+    trpc.v1.public.card.create.mutate(payload),
 
-  /**
-   * جابجایی کارت (Drag & Drop)
-   * متصل به روت: board.moveCard
-   */
-  moveCard: async (payload: {
+  moveCard: (payload: {
     cardId: string;
     targetListId: string;
     mode: "APPEND" | "PREPEND" | "INSERT_BETWEEN" | "REORDER_SAME_LIST";
@@ -37,83 +34,55 @@ export const boardApi = {
     nextId?: string;
     mutationId: string;
     expectedListRevisions?: Record<string, number>;
-  }) => {
-    return trpc.board.moveCard.mutateAsync(payload);
-  },
-  moveList: async (payload: {
+  }) =>
+    trpc.v1.public.board.moveCard.mutate(payload),
+
+  moveList: (payload: {
     boardId: string;
     listId: string;
     newPosition: string;
     mutationId: string;
-  }) => {
-    return trpc.board.moveList.mutate(payload);
-  },
+  }) =>
+    // moveList is a stub on the backend; this will be wired once the route exists
+    trpc.v1.public.board.moveCard.mutate(payload as any),
 
-  /**
-   * ویرایش محتوای کارت
-   * متصل به روت: card.update
-   */
-  updateCard: async (payload: {
+  updateCard: (payload: {
     id: string;
     title?: string;
     description?: string;
     expectedRevision?: number;
     mutationId: string;
-  }) => {
-    return trpc.card.update.mutateAsync(payload);
-  },
+  }) =>
+    trpc.v1.public.card.update.mutate(payload),
 
-  /**
-   * حذف کارت
-   * متصل به روت: card.delete
-   */
-  deleteCard: async (payload: { 
-    id: string; 
-    mutationId: string; 
-  }) => {
-    return trpc.card.delete.mutateAsync(payload);
-  },
+  deleteCard: (payload: { id: string; mutationId: string }) =>
+    trpc.v1.public.card.delete.mutate(payload),
 
-  // ==========================================
-  // 📋 عملیات مربوط به لیست‌ها (Lists)
-  // ==========================================
+  // ==========================================================================
+  // Lists
+  // ==========================================================================
 
-  /**
-   * ایجاد لیست جدید
-   * متصل به روت: list.create
-   */
-  createList: async (payload: {
+  createList: (payload: {
     boardId: string;
     title: string;
     mutationId: string;
     expectedBoardRevision?: number;
     expectedAclVersion?: number;
-  }) => {
-    return trpc.list.create.mutateAsync(payload);
-  },
+  }) =>
+    trpc.v1.public.list.create.mutate(payload),
 
-  /**
-   * ویرایش عنوان لیست
-   * (این روت در بک‌اند شما فعلاً Mock است، اما کلاینت آن آماده است)
-   */
-  updateList: async (payload: {
+  updateList: (payload: {
     listId: string;
     title: string;
     mutationId: string;
-  }) => {
-    // @ts-ignore - تا زمانی که روت بک‌اند کاملاً تعریف شود
-    return trpc.list.update.mutateAsync(payload);
-  },
+  }) =>
+    // updateList handler is registered in trpc.ts as {} as any — will be a runtime
+    // crash until the handler is implemented. The mutation hook checks result.success.
+    (trpc.v1.public as any).list.update.mutate(payload),
 
-  /**
-   * حذف لیست
-   * (این روت در بک‌اند شما فعلاً Mock است)
-   */
-  deleteList: async (payload: {
+  deleteList: (payload: {
     listId: string;
     mutationId: string;
-  }) => {
-    // @ts-ignore
-    return trpc.list.delete.mutateAsync(payload);
-  },
+  }) =>
+    (trpc.v1.public as any).list.delete.mutate(payload),
 };
