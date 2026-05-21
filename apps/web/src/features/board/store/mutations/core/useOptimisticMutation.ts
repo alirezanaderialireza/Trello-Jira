@@ -62,6 +62,10 @@ export function useOptimisticMutation<TVariables extends { correlationId: string
       // ✉️ ۳. تولید پاکتِ رویدادِ خوش‌بینانه (Client Envelope)
       const envelope = config.generateEnvelope(variables, store);
 
+      // 🌟 aggregateId برای aggregate-bound rollback ذخیره می‌شود (در صورت عدم وجود
+      // envelope هم null باقی می‌ماند که در onError قبل از rollback چک می‌شود).
+      const aggregateId = envelope?.event.aggregateId ?? null;
+
       if (envelope) {
         // 🗄️ ۴. ثبت تراکنش در Pending Registry (برای پیگیری وضعیت و رول‌بک احتمالی)
         store.registerPendingMutation({
@@ -79,8 +83,9 @@ export function useOptimisticMutation<TVariables extends { correlationId: string
         store.applyEvent(envelope, { mode: "live" });
       }
 
-      // 📦 بازگرداندن اسنپ‌شات و شناسه به context تا در onError به آن‌ها دسترسی داشته باشیم
-      return { snapshot, correlationId: variables.correlationId };
+      // 📦 بازگرداندن اسنپ‌شات، correlationId و aggregateId به context
+      // تا در onError برای rollback aggregate-bound در دسترس باشد.
+      return { snapshot, correlationId: variables.correlationId, aggregateId };
     },
 
     // ------------------------------------------------------------------------
@@ -97,8 +102,10 @@ export function useOptimisticMutation<TVariables extends { correlationId: string
         
         // 🛡️ ۲. رول‌بک اتمیک! 
         // استور چک می‌کند که اگر دیتای سرور جدیدتر از اسنپ‌شات نباشد، آن را برمی‌گرداند.
+        // 🌟 aggregateId را پاس می‌دهیم تا cleanup فقط محدود به همین mutation باشد
+        // و mutationهای موازی روی همین لیست را آسیب نزند.
         if (context.snapshot) {
-          store.restoreSnapshot(context.snapshot);
+          store.restoreSnapshot(context.snapshot, context.aggregateId ?? undefined);
         }
       }
 

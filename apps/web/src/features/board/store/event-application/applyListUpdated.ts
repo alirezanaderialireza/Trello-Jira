@@ -1,39 +1,66 @@
 // apps/web/src/features/board/store/event-application/applyListUpdated.ts
-//
-// Phase-0 audit:
-//   ✅ stale-safe      — strictly-greater guard (same rationale as applyCardUpdated)
-//   ✅ idempotent      — same event twice → same result
-//   ✅ deterministic   — merge is field-by-field, no randomness
-//   ✅ optimistic-aware — isOptimistic propagated
 
 import type { ListUpdatedEvent } from "@repo/domain";
-import type { BoardStoreState }  from "../useBoardStore";
+import type { BoardStoreState, ListDto } from "../useBoardStore";
 import type { ClientEventEnvelope } from "./types";
-import type { ReducerContext }   from "./context";
+import type { ReducerContext } from "./context";
 
+/**
+ * ------------------------------------------------------------------
+ * applyListUpdated
+ * ------------------------------------------------------------------
+ * Responsibilities:
+ * - apply title changes from payload
+ * - propagate boardId from payload (defensive self-healing)
+ * - stale protection via version check
+ * ------------------------------------------------------------------
+ */
 export function applyListUpdated(
-  state:    BoardStoreState,
+  state: BoardStoreState,
   envelope: ClientEventEnvelope<ListUpdatedEvent>,
   _context: ReducerContext,
 ): Partial<BoardStoreState> {
   const { event } = envelope;
-  const { listId, changes } = event.payload;
+
+  // 🌟 Full canonical payload destructure
+  const { listId, boardId, changes } = event.payload;
 
   const existingList = state.lists[listId];
-  if (!existingList) return {};
 
-  // ✅ Strictly-greater guard (same reasoning as applyCardUpdated)
-  if (existingList.revision > event.version) return {};
+  if (!existingList) {
+    return {};
+  }
 
-  const updatedList = {
+  /**
+   * 🛡️ Stale Protection — dual-revision aware (see applyCardMoved).
+   */
+  if (envelope.acknowledged) {
+    if (existingList.confirmedRevision >= event.version) {
+      return {};
+    }
+  } else {
+    if (existingList.revision >= event.version) {
+      return {};
+    }
+  }
+
+  const updatedList: ListDto = {
     ...existingList,
-    ...changes,
-    id:           listId,           // prevent payload overwriting id
-    revision:     event.version,
-    isOptimistic: envelope.optimistic ?? false,
+    boardId: boardId ?? existingList.boardId,
+    ...(changes.title !== undefined && { title: changes.title }),
+    revision: event.version,
+    confirmedRevision: envelope.acknowledged
+      ? event.version
+      : existingList.confirmedRevision,
+    isOptimistic: envelope.acknowledged
+      ? false
+      : envelope.optimistic ?? existingList.isOptimistic ?? false,
   };
 
   return {
-    lists: { ...state.lists, [listId]: updatedList },
+    lists: {
+      ...state.lists,
+      [listId]: updatedList,
+    },
   };
 }
