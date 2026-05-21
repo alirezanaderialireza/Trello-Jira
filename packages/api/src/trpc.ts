@@ -36,6 +36,13 @@ import type { BoardPermission } from "@repo/infrastructure/auth/aclEngine";
 // 🌟 Audit Logger
 import { AuditLogger } from "@repo/infrastructure/audit/auditLogger";
 
+// 🌟 Phase 2: Card-level ACL, Live ACL, Auth Observability
+import { CardAclEngine } from "@repo/infrastructure/auth/cardAclEngine";
+import { AclInvalidationBus } from "@repo/infrastructure/auth/liveAcl/aclInvalidationBus";
+import { AuthMetrics } from "@repo/infrastructure/auth/observability/authMetrics";
+import { AnomalyDetector } from "@repo/infrastructure/auth/observability/anomalyDetector";
+import { ReplayAttackDetector } from "@repo/infrastructure/auth/observability/replayAttackDetector";
+
 // 🌟 Services
 import { BoardService } from "./services/board.service";
 
@@ -86,6 +93,13 @@ const membershipCache = new MembershipCache(
   dbInstance,
 );
 const auditLogger = new AuditLogger(dbInstance, redisManager.client);
+
+// 🌟 Phase 2: Card-level ACL + Auth Observability
+const cardAclEngine = new CardAclEngine(aclEngine, dbInstance, redisManager.client);
+const aclInvalidationBus = new AclInvalidationBus(redisManager.pubsub);
+const authMetrics = new AuthMetrics(redisManager.client);
+const anomalyDetector = new AnomalyDetector(authMetrics);
+const replayAttackDetector = new ReplayAttackDetector(redisManager.client, authMetrics);
 
 // ============================================================================
 // 🧠 ALS
@@ -154,6 +168,16 @@ const infrastructure = Object.freeze({
   membershipCache,
 
   auditLogger,
+
+  cardAclEngine,
+
+  aclInvalidationBus,
+
+  authMetrics,
+
+  anomalyDetector,
+
+  replayAttackDetector,
 });
 
 // ============================================================================
