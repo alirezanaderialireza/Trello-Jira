@@ -90,5 +90,8 @@ export {
   withTenantContext,
   setTenantContextOnTx,
   verifyTenantContext,
+  applyTenantContextFromALS,
+  getCurrentTenantContext,
+  tenantContextALS,
   type TenantContextParams,
 } from "./middleware/tenantContext";
