@@ -82,3 +82,13 @@ export {
 // 🌟 5. Re-Exports Schemas (برای دسترسی سایر لایه‌ها به تایپ‌ها و جدول‌ها)
 // ============================================================================
 export * from "./schema";
+
+// ============================================================================
+// 🌟 6. Tenant Context Middleware (RLS GUC setter)
+// ============================================================================
+export {
+  withTenantContext,
+  setTenantContextOnTx,
+  verifyTenantContext,
+  type TenantContextParams,
+} from "./middleware/tenantContext";

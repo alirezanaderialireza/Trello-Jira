@@ -200,6 +200,55 @@ export const boardRouter = router({
       const failure = result as DomainFailure;
       return mapDomainErrorToClient(failure.code as DomainErrorReason);
     }),
+
+  // ==========================================================================
+  // MOVE LIST
+  // ==========================================================================
+  // Phase 0.2 wiring: closes the realtime gap where the BoardView used to log
+  // "Backend List Move Sync Pending..." after a list drag. Delegates to
+  // MoveListHandler which wraps the existing functional moveListUseCase.
+  // ==========================================================================
+
+  moveList: protectedProcedure
+    .input(
+      z.object({
+        boardId: EntityIdSchema,
+        listId: EntityIdSchema,
+        newPosition: z.string().trim().min(1).max(255),
+        mutationId: MutationIdSchema,
+      }),
+    )
+    .mutation(async ({ input, ctx }): Promise<ClientMoveResult> => {
+      let result;
+      try {
+        result = await ctx.services.commands.moveList.execute({
+          boardId: input.boardId,
+          listId: input.listId,
+          newPosition: input.newPosition,
+          tenantId: ctx.session.tenantId,
+          userId: ctx.session.user.id,
+          mutationId: input.mutationId,
+          correlationId: ctx.metadata?.requestId,
+          traceId: ctx.metadata?.traceId,
+          spanId: ctx.metadata?.spanId,
+        });
+      } catch {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to move list.",
+        });
+      }
+
+      if (result.success) {
+        return {
+          success: true,
+          sequence: Number(result.boardSequence),
+          listRevisions: result.updatedListRevisions ?? {},
+        };
+      }
+
+      return mapDomainErrorToClient(result.reason);
+    }),
 });
 
 // ============================================================================

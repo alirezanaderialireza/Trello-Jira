@@ -6,7 +6,7 @@ import { AsyncLocalStorage } from "async_hooks";
 import { getSessionFromRequest, type AuthSession } from "@repo/auth";
 
 // 📦 Database
-import { db } from "@repo/db";
+import { db, withTenantContext } from "@repo/db";
 
 import {
   DrizzleCardRepository,
@@ -38,7 +38,7 @@ import {
 import { BoardService } from "./services/board.service";
 
 // 🌟 Domain Handlers
-import { CreateListHandler } from "@repo/domain";
+import { CreateListHandler, MoveListHandler } from "@repo/domain";
 
 // ============================================================================
 // 🛡️ Global Singletons & Connections
@@ -228,11 +228,21 @@ const services = Object.freeze({
       logger
     ),
 
+    moveList: new MoveListHandler(
+      txManager,
+
+      repositories.list,
+
+      repositories.outbox,
+
+      repositories.sequence,
+
+      logger
+    ),
+
     // =========================================================================
     // ⏳ TODO
     // =========================================================================
-
-    moveList: {} as any,
 
     createCard: {} as any,
 
@@ -337,6 +347,39 @@ export async function createContext(opts: {
 
     // metadata
     metadata,
+
+    // ──────────────────────────────────────────────────────────────────────
+    // 🛡️ RLS-aware transaction runner.
+    //
+    // Procedures that read or write tenant-scoped tables MUST execute their
+    // queries inside this helper so that PostgreSQL's RLS policies see a
+    // populated `app.current_tenant_id` GUC. The session/tenant guard
+    // middleware enforces a non-null session before reaching here.
+    //
+    // Usage in a protected procedure:
+    //
+    //   const labels = await ctx.runInTenantTx(async (tx) =>
+    //     tx.query.labels.findMany({ where: eq(labels.boardId, input.boardId) })
+    //   );
+    //
+    // For procedures that delegate to a service (e.g. boardService.moveCard)
+    // the service's own TransactionManager is expected to surface the GUC
+    // setter via setTenantContextOnTx(tx, …). This is the migration path —
+    // existing services keep working until they are individually rewritten.
+    // ──────────────────────────────────────────────────────────────────────
+    runInTenantTx: <T>(cb: (tx: any) => Promise<T>): Promise<T> => {
+      if (!session?.tenantId) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Tenant context unavailable.",
+        });
+      }
+      return withTenantContext(
+        dbInstance,
+        { tenantId: session.tenantId, userId: session.user.id },
+        cb,
+      );
+    },
   };
 }
 
@@ -480,6 +523,51 @@ const tenantGuard = t.middleware(
 );
 
 // --------------------------------------------------------------------------
+// 🛡️ RLS Tenant Context Middleware
+// --------------------------------------------------------------------------
+// Opens a database transaction, sets the `app.current_tenant_id` and
+// `app.current_user_id` GUC variables (which the PostgreSQL RLS policies
+// from migration 0002 read), and exposes the transaction handle to the
+// procedure as `ctx.tx`. Procedures that touch tenant-scoped tables should
+// run their queries against `ctx.tx` so the RLS policies fire correctly.
+//
+// IMPORTANT — backwards compatibility:
+//   We deliberately do NOT replace `ctx.infra.db` with the transaction
+//   handle. Most existing routers query `ctx.infra.db.*` directly today,
+//   and rewriting all of them in one PR would dwarf this task. Instead we:
+//
+//     1. Always make `ctx.tx` available so new code is RLS-correct from
+//        day one.
+//     2. Provide `ctx.runInTenantTx(cb)` (defined in createContext) for
+//        procedures that prefer a callback style without depending on the
+//        outer middleware running.
+//     3. Leave `ctx.infra.db` untouched, so existing routers continue to
+//        work — they just remain RLS-bypass-by-virtue-of-their-connection
+//        until their individual migration to `ctx.tx`.
+//
+// As routers are individually migrated to `ctx.tx`, they automatically
+// inherit RLS enforcement.
+// --------------------------------------------------------------------------
+
+const tenantContextMiddleware = t.middleware(
+  async ({ ctx, next }) => {
+    if (!ctx.session?.tenantId) {
+      // Should be caught by tenantGuard, but defensive.
+      return next();
+    }
+
+    return ctx.runInTenantTx(async (tx) => {
+      return next({
+        ctx: {
+          ...ctx,
+          tx,
+        },
+      });
+    });
+  }
+);
+
+// --------------------------------------------------------------------------
 // Timeout / Abort
 // --------------------------------------------------------------------------
 
@@ -619,6 +707,27 @@ export const protectedProcedure =
     .use(timeoutGuard)
     .use(isAuthed)
     .use(tenantGuard);
+
+// ============================================================================
+// 🚀 Tenant-Tx Procedure
+// ============================================================================
+// Same pipeline as `protectedProcedure`, but additionally runs the body
+// inside a transaction whose `app.current_tenant_id` GUC is set, so that
+// any query against `ctx.tx` is RLS-enforced.
+//
+// New routers that touch tenant-scoped tables SHOULD prefer this procedure.
+// Older routers continue to use `protectedProcedure` and migrate over time.
+// ============================================================================
+
+export const tenantTxProcedure =
+  t.procedure
+    .use(loadSheddingGuard)
+    .use(alsMiddleware)
+    .use(observabilityMiddleware)
+    .use(timeoutGuard)
+    .use(isAuthed)
+    .use(tenantGuard)
+    .use(tenantContextMiddleware);
 
 // ============================================================================
 // 🛡️ Board Membership Guard

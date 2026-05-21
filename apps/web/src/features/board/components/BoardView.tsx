@@ -33,12 +33,19 @@ import CardModal from "./CardModal";
 
 import {
   moveCardAction,
+  moveListAction,
   deleteCardAction,
 } from "../actions/board.actions";
 
 import { useBoardStore } from "../store/useBoardStore";
 import { useSyncOrchestrator } from "../store/sync/useSyncOrchestrator";
 import { usePendingGC } from "../store/mutations/core/usePendingGC";
+import { positioningEngine } from "../store/sync/positioning/positioningEngine";
+import {
+  BoardErrorBoundary,
+  ListErrorBoundary,
+  ModalErrorBoundary,
+} from "../../../components/error/ErrorBoundary";
 
 // ============================================================================
 // DTO TYPES
@@ -504,22 +511,50 @@ export default function BoardView({
           ...currentState.listOrder,
         ];
 
+        // ── 1. Optimistic UI shuffle (Zustand store) ─────────────────
         moveList(fromIndex, toIndex);
 
         try {
-          /**
-           * هنوز API جابه‌جایی لیست نداریم
-           */
-          console.log(
-            "Backend List Move Sync Pending..."
+          // ── 2. Compute the LexoRank position for the new slot ────
+          // The positioning engine is actor-serialized so concurrent
+          // drags from multiple tabs cannot collide on the same rank.
+          const positioning = await positioningEngine.moveList(
+            activeIdStr,
+            toIndex,
           );
-        } catch {
+
+          // ── 3. Persist to the server via tRPC server action ──────
+          const result = await moveListAction({
+            boardId: boardId,
+            listId: activeIdStr,
+            newPosition: positioning.position,
+            mutationId: crypto.randomUUID(),
+          });
+
+          // ── 4. createSafeAction wraps server failures in
+          //    { success: false, code, message } — surface to user.
+          if (!result.success) {
+            throw new Error(result.message);
+          }
+
+          // ── 5. The tRPC mutation may also return a domain-level
+          //    failure with success === false on its data payload
+          //    (e.g. SYNC_CONFLICT). Roll back in that case too.
+          const data = (result as { data: unknown }).data as
+            | { success: boolean; message?: string }
+            | undefined;
+          if (data && data.success === false) {
+            throw new Error(data.message ?? "List move rejected.");
+          }
+        } catch (err) {
           useBoardStore.setState({
             listOrder: previousListOrder,
           });
 
           toast.error(
-            "List sync error. Rolled back."
+            err instanceof Error
+              ? err.message
+              : "List sync error. Rolled back."
           );
         } finally {
           syncingListsRef.current.delete(
@@ -727,7 +762,7 @@ export default function BoardView({
   // ==========================================================================
 
   return (
-    <>
+    <BoardErrorBoundary boardId={boardId}>
       <DndContext
         sensors={sensors}
         collisionDetection={
@@ -746,14 +781,18 @@ export default function BoardView({
           >
             {listOrder.map(
               (listId: string) => (
-                <ListColumn
+                <ListErrorBoundary
                   key={listId}
                   listId={listId}
-                  boardId={boardId}
-                  onDeleteCard={
-                    deleteCardWithUndo
-                  }
-                />
+                >
+                  <ListColumn
+                    listId={listId}
+                    boardId={boardId}
+                    onDeleteCard={
+                      deleteCardWithUndo
+                    }
+                  />
+                </ListErrorBoundary>
               )
             )}
           </SortableContext>
@@ -784,8 +823,10 @@ export default function BoardView({
         </DragOverlay>
       </DndContext>
 
-      <CardModal />
-    </>
+      <ModalErrorBoundary>
+        <CardModal />
+      </ModalErrorBoundary>
+    </BoardErrorBoundary>
   );
 }
 

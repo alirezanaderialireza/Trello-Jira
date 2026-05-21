@@ -9,6 +9,7 @@ import { MoreHorizontal } from "lucide-react";
 import { useBoardStore } from "../store/useBoardStore";
 import { CardItem } from "./CardItem";
 import CreateCardForm from "./create-card-form"; // 🌟 @ts-ignore حذف شد چون باگ پراپ‌ها رفع شده است
+import { CardErrorBoundary } from "../../../components/error/ErrorBoundary";
 
 interface ListColumnProps {
   listId: string;
@@ -84,11 +85,15 @@ export const ListColumn = memo(function ListColumn({ listId, boardId, onDeleteCa
       <div className="flex-1 overflow-y-auto overflow-x-hidden p-2 flex flex-col gap-2 min-h-[50px] scrollbar-thin scrollbar-thumb-gray-300">
         <SortableContext items={cardIds} strategy={verticalListSortingStrategy}>
           {cardIds.map((cardId: string) => (
-            <CardItem 
-              key={cardId} 
-              cardId={cardId} 
-              onDeleteCard={onDeleteCard} 
-            />
+            <CardErrorBoundary
+              key={cardId}
+              cardId={cardId}
+            >
+              <CardItem
+                cardId={cardId}
+                onDeleteCard={onDeleteCard}
+              />
+            </CardErrorBoundary>
           ))}
         </SortableContext>
 

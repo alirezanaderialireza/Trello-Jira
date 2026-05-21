@@ -87,3 +87,14 @@ export function passwordResetEmailHtml(url: string, displayName: string): string
     </div>
   `;
 }
+
+export function emailVerificationHtml(url: string, displayName: string): string {
+  return `
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px;">
+      <h2 style="color:#1e293b;">به Trello OS خوش آمدید!</h2>
+      <p style="color:#475569;">${displayName} عزیز، برای فعال‌سازی حساب خود روی لینک زیر کلیک کنید:</p>
+      <a href="${url}" style="display:inline-block;padding:12px 24px;background:#2563eb;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold;">تأیید ایمیل</a>
+      <p style="color:#94a3b8;font-size:12px;margin-top:24px;">این لینک تا ۲۴ ساعت معتبر است. اگر این حساب را شما نساخته‌اید، این ایمیل را نادیده بگیرید.</p>
+    </div>
+  `;
+}

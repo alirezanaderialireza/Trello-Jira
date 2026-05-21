@@ -45,6 +45,8 @@ export default function LoginPage() {
           <Link href="/signup" className="text-blue-400 hover:text-blue-300">ثبت‌نام</Link>
           <span className="mx-2">•</span>
           <Link href="/forgot-password" className="text-slate-500 hover:text-slate-300">فراموشی رمز</Link>
+          <span className="mx-2">•</span>
+          <Link href="/verify-email" className="text-slate-500 hover:text-slate-300">تأیید ایمیل</Link>
         </div>
       </div>
     </div>
