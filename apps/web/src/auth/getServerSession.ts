@@ -28,6 +28,10 @@
 //     tenantId. If the user is not a member, we deny by returning null.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// 📦 Domain types — keep role narrowing aligned with the Zod RoleSchema in
+//    workspaces.router and the DB CHECK constraint in migration 0003.
+import { isValidRole as isValidWorkspaceRole, type WorkspaceRole } from "@repo/domain/workspaces";
+
 import { auth } from "./index";
 import { db, workspaces, workspaceMembers } from "@repo/db";
 import { and, eq, isNull } from "drizzle-orm";
@@ -98,11 +102,19 @@ export async function getWebSession(
 
   if (!membership) return null;
 
+  // Defensive narrowing: the DB CHECK constraint (0003) keeps `role` in the
+  // four-value enum, but if a stale row ever held a stranger value we'd
+  // rather refuse to mint a session than silently propagate `string` into
+  // tRPC's typed roles array.
+  const rawRole = membership.role as string;
+  if (!isValidWorkspaceRole(rawRole)) return null;
+  const role: WorkspaceRole = rawRole;
+
   return {
     user: { id: userId },
     tenantId: resolvedTenantId,
     aclVersion: 1, // bumped when tenant ACL changes — not yet wired
-    roles: [membership.role as string],
+    roles: [role],
   };
 }
 

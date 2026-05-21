@@ -28,9 +28,17 @@ import { NextResponse } from "next/server";
 import { eq, and, isNull } from "drizzle-orm";
 import { db, users, verificationTokens } from "@repo/db";
 import { EMAIL_VERIFY_PREFIX } from "@/auth/emailVerification";
+import { rateLimitResponse, MAGIC_LINK_LIMIT } from "@repo/api/middleware/authRateLimit";
 
 export async function GET(req: Request) {
   try {
+    // ── 0. Rate limit ─────────────────────────────────────────────────────
+    // GET endpoints are easy to flood, and an attacker can blind-guess
+    // the 32-byte token but only at the rate the limiter allows.
+    const ip = req.headers.get("x-forwarded-for") || "unknown";
+    const limited = rateLimitResponse(ip, MAGIC_LINK_LIMIT);
+    if (limited) return limited;
+
     const url = new URL(req.url);
     const token = url.searchParams.get("token") ?? "";
     if (!token) {

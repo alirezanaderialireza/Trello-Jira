@@ -29,13 +29,43 @@ export function generateSlugFromName(name: string): WorkspaceSlug {
 }
 
 // ── Role Enum ────────────────────────────────────────────────────────────────
+//
+// Single source of truth for workspace roles. Used by:
+//   • The Drizzle schema (`workspaceMembers.role` is `.$type<WorkspaceRole>()`).
+//   • The Postgres CHECK constraint added in migration 0003 — keep these
+//     four values in sync there.
+//   • The Zod RoleSchema in workspaces.router.ts (z.enum(WORKSPACE_ROLES)).
+//
+// If you ever add or remove a role you MUST update all three places, plus
+// the helper functions below.
 
 export type WorkspaceRole = "OWNER" | "ADMIN" | "MEMBER" | "VIEWER";
 
-export const WORKSPACE_ROLES: readonly WorkspaceRole[] = ["OWNER", "ADMIN", "MEMBER", "VIEWER"];
+/**
+ * All valid workspace roles, ordered from highest to lowest privilege.
+ * Typed as a readonly tuple so it can be passed directly to `z.enum(...)`.
+ */
+export const WORKSPACE_ROLES = ["OWNER", "ADMIN", "MEMBER", "VIEWER"] as const satisfies readonly WorkspaceRole[];
 
+/** Mutable copy for places that demand a plain string array (e.g. SQL CHECK). */
+export const WORKSPACE_ROLES_ARRAY: readonly string[] = WORKSPACE_ROLES;
+
+/** Type-narrowing guard. Prefer this over `as WorkspaceRole` casts. */
 export function isValidRole(role: string): role is WorkspaceRole {
-  return WORKSPACE_ROLES.includes(role as WorkspaceRole);
+  return (WORKSPACE_ROLES as readonly string[]).includes(role);
+}
+
+/**
+ * Roles that may invite, remove, or change the role of other members.
+ * Mirrors the application-layer `["OWNER","ADMIN"].includes(role)` checks.
+ */
+export function canManageMembers(role: WorkspaceRole): boolean {
+  return role === "OWNER" || role === "ADMIN";
+}
+
+/** Only the OWNER can transfer ownership or delete the workspace. */
+export function canDeleteWorkspace(role: WorkspaceRole): boolean {
+  return role === "OWNER";
 }
 
 // ── Entity ───────────────────────────────────────────────────────────────────
