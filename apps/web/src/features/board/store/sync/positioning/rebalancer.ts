@@ -38,7 +38,7 @@ import {
   shouldRebalancePosition,
   comparePositions,
   type Position,
-} from "@repo/domain";
+} from "@repo/domain/ordering";
 
 import { telemetry } from "../../../devtools/logEvent";
 
