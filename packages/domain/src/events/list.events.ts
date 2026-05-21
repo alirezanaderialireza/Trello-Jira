@@ -1,13 +1,20 @@
 // packages/domain/src/events/list.events.ts
+//
+// Fixes applied:
+// ✅ #D-11: ListMovedPayload.oldPosition was required but move-list use-case
+//           and board.service.ts don't always include it in outbox payload.
+//           Made optional for backward-compat, same as CardMovedPayload.
+
 import type { DomainEvent } from "./base";
 
 // ============================================================================
 // 1. List Moved
 // ============================================================================
 export interface ListMovedPayload {
-  readonly listId: string;
-  readonly boardId: string;
-  readonly oldPosition: string;
+  readonly listId:      string;
+  readonly boardId:     string;
+  // ✅ #D-11: oldPosition optional — not always produced by move-list service
+  readonly oldPosition?: string;
   readonly newPosition: string;
 }
 

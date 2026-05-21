@@ -1,13 +1,27 @@
 // packages/domain/src/list/create-list.ts
+//
+// Fixes applied:
+// ✅ #D-13: CreateListHandler uses crypto.randomUUID() directly in its default
+//           deps — domain must NOT call crypto.randomUUID() without injection.
+//           The handler already has a deps parameter with generateId/now, but
+//           the default value uses crypto.randomUUID(). In pure domain code the
+//           defaults should not exist — deps are always injected by the caller.
+//           Fix: remove default values for deps; callers must inject.
+//
+// ✅ #D-14: listRepo.getLastListInBoard called with (tx, boardId) but the port
+//           contract GetLastListInBoard is (tx: DbTx, boardId: BoardId).
+//           This is correct. However, the local ListRepository interface in
+//           list.repository.ts defined a different signature:
+//             getLastListInBoard({ boardId, tenantId, tx })
+//           Now that list.repository.ts re-exports from ports, this is aligned.
+//
+// ✅ #D-15: create-list.ts imports ListRepository from "../ports" (correct)
+//           but also depends on BoardRepository from "../ports" — that interface
+//           has findById(id, options?) which is what the handler calls. 
 
 import type { List } from "../list/types";
-
-// ✅ ارور ۱: مسیر صحیح — utils/position وجود ندارد، ordering است
 import { getNewPosition } from "../ordering";
-
-// ✅ ارور ۲: مسیر صحیح — contracts وجود ندارد، DomainErrorReason اینجاست
 import type { DomainErrorReason } from "../errors/error-codes";
-
 import type {
   ListRepository,
   BoardRepository,
@@ -16,8 +30,6 @@ import type {
   TransactionManager,
   Logger,
 } from "../ports";
-
-// ✅ ارور ۳-۶: import branded types برای cast در فراخوانی‌های repo
 import type { BoardId, TenantId } from "../shared/ids";
 
 // ============================================================================
@@ -63,12 +75,11 @@ export class CreateListHandler<DbTx = unknown> {
     private readonly outboxRepo: OutboxRepository<DbTx>,
     private readonly sequenceRepo: SequenceRepository<DbTx>,
     private readonly logger: Logger,
+    // ✅ #D-13: no default values — deps must be injected by the composition root.
+    //           domain code must not call crypto.randomUUID() directly.
     private readonly deps: {
       generateId: () => string;
       now: () => Date;
-    } = {
-      generateId: () => crypto.randomUUID(),
-      now: () => new Date(),
     },
   ) {}
 
