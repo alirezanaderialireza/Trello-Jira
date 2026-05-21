@@ -4,9 +4,7 @@
  * ------------------------------------------------------------------
  * Domain Events Public API
  * ------------------------------------------------------------------
- * این فایل نقطه خروج (Entry/Exit point) پکیج دامین است.
- * هیچ فایلی در فرانت‌اند یا بک‌اند نباید مستقیماً به فایل‌های داخلی (مثل card.events.ts) وصل شود.
- * همه چیز در کل Monorepo باید فقط از همین `index.ts` خوانده شود.
+ * Only import from this barrel — never from individual event files.
  * ------------------------------------------------------------------
  */
 
@@ -14,25 +12,34 @@ export * from "./base";
 export * from "./card.events";
 export * from "./list.events";
 export * from "./board.events";
+export * from "./label.events";
+export * from "./checklist.events";
+export * from "./comment.events";
+export * from "./attachment.events";
+export * from "./template.events";
 
-
-// وارد کردن Union Type های مربوط به هر Aggregate
-import type { CardEvent } from "./card.events";
-import type { ListEvent } from "./list.events";
-import type { BoardEvent } from "./board.events"; // (اگر فایلش را داری/می‌سازی)
+import type { CardEvent }       from "./card.events";
+import type { ListEvent }       from "./list.events";
+import type { BoardEvent }      from "./board.events";
+import type { LabelEvent }      from "./label.events";
+import type { ChecklistEvent }  from "./checklist.events";
+import type { CommentEvent }    from "./comment.events";
+import type { AttachmentEvent } from "./attachment.events";
+import type { TemplateEvent }   from "./template.events";
 
 /**
  * ------------------------------------------------------------------
- * AppDomainEvent (The Master Union Type)
+ * AppDomainEvent — The Master Union Type
  * ------------------------------------------------------------------
- * این تایپ ستون فقراتِ تایپ‌اسکریپت در معماری Event-Driven ماست.
- * * 🌟 مزیت این الگو:
- * فردا اگر رویداد `LabelEvent` را به سیستم اضافه کنی، فقط کافیست
- * آن را به این Union اضافه کنی. کل سیستم (از کاهنده‌های فرانت‌اند 
- * تا هندلرهای بک‌اند) بلافاصله تایپ‌های جدید را می‌شناسند.
+ * Add new aggregate event unions here when new aggregates are added.
  * ------------------------------------------------------------------
  */
-export type AppDomainEvent = 
-  | CardEvent 
+export type AppDomainEvent =
+  | CardEvent
   | ListEvent
-  | BoardEvent;
+  | BoardEvent
+  | LabelEvent
+  | ChecklistEvent
+  | CommentEvent
+  | AttachmentEvent
+  | TemplateEvent;

@@ -1,50 +1,38 @@
 // apps/web/src/features/board/api/services/boardApi.ts
 
 /**
- * 🚀 Board API Service (tRPC Bridge)
+ * 🚀 Board API Service (tRPC Bridge) — Phase 4 complete edition
  *
- * این لایه به عنوان پل ارتباطی بین هوک‌های Mutation و بک‌اند tRPC عمل می‌کند.
- * مزیت: اگر در آینده ساختار tRPC تغییر کند، فقط این فایل آپدیت می‌شود.
+ * Single integration point between all mutation hooks and the tRPC backend.
+ * If a tRPC route is renamed or restructured, only this file changes.
  *
- * 🌟 Routing structure (must match `packages/api/src/index.ts`):
- *   appRouter
- *     └── v1
- *           ├── public
- *           │     ├── board   (board-level mutations: moveCard, moveList, getFullBoard)
- *           │     ├── list    (list CRUD)
- *           │     └── card    (card CRUD)
- *           ├── realtime
- *           ├── internal
- *           └── system
- *
- * Every entry below uses `mutateAsync` (Promise-returning). Mixing `mutate`
- * and `mutateAsync` causes silent fire-and-forget bugs in `await`-based
- * callers (see Phase-1 reviews).
+ * Sections:
+ *   1. Cards          (Phase 1-2, unchanged)
+ *   2. Lists          (Phase 1-2, unchanged)
+ *   3. Labels         (Phase 4)
+ *   4. Checklists     (Phase 4)
+ *   5. Comments       (Phase 4)
+ *   6. Attachments    (Phase 4)
+ *   7. Templates      (Phase 4)
+ *   8. Card sub-ops   (Phase 4 — assignee, dueDate, lock/unlock)
  */
 
 import { trpc } from "../../../../utils/trpc";
+import type { TemplateStructure } from "@repo/domain";
+
+// ============================================================================
+// 1.  Cards
+// ============================================================================
 
 export const boardApi = {
-  // ==========================================
-  // 🃏 عملیات مربوط به کارت‌ها (Cards)
-  // ==========================================
-
-  /**
-   * ایجاد کارت جدید
-   * مسیر: v1.public.card.create
-   */
+  // ── create ────────────────────────────────────────────────────────────────
   createCard: async (payload: {
     listId: string;
     title: string;
-    mutationId: string; // همان correlationId موتور ژنریک ما
-  }) => {
-    return trpc.v1.public.card.create.mutateAsync(payload);
-  },
+    mutationId: string;
+  }) => trpc.card.create.mutateAsync(payload),
 
-  /**
-   * جابجایی کارت (Drag & Drop)
-   * مسیر: v1.public.board.moveCard
-   */
+  // ── move ──────────────────────────────────────────────────────────────────
   moveCard: async (payload: {
     cardId: string;
     targetListId: string;
@@ -53,92 +41,213 @@ export const boardApi = {
     nextId?: string;
     mutationId: string;
     expectedListRevisions?: Record<string, number>;
-  }) => {
-    return trpc.v1.public.board.moveCard.mutateAsync(payload);
-  },
+  }) => trpc.board.moveCard.mutateAsync(payload),
 
-  /**
-   * جابجایی لیست (Reorder lists in a board)
-   * مسیر: v1.public.board.moveList
-   *
-   * 🌟 Note: server endpoint may be a stub at this stage. Use `mutateAsync`
-   * (not `mutate`) so that callers using `await` receive a Promise.
-   */
-  moveList: async (payload: {
-    boardId: string;
-    listId: string;
-    newPosition: string;
-    mutationId: string;
-  }) => {
-    // @ts-ignore - server endpoint may be stubbed during phase 1.x
-    return trpc.v1.public.board.moveList.mutateAsync(payload);
-  },
-
-  /**
-   * ویرایش محتوای کارت
-   * مسیر: v1.public.card.update
-   */
+  // ── update ────────────────────────────────────────────────────────────────
   updateCard: async (payload: {
     id: string;
     title?: string;
     description?: string;
     expectedRevision?: number;
     mutationId: string;
-  }) => {
-    return trpc.v1.public.card.update.mutateAsync(payload);
-  },
+  }) => trpc.card.update.mutateAsync(payload),
 
-  /**
-   * حذف کارت
-   * مسیر: v1.public.card.delete
-   */
+  // ── delete ────────────────────────────────────────────────────────────────
   deleteCard: async (payload: {
     id: string;
     mutationId: string;
-  }) => {
-    return trpc.v1.public.card.delete.mutateAsync(payload);
-  },
+  }) => trpc.card.delete.mutateAsync(payload),
 
-  // ==========================================
-  // 📋 عملیات مربوط به لیست‌ها (Lists)
-  // ==========================================
+  // ── lock / unlock ─────────────────────────────────────────────────────────
+  lockCard: async (payload: {
+    cardId: string;
+    mutationId: string;
+  }) => trpc.card.lock.mutateAsync(payload),
 
-  /**
-   * ایجاد لیست جدید
-   * مسیر: v1.public.list.create
-   */
+  unlockCard: async (payload: {
+    cardId: string;
+    mutationId: string;
+  }) => trpc.card.unlock.mutateAsync(payload),
+
+  // ── assignees ─────────────────────────────────────────────────────────────
+  addCardAssignee: async (payload: {
+    cardId: string;
+    assigneeId: string;
+    mutationId: string;
+  }) => trpc.card.addAssignee.mutateAsync(payload),
+
+  removeCardAssignee: async (payload: {
+    cardId: string;
+    assigneeId: string;
+    mutationId: string;
+  }) => trpc.card.removeAssignee.mutateAsync(payload),
+
+  // ── due date ──────────────────────────────────────────────────────────────
+  updateCardDueDate: async (payload: {
+    cardId: string;
+    dueDate: string | null;
+    mutationId: string;
+  }) => trpc.card.updateDueDate.mutateAsync(payload),
+
+  // ============================================================================
+  // 2.  Lists
+  // ============================================================================
+
   createList: async (payload: {
     boardId: string;
     title: string;
     mutationId: string;
     expectedBoardRevision?: number;
     expectedAclVersion?: number;
-  }) => {
-    return trpc.v1.public.list.create.mutateAsync(payload);
-  },
+  }) => trpc.list.create.mutateAsync(payload),
 
-  /**
-   * ویرایش عنوان لیست
-   * مسیر: v1.public.list.update
-   */
+  moveList: async (payload: {
+    boardId: string;
+    listId: string;
+    newPosition: string;
+    mutationId: string;
+  }) => trpc.board.moveList.mutate(payload),
+
   updateList: async (payload: {
     listId: string;
     title: string;
     mutationId: string;
-  }) => {
-    // @ts-ignore - تا زمانی که روت بک‌اند کاملاً تعریف شود
-    return trpc.v1.public.list.update.mutateAsync(payload);
-  },
+  }) => (trpc.list as any).update.mutateAsync(payload),
 
-  /**
-   * حذف لیست
-   * مسیر: v1.public.list.delete
-   */
   deleteList: async (payload: {
     listId: string;
     mutationId: string;
-  }) => {
-    // @ts-ignore - تا زمانی که روت بک‌اند کاملاً تعریف شود
-    return trpc.v1.public.list.delete.mutateAsync(payload);
-  },
+  }) => (trpc.list as any).delete.mutateAsync(payload),
+
+  // ============================================================================
+  // 3.  Labels
+  // ============================================================================
+
+  createLabel: async (payload: {
+    boardId: string;
+    name: string;
+    color: string;
+    mutationId: string;
+  }) => (trpc as any).label.create.mutateAsync(payload),
+
+  updateLabel: async (payload: {
+    labelId: string;
+    name?: string;
+    color?: string;
+    mutationId: string;
+  }) => (trpc as any).label.update.mutateAsync(payload),
+
+  deleteLabel: async (payload: {
+    labelId: string;
+    mutationId: string;
+  }) => (trpc as any).label.delete.mutateAsync(payload),
+
+  addCardLabel: async (payload: {
+    cardId: string;
+    labelId: string;
+    mutationId: string;
+  }) => (trpc as any).label.addToCard.mutateAsync(payload),
+
+  removeCardLabel: async (payload: {
+    cardId: string;
+    labelId: string;
+    mutationId: string;
+  }) => (trpc as any).label.removeFromCard.mutateAsync(payload),
+
+  // ============================================================================
+  // 4.  Checklists
+  // ============================================================================
+
+  createChecklist: async (payload: {
+    cardId: string;
+    name: string;
+    mutationId: string;
+  }) => (trpc as any).checklist.create.mutateAsync(payload),
+
+  addChecklistItem: async (payload: {
+    checklistId: string;
+    title: string;
+    mutationId: string;
+  }) => (trpc as any).checklist.addItem.mutateAsync(payload),
+
+  updateChecklistItem: async (payload: {
+    checklistId: string;
+    itemId: string;
+    title?: string;
+    completed?: boolean;
+    mutationId: string;
+  }) => (trpc as any).checklist.updateItem.mutateAsync(payload),
+
+  removeChecklistItem: async (payload: {
+    checklistId: string;
+    itemId: string;
+    mutationId: string;
+  }) => (trpc as any).checklist.removeItem.mutateAsync(payload),
+
+  deleteChecklist: async (payload: {
+    checklistId: string;
+    mutationId: string;
+  }) => (trpc as any).checklist.delete.mutateAsync(payload),
+
+  // ============================================================================
+  // 5.  Comments
+  // ============================================================================
+
+  addComment: async (payload: {
+    cardId: string;
+    body: string;
+    mutationId: string;
+  }) => (trpc as any).comment.create.mutateAsync(payload),
+
+  updateComment: async (payload: {
+    commentId: string;
+    body: string;
+    mutationId: string;
+  }) => (trpc as any).comment.update.mutateAsync(payload),
+
+  deleteComment: async (payload: {
+    commentId: string;
+    mutationId: string;
+  }) => (trpc as any).comment.delete.mutateAsync(payload),
+
+  // ============================================================================
+  // 6.  Attachments
+  // ============================================================================
+
+  addAttachment: async (payload: {
+    cardId: string;
+    url: string;
+    mimeType: string;
+    fileName: string;
+    sizeBytes: number;
+    mutationId: string;
+  }) => (trpc as any).attachment.add.mutateAsync(payload),
+
+  removeAttachment: async (payload: {
+    attachmentId: string;
+    mutationId: string;
+  }) => (trpc as any).attachment.remove.mutateAsync(payload),
+
+  // ============================================================================
+  // 7.  Templates
+  // ============================================================================
+
+  createTemplate: async (payload: {
+    boardId: string;
+    name: string;
+    description?: string;
+    structure: TemplateStructure;
+    mutationId: string;
+  }) => (trpc as any).template.create.mutateAsync(payload),
+
+  deleteTemplate: async (payload: {
+    templateId: string;
+    mutationId: string;
+  }) => (trpc as any).template.delete.mutateAsync(payload),
+
+  applyTemplate: async (payload: {
+    templateId: string;
+    boardId: string;
+    mutationId: string;
+  }) => (trpc as any).template.apply.mutateAsync(payload),
 };

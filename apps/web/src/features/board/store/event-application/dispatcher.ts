@@ -1,30 +1,8 @@
 // apps/web/src/features/board/store/event-application/dispatcher.ts
-//
-// Architecture boundary:
-//   ┌─────────────────────────────────────────────────┐
-//   │  dispatcher.ts  ←  ORCHESTRATION BOUNDARY       │
-//   │  ─────────────────────────────────────────────  │
-//   │  • Resolves event type → handler                │
-//   │  • Handles unknown-event forward-compat         │
-//   │  • Catches reducer crashes (isolation boundary) │
-//   │  • Fires telemetry observer (side-effect layer) │
-//   │                                                 │
-//   │  reducers (applyCard*, applyList*)              │
-//   │  ─────────────────────────────────────────────  │
-//   │  • 100% pure — no imports outside domain/store  │
-//   │  • zero telemetry, zero side effects            │
-//   │  • (state, envelope, context) → Partial<State>  │
-//   └─────────────────────────────────────────────────┘
-//
-// Task #2 fix: telemetry was already ONLY in this orchestration layer, never
-// inside individual reducers. This refactor makes the boundary explicit by:
-//   1. Wrapping telemetry calls in a narrow DispatchObserver type
-//   2. Making the observer injectable (default = telemetry, testable = no-op)
-//   3. Removing the `telemetry` import from the dispatch hot-path into the
-//      observer so tests can run without the devtools store mounting
 
 import type {
   AppDomainEvent,
+  // ── Phase 1-2 ───────────────────────────────────────────────────────────
   CardCreatedEvent,
   CardUpdatedEvent,
   CardDeletedEvent,
@@ -33,16 +11,45 @@ import type {
   ListUpdatedEvent,
   ListMovedEvent,
   ListDeletedEvent,
+  // ── Phase 4 card sub-events ─────────────────────────────────────────────
+  CardLockedEvent,
+  CardUnlockedEvent,
+  CardAssigneeAddedEvent,
+  CardAssigneeRemovedEvent,
+  CardDueDateUpdatedEvent,
+  CardLabelAddedEvent,
+  CardLabelRemovedEvent,
+  // ── Phase 4 label ────────────────────────────────────────────────────────
+  LabelCreatedEvent,
+  LabelUpdatedEvent,
+  LabelDeletedEvent,
+  // ── Phase 4 checklist ────────────────────────────────────────────────────
+  ChecklistCreatedEvent,
+  ChecklistItemAddedEvent,
+  ChecklistItemUpdatedEvent,
+  ChecklistItemRemovedEvent,
+  ChecklistDeletedEvent,
+  // ── Phase 4 comment ──────────────────────────────────────────────────────
+  CommentCreatedEvent,
+  CommentUpdatedEvent,
+  CommentDeletedEvent,
+  // ── Phase 4 attachment ───────────────────────────────────────────────────
+  AttachmentAddedEvent,
+  AttachmentRemovedEvent,
+  // ── Phase 4 template ─────────────────────────────────────────────────────
+  TemplateCreatedEvent,
+  TemplateUpdatedEvent,
+  TemplateDeletedEvent,
+  TemplateAppliedEvent,
 } from "@repo/domain";
 
 import type { BoardStoreState } from "../useBoardStore";
+import { telemetry } from "../../devtools/logEvent";
+
 import type { ClientEventEnvelope } from "./types";
 import type { ReducerContext } from "./context";
 
-// ============================================================================
-// 🛡️ Pure Reducers (zero side effects, zero telemetry)
-// ============================================================================
-
+// ── Phase 1-2 reducers ────────────────────────────────────────────────────────
 import { applyCardMoved }    from "./applyCardMoved";
 import { applyCardCreated }  from "./applyCardCreated";
 import { applyCardUpdated }  from "./applyCardUpdated";
@@ -52,80 +59,44 @@ import { applyListCreated }  from "./applyListCreated";
 import { applyListUpdated }  from "./applyListUpdated";
 import { applyListDeleted }  from "./applyListDeleted";
 
-// ============================================================================
-// 📋 DispatchObserver — injectable side-effect hook (NOT part of pure core)
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests inject a no-op observer.
-// Production injects the telemetry observer.
-// The pure dispatch logic (HANDLERS + applyEvent) has zero direct dependency
-// on any observer — keeping the orchestration boundary clean.
-// ============================================================================
+// ── Phase 4 card sub-event reducers ──────────────────────────────────────────
+import { applyCardLocked, applyCardUnlocked }             from "./applyCardLocked";
+import { applyCardAssigneeAdded, applyCardAssigneeRemoved } from "./applyCardAssignee";
+import { applyCardDueDateUpdated }                        from "./applyCardDueDate";
+import { applyCardLabelAdded, applyCardLabelRemoved }     from "./applyCardLabel";
 
-export interface DispatchObserver {
-  onApply(eventType: string, mode: string, correlationId: string | undefined): void;
-  onUnknownEvent(eventType: string, correlationId: string | undefined): void;
-  onOptimisticApplied(correlationId: string, eventType: string): void;
-  onReducerCrash(eventType: string, error: string, correlationId: string | undefined): void;
-}
+// ── Phase 4 label reducers ───────────────────────────────────────────────────
+import { applyLabelCreated, applyLabelUpdated, applyLabelDeleted } from "./applyLabel";
 
-/** No-op observer — used in tests and when telemetry is unavailable */
-export const NO_OP_OBSERVER: DispatchObserver = {
-  onApply: () => undefined,
-  onUnknownEvent: () => undefined,
-  onOptimisticApplied: () => undefined,
-  onReducerCrash: () => undefined,
-};
+// ── Phase 4 checklist reducers ───────────────────────────────────────────────
+import {
+  applyChecklistCreated,
+  applyChecklistItemAdded,
+  applyChecklistItemUpdated,
+  applyChecklistItemRemoved,
+  applyChecklistDeleted,
+} from "./applyChecklist";
 
-/** Lazily-constructed telemetry observer — only imports telemetry at call-time */
-function makeTelemetryObserver(): DispatchObserver {
-  return {
-    onApply(eventType, mode, correlationId) {
-      try {
-        const { telemetry } = require("../../devtools/logEvent");
-        telemetry.log(
-          "MUTATION_ENGINE",
-          mode === "live" ? "APPLY_LIVE" : "APPLY_OPTIMISTIC",
-          { eventType, mode },
-          { correlationId },
-        );
-      } catch { /* devtools not mounted — safe to ignore */ }
-    },
-    onUnknownEvent(eventType, correlationId) {
-      try {
-        if (process.env.NODE_ENV === "development") {
-          console.warn(`[Dispatcher] Unknown event type: "${eventType}"`);
-        }
-        const { telemetry } = require("../../devtools/logEvent");
-        telemetry.log("MUTATION_ENGINE", "UNKNOWN_EVENT_DROPPED", { eventType }, { correlationId });
-      } catch { /* devtools not mounted */ }
-    },
-    onOptimisticApplied(correlationId, eventType) {
-      try {
-        const { telemetry } = require("../../devtools/logEvent");
-        telemetry.mutation(correlationId, eventType, "OPTIMISTIC_APPLIED");
-      } catch { /* devtools not mounted */ }
-    },
-    onReducerCrash(eventType, error, correlationId) {
-      try {
-        console.error(`[Dispatcher] Failed applying "${eventType}" event. Error: ${error}`);
-        const { telemetry } = require("../../devtools/logEvent");
-        telemetry.log("MUTATION_ENGINE", "REDUCER_CRASH", { eventType, error }, { correlationId });
-      } catch { /* devtools not mounted */ }
-    },
-  };
-}
+// ── Phase 4 comment reducers ─────────────────────────────────────────────────
+import {
+  applyCommentCreated,
+  applyCommentUpdated,
+  applyCommentDeleted,
+} from "./applyComment";
 
-// Module-level default observer (lazy, replaced in tests via setDispatchObserver)
-let _observer: DispatchObserver = makeTelemetryObserver();
+// ── Phase 4 attachment reducers ──────────────────────────────────────────────
+import { applyAttachmentAdded, applyAttachmentRemoved } from "./applyAttachment";
 
-/**
- * Override the dispatch observer.
- * Call in test setup:  setDispatchObserver(NO_OP_OBSERVER)
- * Call in production:  setDispatchObserver(makeTelemetryObserver())
- */
-export function setDispatchObserver(obs: DispatchObserver): void {
-  _observer = obs;
-}
+// ── Phase 4 template reducers ────────────────────────────────────────────────
+import {
+  applyTemplateCreated,
+  applyTemplateUpdated,
+  applyTemplateDeleted,
+  applyTemplateApplied,
+} from "./applyTemplate";
+
+// ── Activity reducer ─────────────────────────────────────────────────────────
+import { applyActivityRecorded } from "./applyActivity";
 
 // ============================================================================
 // 🌟 Event Handler Contract
@@ -138,49 +109,111 @@ export type EventHandler<TEvent extends AppDomainEvent = AppDomainEvent> = (
 ) => Partial<BoardStoreState>;
 
 // ============================================================================
-// 📚 Canonical Event Map
+// 📚 Canonical Event Map  (type string → full Event type)
 // ============================================================================
 
 type EventMap = {
-  "card.created": CardCreatedEvent;
-  "card.updated": CardUpdatedEvent;
-  "card.deleted": CardDeletedEvent;
-  "card.moved":   CardMovedEvent;
-  "list.created": ListCreatedEvent;
-  "list.updated": ListUpdatedEvent;
-  "list.moved":   ListMovedEvent;
-  "list.deleted": ListDeletedEvent;
+  // ── Card ──────────────────────────────────────────────────────────────────
+  "card.created":          CardCreatedEvent;
+  "card.updated":          CardUpdatedEvent;
+  "card.deleted":          CardDeletedEvent;
+  "card.moved":            CardMovedEvent;
+  "card.locked":           CardLockedEvent;
+  "card.unlocked":         CardUnlockedEvent;
+  "card.assignee_added":   CardAssigneeAddedEvent;
+  "card.assignee_removed": CardAssigneeRemovedEvent;
+  "card.due_date_updated": CardDueDateUpdatedEvent;
+  "card.label_added":      CardLabelAddedEvent;
+  "card.label_removed":    CardLabelRemovedEvent;
+  // ── List ──────────────────────────────────────────────────────────────────
+  "list.created":  ListCreatedEvent;
+  "list.updated":  ListUpdatedEvent;
+  "list.moved":    ListMovedEvent;
+  "list.deleted":  ListDeletedEvent;
+  // ── Label ─────────────────────────────────────────────────────────────────
+  "label.created": LabelCreatedEvent;
+  "label.updated": LabelUpdatedEvent;
+  "label.deleted": LabelDeletedEvent;
+  // ── Checklist ─────────────────────────────────────────────────────────────
+  "checklist.created":      ChecklistCreatedEvent;
+  "checklist.item_added":   ChecklistItemAddedEvent;
+  "checklist.item_updated": ChecklistItemUpdatedEvent;
+  "checklist.item_removed": ChecklistItemRemovedEvent;
+  "checklist.deleted":      ChecklistDeletedEvent;
+  // ── Comment ───────────────────────────────────────────────────────────────
+  "comment.created": CommentCreatedEvent;
+  "comment.updated": CommentUpdatedEvent;
+  "comment.deleted": CommentDeletedEvent;
+  // ── Attachment ────────────────────────────────────────────────────────────
+  "attachment.added":   AttachmentAddedEvent;
+  "attachment.removed": AttachmentRemovedEvent;
+  // ── Template ──────────────────────────────────────────────────────────────
+  "template.created": TemplateCreatedEvent;
+  "template.updated": TemplateUpdatedEvent;
+  "template.deleted": TemplateDeletedEvent;
+  "template.applied": TemplateAppliedEvent;
+  // ── Activity (internal projection event) ──────────────────────────────────
+  "activity.recorded": AppDomainEvent; // passthrough — handled by applyActivity
 };
 
-type HandlerRegistry = { [K in keyof EventMap]: EventHandler<EventMap[K]> };
+// ============================================================================
+// 🧠 Strict Registry Type
+// ============================================================================
+
+type HandlerRegistry = {
+  [K in keyof EventMap]: EventHandler<EventMap[K]>;
+};
 
 // ============================================================================
-// 🚀 Reducer Registry  (O(1) lookup — zero side effects in this object)
+// 🚀 Reducer Registry  — O(1) lookup
 // ============================================================================
 
 const HANDLERS: HandlerRegistry = {
-  "card.moved":    applyCardMoved,
-  "card.created":  applyCardCreated,
-  "card.updated":  applyCardUpdated,
-  "card.deleted":  applyCardDeleted,
-  "list.moved":    applyListMoved,
-  "list.created":  applyListCreated,
-  "list.updated":  applyListUpdated,
-  "list.deleted":  applyListDeleted,
+  // ── Card ──────────────────────────────────────────────────────────────────
+  "card.created":          applyCardCreated,
+  "card.updated":          applyCardUpdated,
+  "card.deleted":          applyCardDeleted,
+  "card.moved":            applyCardMoved,
+  "card.locked":           applyCardLocked,
+  "card.unlocked":         applyCardUnlocked,
+  "card.assignee_added":   applyCardAssigneeAdded,
+  "card.assignee_removed": applyCardAssigneeRemoved,
+  "card.due_date_updated": applyCardDueDateUpdated,
+  "card.label_added":      applyCardLabelAdded,
+  "card.label_removed":    applyCardLabelRemoved,
+  // ── List ──────────────────────────────────────────────────────────────────
+  "list.created": applyListCreated,
+  "list.updated": applyListUpdated,
+  "list.moved":   applyListMoved,
+  "list.deleted": applyListDeleted,
+  // ── Label ─────────────────────────────────────────────────────────────────
+  "label.created": applyLabelCreated,
+  "label.updated": applyLabelUpdated,
+  "label.deleted": applyLabelDeleted,
+  // ── Checklist ─────────────────────────────────────────────────────────────
+  "checklist.created":      applyChecklistCreated,
+  "checklist.item_added":   applyChecklistItemAdded,
+  "checklist.item_updated": applyChecklistItemUpdated,
+  "checklist.item_removed": applyChecklistItemRemoved,
+  "checklist.deleted":      applyChecklistDeleted,
+  // ── Comment ───────────────────────────────────────────────────────────────
+  "comment.created": applyCommentCreated,
+  "comment.updated": applyCommentUpdated,
+  "comment.deleted": applyCommentDeleted,
+  // ── Attachment ────────────────────────────────────────────────────────────
+  "attachment.added":   applyAttachmentAdded,
+  "attachment.removed": applyAttachmentRemoved,
+  // ── Template ──────────────────────────────────────────────────────────────
+  "template.created": applyTemplateCreated,
+  "template.updated": applyTemplateUpdated,
+  "template.deleted": applyTemplateDeleted,
+  "template.applied": applyTemplateApplied,
+  // ── Activity ──────────────────────────────────────────────────────────────
+  "activity.recorded": applyActivityRecorded,
 };
 
 // ============================================================================
-// 👑 applyEvent — PURE orchestration core
-// ─────────────────────────────────────────────────────────────────────────────
-// This function is pure with respect to domain state:
-//   (state, envelope, context) → Partial<BoardStoreState>
-//
-// The only side effect is the _observer call, which is:
-//   - injected (not hardcoded)
-//   - wrapped in try/catch (never affects return value)
-//   - no-op in tests
-//
-// The individual reducers called here have ZERO side effects by contract.
+// 👑 Main Dispatcher — single entry point for all state mutations
 // ============================================================================
 
 export function applyEvent(
@@ -188,30 +221,52 @@ export function applyEvent(
   envelope: ClientEventEnvelope,
   context: ReducerContext,
 ): Partial<BoardStoreState> {
-  const eventType    = envelope.event.type as keyof EventMap;
+
+  const eventType     = envelope.event.type as keyof EventMap;
   const correlationId = envelope.event.correlationId;
 
-  // Side-effect: telemetry (isolated, injectable, never throws into core)
-  _observer.onApply(eventType, context.mode, correlationId);
+  telemetry.log(
+    "MUTATION_ENGINE",
+    context.mode === "live" ? "APPLY_LIVE" : "APPLY_OPTIMISTIC",
+    { eventType, mode: context.mode },
+    { correlationId },
+  );
 
   const handler = HANDLERS[eventType];
 
   if (!handler) {
-    _observer.onUnknownEvent(eventType, correlationId);
+    if (process.env.NODE_ENV === "development") {
+      console.warn(`[Dispatcher] Unknown event type: "${eventType}"`);
+    }
+    telemetry.log(
+      "MUTATION_ENGINE",
+      "UNKNOWN_EVENT_DROPPED",
+      { eventType },
+      { correlationId },
+    );
     return {};
   }
 
   try {
     const nextState = (handler as EventHandler)(state, envelope, context);
 
-    // Optimistic events: live mode + no ACK yet
-    if (context.mode === "live" && correlationId && !envelope.acknowledged) {
-      _observer.onOptimisticApplied(correlationId, eventType);
+    if (context.mode !== "live" && correlationId) {
+      telemetry.mutation(correlationId, eventType, "OPTIMISTIC_APPLIED");
     }
 
     return nextState;
+
   } catch (error: any) {
-    _observer.onReducerCrash(eventType, error?.message ?? String(error), correlationId);
-    return {}; // Reducer isolation: crash is contained, state unchanged
+    console.error(
+      `[Dispatcher] Failed applying "${eventType}" event.`,
+      { error, event: envelope.event, context },
+    );
+    telemetry.log(
+      "MUTATION_ENGINE",
+      "REDUCER_CRASH",
+      { eventType, error: error.message },
+      { correlationId },
+    );
+    return {};
   }
 }
