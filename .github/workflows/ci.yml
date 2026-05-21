@@ -29,10 +29,8 @@ jobs:
           DATABASE_URL: postgresql://trello:ci@localhost:5432/trello_test
           REDIS_URL: redis://localhost:6379
           JWT_SECRET: ci-secret
-      # Build is currently disabled due to a tRPC v10/v11 peer-dependency
-      # mismatch (`@trpc/client@11` + `@trpc/server@10`). Re-enable after
-      # aligning trpc versions across the monorepo.
-      # - run: pnpm turbo build
-      #   env:
-      #     DATABASE_URL: postgresql://trello:ci@localhost:5432/trello_test
-      #     REDIS_URL: redis://localhost:6379
+      - run: pnpm turbo build
+        env:
+          DATABASE_URL: postgresql://trello:ci@localhost:5432/trello_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: ci-secret

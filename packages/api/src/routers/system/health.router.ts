@@ -6,7 +6,7 @@ import { sql } from "drizzle-orm";
 
 type ServiceStatus = "healthy" | "degraded" | "unhealthy";
 
-interface HealthResult {
+export interface HealthResult {
   status: ServiceStatus;
   uptime: number;
   timestamp: string;

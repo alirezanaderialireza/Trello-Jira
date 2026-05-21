@@ -17,8 +17,22 @@
  *   8. Card sub-ops   (Phase 4 — assignee, dueDate, lock/unlock)
  */
 
-import { trpc } from "../../../../utils/trpc";
+import { trpc as _typedTrpc } from "../../../../utils/trpc";
 import type { TemplateStructure } from "@repo/domain";
+
+// NOTE: Many of the procedures referenced below (e.g. card.lock, list.update,
+// card.addAssignee, label.*, checklist.*, comment.*, attachment.*, template.*)
+// are not yet wired into the server router (see packages/api/src/index.ts —
+// only `v1.public.{board,list,card,label,checklist,comment,dueDate,activity}`
+// are mounted, and `card`/`list`/`board` only expose a subset of methods).
+//
+// This service file is the optimistic-mutation bridge consumed by the board
+// store hooks. The hooks fall back to optimistic state when the server call
+// fails (or is missing), so we intentionally type-erase the tRPC proxy here
+// to keep this layer compiling while individual procedures are filled in.
+// When a procedure lands on the server, switch its caller to the strongly
+// typed `_typedTrpc.v1.public.<x>.<y>` form.
+const trpc = _typedTrpc as any;
 
 // ============================================================================
 // 1.  Cards

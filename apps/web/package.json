@@ -19,7 +19,7 @@
     "@trpc/client": "^11.17.0",
     "@trpc/next": "^11.17.0",
     "@trpc/react-query": "^11.17.0",
-    "@trpc/server": "^10.45.4",
+    "@trpc/server": "^11.17.0",
     "immer": "^11.1.8",
     "lucide-react": "^1.14.0",
     "next": "latest",

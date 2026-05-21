@@ -3,25 +3,11 @@
 import "./globals.css";
 import { Toaster } from "sonner";
 import { QueryProvider } from "../providers/QueryProvider";
+import { DevtoolsLoader } from "./_components/DevtoolsLoader";
 
-// ✅ fix: dynamic import برای devtools
-// با static import، BoardDevtoolsOverlay همیشه در bundle بود حتی در production.
-// با dynamic import + ssr:false:
-// 1. در production build اصلاً bundled نمی‌شود (tree-shaken)
-// 2. فقط در client-side load می‌شود (چون "use client" است)
-// 3. بدون این، Next.js ممکن است در SSR crash کند چون devtools به window/store وابسته است
-import dynamic from "next/dynamic";
-
-const BoardDevtoolsOverlay =
-  process.env.NODE_ENV === "development"
-    ? dynamic(
-        () =>
-          import("../features/board/devtools/BoardDevtoolsOverlay").then(
-            (mod) => mod.BoardDevtoolsOverlay,
-          ),
-        { ssr: false }, // devtools به useBoardStore/Zustand وابسته است — SSR-safe نیست
-      )
-    : null;
+// Note: the Board devtools overlay is dynamically imported with `ssr: false`
+// inside a Client Component (`DevtoolsLoader`) — Next.js 16 / Turbopack no
+// longer allow `next/dynamic({ ssr: false })` directly in Server Components.
 
 export const metadata = {
   title: "Trello OS",
@@ -39,8 +25,8 @@ export default function RootLayout({
         <QueryProvider>
           {children}
 
-          {/* Devtools فقط در development — در production از bundle حذف می‌شود */}
-          {BoardDevtoolsOverlay && <BoardDevtoolsOverlay />}
+          {/* Devtools only in development — tree-shaken in production. */}
+          <DevtoolsLoader />
         </QueryProvider>
 
         <Toaster position="bottom-right" richColors theme="light" />
