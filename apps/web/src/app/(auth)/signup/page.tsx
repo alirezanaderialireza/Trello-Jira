@@ -38,8 +38,20 @@ export default function SignupPage() {
       <div className="min-h-screen flex items-center justify-center bg-slate-900">
         <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 p-8 text-center">
           <h1 className="text-xl font-bold text-white mb-4">✓ ثبت‌نام موفق</h1>
-          <p className="text-slate-300 text-sm">ایمیل تأیید ارسال شد. لطفاً صندوق ورودی خود را بررسی کنید.</p>
-          <Link href="/login" className="mt-4 inline-block text-blue-400 hover:text-blue-300 text-sm">بازگشت به صفحه ورود</Link>
+          <p className="text-slate-300 text-sm mb-2">
+            ایمیل تأیید برای <span dir="ltr" className="font-mono text-slate-200">{email}</span> ارسال شد.
+          </p>
+          <p className="text-slate-400 text-xs mb-4">
+            برای فعال‌سازی حساب، لینک داخل ایمیل را باز کنید.
+          </p>
+          <div className="flex flex-col gap-2">
+            <Link href="/verify-email" className="text-blue-400 hover:text-blue-300 text-sm">
+              ارسال مجدد لینک تأیید
+            </Link>
+            <Link href="/login" className="text-slate-500 hover:text-slate-300 text-sm">
+              بازگشت به صفحه ورود
+            </Link>
+          </div>
         </div>
       </div>
     );

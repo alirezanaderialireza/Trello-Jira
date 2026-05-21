@@ -29,3 +29,4 @@ export * from "./services";
 
 // 8️⃣ List Use Cases
 export * from "./list/create-list";
+export * from "./list/move-list";

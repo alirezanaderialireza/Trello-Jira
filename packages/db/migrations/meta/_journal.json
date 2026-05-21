@@ -8,6 +8,20 @@
       "when": 1777367305078,
       "tag": "0000_great_johnny_blaze",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779369000000,
+      "tag": "0001_phase2_auth_acl",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779370000000,
+      "tag": "0002_phase02_auth_rls",
+      "breakpoints": true
     }
   ]
 }

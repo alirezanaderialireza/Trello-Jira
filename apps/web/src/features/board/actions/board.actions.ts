@@ -1,16 +1,21 @@
 "use server";
 
-// ✅ fix: PinoLogger از @repo/infrastructure حذف شد — این package هنوز ساخته نشده.
-// به جای آن یک inline logger ساده استفاده می‌کنیم که production-safe است.
-// وقتی @repo/infrastructure ساخته شد، فقط همین یک import را عوض کن.
+// ─────────────────────────────────────────────────────────────────────────────
+// Server Actions for the board feature.
+// Every action runs inside the Next.js Server Action runtime, looks up the
+// authenticated Auth.js session via `getWebSession()`, and constructs a tRPC
+// caller with that real session injected. There is no longer a hardcoded
+// dev-user fallback — unauthenticated callers get a proper UNAUTHORIZED error.
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { appRouter, createContext } from "@repo/api";
 import { TRPCError, inferProcedureInput } from "@trpc/server";
 import superjson from "superjson";
 import { headers } from "next/headers";
+import { getWebSession } from "@/auth/getServerSession";
 
 // ============================================================================
-// Inline Logger (تا زمانی که @repo/infrastructure ساخته شود)
+// Inline Logger (until @repo/infrastructure exposes a browser-safe logger)
 // ============================================================================
 
 const logger = {
@@ -37,28 +42,29 @@ type AppRouterType = typeof appRouter;
 type Caller = ReturnType<typeof appRouter.createCaller>;
 
 // ============================================================================
-// Safe Tenant (Dev Only)
+// Context Factory — uses the real Auth.js session
 // ============================================================================
+//
+// `tenantHint` lets callers pass through the workspace id when they already
+// know it (most board/list/card actions know their boardId, and the board
+// already encodes the tenant). When omitted, the user's personal workspace is
+// used. If the user is unauthenticated, we throw UNAUTHORIZED so the action
+// returns a structured failure rather than silently impersonating a dev user.
 
-const DEV_TENANT_ID =
-  process.env.DEV_TENANT_ID || "00000000-0000-0000-0000-000000000001";
-
-// ============================================================================
-// Context Factory
-// ============================================================================
-
-const getCaller = async (signal?: AbortSignal): Promise<Caller> => {
+const getCaller = async (
+  signal?: AbortSignal,
+  tenantHint?: string,
+): Promise<Caller> => {
   const reqHeaders = await headers();
-
   const traceId = reqHeaders.get("x-trace-id") ?? crypto.randomUUID();
 
-  // TODO: در production باید session از auth provider واقعی بیاید
-  const session = {
-    user: { id: "dev-user" },
-    tenantId: DEV_TENANT_ID,
-    roles: ["admin"],
-    aclVersion: 1,
-  };
+  const session = await getWebSession(tenantHint);
+  if (!session) {
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: "Authentication required.",
+    });
+  }
 
   const ctx = await createContext({
     requestId: crypto.randomUUID(),
@@ -180,29 +186,20 @@ export const moveCardAction = createSafeAction(
     trpc.v1.public.board.moveCard(input),
 );
 
-// ✅ fix: moveList در boardRouter وجود ندارد — تا زمانی که اضافه شود
-// این action یک stub امن است که به جای crash کردن، error مناسب برمی‌گرداند.
-// وقتی moveList به boardRouter اضافه شد، این خط را uncomment کن:
-// export const moveListAction = createSafeAction(
-//   "moveList",
-//   (trpc, input: inferProcedureInput<AppRouterType["v1"]["public"]["board"]["moveList"]>) =>
-//     trpc.v1.public.board.moveList(input),
-// );
-
-export const moveListAction = async (input: {
-  boardId: string;
-  listId: string;
-  newPosition: string;
-  mutationId: string;
-}): Promise<ActionResponse<{ success: true }>> => {
-  logger.info({
-    event: "move_list_stub_called",
-    note: "moveList not yet implemented in boardRouter",
-    input,
-  });
-  // Optimistic UI در BoardView این را هندل می‌کند — server sync بعداً اضافه می‌شود
-  return { success: true, data: { success: true } };
-};
+// ✅ Phase 0.2: real backing for list reorder.
+// Wired through trpc.v1.public.board.moveList → MoveListHandler →
+// moveListUseCase. The optimistic UI in BoardView now has a real server
+// counterpart, and rollback is triggered automatically by createSafeAction
+// when the server returns success: false.
+export const moveListAction = createSafeAction(
+  "moveList",
+  (
+    trpc,
+    input: inferProcedureInput<
+      AppRouterType["v1"]["public"]["board"]["moveList"]
+    >,
+  ) => trpc.v1.public.board.moveList(input),
+);
 
 // ============================================================================
 // Get Board Data (SSR)
