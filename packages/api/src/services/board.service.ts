@@ -69,6 +69,48 @@ function makeDomainFailure(
     ...(metadata !== undefined ? { metadata } : {}),
   };
 }
+
+// ============================================================================
+// 🏭 Reason-Based Failure Factory (for create/update/delete commands)
+// ----------------------------------------------------------------------------
+// The card/list mutation routers map a `reason` field (DomainErrorReason union)
+// to a stable client-facing failure shape. They are decoupled from the
+// MoveCardResult / DomainFailure schema (which carries `code` + `correlationId`).
+// This helper produces the lighter `{ success: false, reason }` shape used
+// by createCard / updateCard / deleteCard / updateList / deleteList.
+// ============================================================================
+
+function makeReasonFailure(reason: DomainErrorReason): {
+  success: false;
+  reason: DomainErrorReason;
+} {
+  return { success: false, reason };
+}
+
+// ============================================================================
+// 🧬 Mutation Result Types (consumed by cardRouter / listRouter)
+// ============================================================================
+
+export type CardMutationOutcome =
+  | { success: false; reason: DomainErrorReason }
+  | {
+      success: true;
+      cardId: string;
+      listRevision: number;
+      boardSequence: string;
+      projectionSequence: string;
+      aclVersion: number;
+    };
+
+export type ListMutationOutcome =
+  | { success: false; reason: DomainErrorReason }
+  | {
+      success: true;
+      listId: string;
+      boardSequence: string;
+      projectionSequence: string;
+      aclVersion: number;
+    };
  
 // ============================================================================
 // 🏭 MoveCardSuccessResult Factory
@@ -479,7 +521,13 @@ export class BoardService<TTx = unknown> {
   // ==========================================================================
   // ➕ CREATE CARD
   // ==========================================================================
- 
+  // Returns the rich `CardMutationOutcome` shape consumed by cardRouter.create:
+  // success path includes listRevision/boardSequence/projectionSequence/aclVersion
+  // so the client can update its optimistic state with confirmed authoritative
+  // values; failure path uses the lighter `{ reason }` form (the mover-style
+  // DomainFailure shape is reserved for moveCard's MoveCardResult).
+  // ==========================================================================
+
   async createCard(command: {
     listId: string;
     title: string;
@@ -488,31 +536,34 @@ export class BoardService<TTx = unknown> {
     tenantId: string;
     mutationId: string;
     correlationId?: string;
-  }): Promise<{ success: true; cardId: string } | DomainFailure> {
+    traceId?: string;
+    spanId?: string;
+  }): Promise<CardMutationOutcome> {
     const correlationId = command.correlationId ?? crypto.randomUUID();
- 
+
     return this.txManager.serializable(async (tx) => {
-      // Idempotency
-      const existing = await this.idempotencyRepo.findByMutationId(
-        tx,
-        command.mutationId as MutationId,
-      );
+      // Idempotency replay
+      const existing =
+        await this.idempotencyRepo.findByMutationId<CardMutationOutcome>(
+          tx,
+          command.mutationId as MutationId,
+        );
       if (existing) {
-        return existing.response as { success: true; cardId: string };
+        return existing.response;
       }
- 
+
       const list = await this.listRepo.findById(command.listId as ListId, {
         tx,
         forUpdate: true,
         tenantId: command.tenantId,
       });
       if (!list) {
-        return makeDomainFailure("NOT_FOUND", correlationId, "List not found");
+        return makeReasonFailure("NOT_FOUND");
       }
       if (list.tenantId !== command.tenantId) {
-        return makeDomainFailure("FORBIDDEN", correlationId);
+        return makeReasonFailure("FORBIDDEN");
       }
- 
+
       // Position: append after last card
       const lastCard = await this.cardRepo.getLastCardInList({
         listId: command.listId as ListId,
@@ -520,10 +571,10 @@ export class BoardService<TTx = unknown> {
         tx,
       });
       const position = getNewPosition(lastCard?.position, undefined);
- 
+
       const cardId = crypto.randomUUID();
       const now = new Date();
- 
+
       await this.cardRepo.create(
         {
           id: cardId,
@@ -533,19 +584,28 @@ export class BoardService<TTx = unknown> {
           title: command.title,
           description: command.description ?? null,
           position,
-          revision: 0,
+          revision: 1,
           createdAt: now,
           updatedAt: now,
           deletedAt: null,
         },
         tx,
       );
- 
+
+      // Bump list revision (cards-in-list view changed) and board sequence
+      const listRevision = await this.listRepo.incrementRevision(
+        tx,
+        command.listId as ListId,
+      );
       const boardSequence = await this.sequenceRepo.nextBoardSequence(
         tx,
         list.boardId as BoardId,
       );
- 
+      const acl = await this.listRepo.getBoardAclForUpdate(
+        tx,
+        list.boardId as BoardId,
+      );
+
       await this.outboxRepo.append(tx, {
         eventId: crypto.randomUUID(),
         aggregateId: list.boardId,
@@ -561,12 +621,13 @@ export class BoardService<TTx = unknown> {
           boardId: list.boardId,
           title: command.title,
           position,
+          listRevision,
           boardSequence,
           userId: command.userId,
           tenantId: command.tenantId,
         },
       });
- 
+
       await this.auditRepo.append(tx, {
         actorId: command.userId as UserId,
         tenantId: command.tenantId as TenantId,
@@ -577,24 +638,32 @@ export class BoardService<TTx = unknown> {
         beforeState: {},
         afterState: { cardId, listId: command.listId, title: command.title, position },
       });
- 
-      const result = { success: true as const, cardId };
- 
+
+      const result: CardMutationOutcome = {
+        success: true,
+        cardId,
+        listRevision,
+        boardSequence: String(boardSequence),
+        projectionSequence: String(boardSequence),
+        aclVersion: acl.version,
+      };
+
       await this.idempotencyRepo.save(tx, {
         mutationId: command.mutationId as MutationId,
         response: result,
         schemaVersion: this.CURRENT_SCHEMA_VERSION,
         createdAt: now,
       });
- 
+
       this.logger.info({
         event: "create_card_success",
         correlationId,
         mutationId: command.mutationId,
         cardId,
         listId: command.listId,
+        boardSequence,
       });
- 
+
       return result;
     });
   }
@@ -602,44 +671,55 @@ export class BoardService<TTx = unknown> {
   // ==========================================================================
   // 🗑️ DELETE CARD
   // ==========================================================================
- 
+
   async deleteCard(command: {
     cardId: string;
     userId: string;
     tenantId: string;
     mutationId: string;
     correlationId?: string;
-  }): Promise<{ success: true } | DomainFailure> {
+    traceId?: string;
+    spanId?: string;
+  }): Promise<CardMutationOutcome> {
     const correlationId = command.correlationId ?? crypto.randomUUID();
- 
+
     return this.txManager.serializable(async (tx) => {
-      const existing = await this.idempotencyRepo.findByMutationId(
-        tx,
-        command.mutationId as MutationId,
-      );
+      const existing =
+        await this.idempotencyRepo.findByMutationId<CardMutationOutcome>(
+          tx,
+          command.mutationId as MutationId,
+        );
       if (existing) {
-        return existing.response as { success: true };
+        return existing.response;
       }
- 
+
       const card = await this.cardRepo.findById(command.cardId, {
         tx,
         forUpdate: true,
         tenantId: command.tenantId,
       });
       if (!card) {
-        return makeDomainFailure("NOT_FOUND", correlationId, "Card not found");
+        return makeReasonFailure("NOT_FOUND");
       }
       if (card.tenantId !== command.tenantId) {
-        return makeDomainFailure("FORBIDDEN", correlationId);
+        return makeReasonFailure("FORBIDDEN");
       }
- 
+
       await this.cardRepo.delete(tx, command.cardId as CardId);
- 
+
+      const listRevision = await this.listRepo.incrementRevision(
+        tx,
+        card.listId as ListId,
+      );
       const boardSequence = await this.sequenceRepo.nextBoardSequence(
         tx,
         card.boardId as BoardId,
       );
- 
+      const acl = await this.listRepo.getBoardAclForUpdate(
+        tx,
+        card.boardId as BoardId,
+      );
+
       await this.outboxRepo.append(tx, {
         eventId: crypto.randomUUID(),
         aggregateId: card.boardId,
@@ -653,12 +733,13 @@ export class BoardService<TTx = unknown> {
           cardId: command.cardId,
           listId: card.listId,
           boardId: card.boardId,
+          listRevision,
           boardSequence,
           userId: command.userId,
           tenantId: command.tenantId,
         },
       });
- 
+
       await this.auditRepo.append(tx, {
         actorId: command.userId as UserId,
         tenantId: command.tenantId as TenantId,
@@ -669,16 +750,23 @@ export class BoardService<TTx = unknown> {
         beforeState: { listId: card.listId, title: card.title, position: card.position },
         afterState: { deletedAt: new Date().toISOString() },
       });
- 
-      const result = { success: true as const };
- 
+
+      const result: CardMutationOutcome = {
+        success: true,
+        cardId: command.cardId,
+        listRevision,
+        boardSequence: String(boardSequence),
+        projectionSequence: String(boardSequence),
+        aclVersion: acl.version,
+      };
+
       await this.idempotencyRepo.save(tx, {
         mutationId: command.mutationId as MutationId,
         response: result,
         schemaVersion: this.CURRENT_SCHEMA_VERSION,
         createdAt: new Date(),
       });
- 
+
       return result;
     });
   }
@@ -686,59 +774,82 @@ export class BoardService<TTx = unknown> {
   // ==========================================================================
   // ✏️ UPDATE CARD
   // ==========================================================================
- 
+
   async updateCard(command: {
     cardId: string;
     title?: string;
     description?: string;
+    expectedRevision?: number;
     tenantId: string;
     userId: string;
     mutationId: string;
     correlationId?: string;
-  }): Promise<{ success: true } | DomainFailure> {
+    traceId?: string;
+    spanId?: string;
+  }): Promise<CardMutationOutcome> {
     const correlationId = command.correlationId ?? crypto.randomUUID();
- 
+
     return this.txManager.serializable(async (tx) => {
-      const existing = await this.idempotencyRepo.findByMutationId(
-        tx,
-        command.mutationId as MutationId,
-      );
+      const existing =
+        await this.idempotencyRepo.findByMutationId<CardMutationOutcome>(
+          tx,
+          command.mutationId as MutationId,
+        );
       if (existing) {
-        return existing.response as { success: true };
+        return existing.response;
       }
- 
+
       const card = await this.cardRepo.findById(command.cardId, {
         tx,
         forUpdate: true,
         tenantId: command.tenantId,
       });
       if (!card) {
-        return makeDomainFailure("NOT_FOUND", correlationId, "Card not found");
+        return makeReasonFailure("NOT_FOUND");
       }
       if (card.tenantId !== command.tenantId) {
-        return makeDomainFailure("FORBIDDEN", correlationId);
+        return makeReasonFailure("FORBIDDEN");
       }
- 
+
+      // Optional client-supplied OCC: caller may have an older snapshot.
+      if (
+        command.expectedRevision !== undefined &&
+        command.expectedRevision !== card.revision
+      ) {
+        return makeReasonFailure("STALE_REVISION");
+      }
+
       const updatedCard = {
         ...card,
         ...(command.title !== undefined ? { title: command.title } : {}),
-        ...(command.description !== undefined ? { description: command.description } : {}),
+        ...(command.description !== undefined
+          ? { description: command.description }
+          : {}),
+        revision: card.revision + 1,
         updatedAt: new Date(),
       };
- 
+
       const saved = await this.cardRepo.save(tx, {
         entity: updatedCard,
         expectedRevision: card.revision,
       });
       if (!saved) {
-        return makeDomainFailure("STALE_REVISION", correlationId);
+        return makeReasonFailure("STALE_REVISION");
       }
- 
+
+      const listRevision = await this.listRepo.incrementRevision(
+        tx,
+        card.listId as ListId,
+      );
       const boardSequence = await this.sequenceRepo.nextBoardSequence(
         tx,
         card.boardId as BoardId,
       );
- 
+      const acl = await this.listRepo.getBoardAclForUpdate(
+        tx,
+        card.boardId as BoardId,
+      );
+
       await this.outboxRepo.append(tx, {
         eventId: crypto.randomUUID(),
         aggregateId: card.boardId,
@@ -753,13 +864,16 @@ export class BoardService<TTx = unknown> {
           listId: card.listId,
           boardId: card.boardId,
           ...(command.title !== undefined ? { title: command.title } : {}),
-          ...(command.description !== undefined ? { description: command.description } : {}),
+          ...(command.description !== undefined
+            ? { description: command.description }
+            : {}),
+          listRevision,
           boardSequence,
           userId: command.userId,
           tenantId: command.tenantId,
         },
       });
- 
+
       await this.auditRepo.append(tx, {
         actorId: command.userId as UserId,
         tenantId: command.tenantId as TenantId,
@@ -773,16 +887,23 @@ export class BoardService<TTx = unknown> {
           description: updatedCard.description ?? null,
         },
       });
- 
-      const result = { success: true as const };
- 
+
+      const result: CardMutationOutcome = {
+        success: true,
+        cardId: command.cardId,
+        listRevision,
+        boardSequence: String(boardSequence),
+        projectionSequence: String(boardSequence),
+        aclVersion: acl.version,
+      };
+
       await this.idempotencyRepo.save(tx, {
         mutationId: command.mutationId as MutationId,
         response: result,
         schemaVersion: this.CURRENT_SCHEMA_VERSION,
         createdAt: new Date(),
       });
- 
+
       return result;
     });
   }
@@ -790,7 +911,7 @@ export class BoardService<TTx = unknown> {
   // ==========================================================================
   // ✏️ UPDATE LIST
   // ==========================================================================
- 
+
   async updateList(command: {
     listId: string;
     boardId: string;
@@ -800,52 +921,60 @@ export class BoardService<TTx = unknown> {
     description?: string;
     mutationId: string;
     correlationId?: string;
-  }): Promise<{ success: true } | DomainFailure> {
+    traceId?: string;
+    spanId?: string;
+  }): Promise<ListMutationOutcome> {
     const correlationId = command.correlationId ?? crypto.randomUUID();
- 
+
     return this.txManager.serializable(async (tx) => {
-      const existing = await this.idempotencyRepo.findByMutationId(
-        tx,
-        command.mutationId as MutationId,
-      );
+      const existing =
+        await this.idempotencyRepo.findByMutationId<ListMutationOutcome>(
+          tx,
+          command.mutationId as MutationId,
+        );
       if (existing) {
-        return existing.response as { success: true };
+        return existing.response;
       }
- 
+
       const list = await this.listRepo.findById(command.listId as ListId, {
         tx,
         forUpdate: true,
         tenantId: command.tenantId,
       });
       if (!list) {
-        return makeDomainFailure("NOT_FOUND", correlationId, "List not found");
+        return makeReasonFailure("NOT_FOUND");
       }
       if (list.tenantId !== command.tenantId) {
-        return makeDomainFailure("FORBIDDEN", correlationId);
+        return makeReasonFailure("FORBIDDEN");
       }
       if (list.boardId !== command.boardId) {
-        return makeDomainFailure("TOPOLOGY_MISMATCH", correlationId);
+        return makeReasonFailure("TOPOLOGY_MISMATCH");
       }
- 
+
       const updatedList = {
         ...list,
         ...(command.title !== undefined ? { title: command.title } : {}),
+        revision: list.revision + 1,
         updatedAt: new Date(),
       };
- 
+
       const saved = await this.listRepo.save(tx, {
         entity: updatedList,
         expectedRevision: list.revision,
       });
       if (!saved) {
-        return makeDomainFailure("STALE_REVISION", correlationId);
+        return makeReasonFailure("STALE_REVISION");
       }
- 
+
       const boardSequence = await this.sequenceRepo.nextBoardSequence(
         tx,
         command.boardId as BoardId,
       );
- 
+      const acl = await this.listRepo.getBoardAclForUpdate(
+        tx,
+        command.boardId as BoardId,
+      );
+
       await this.outboxRepo.append(tx, {
         eventId: crypto.randomUUID(),
         aggregateId: command.boardId,
@@ -864,7 +993,7 @@ export class BoardService<TTx = unknown> {
           tenantId: command.tenantId,
         },
       });
- 
+
       await this.auditRepo.append(tx, {
         actorId: command.userId as UserId,
         tenantId: command.tenantId as TenantId,
@@ -875,16 +1004,22 @@ export class BoardService<TTx = unknown> {
         beforeState: { title: list.title },
         afterState: { title: updatedList.title },
       });
- 
-      const result = { success: true as const };
- 
+
+      const result: ListMutationOutcome = {
+        success: true,
+        listId: command.listId,
+        boardSequence: String(boardSequence),
+        projectionSequence: String(boardSequence),
+        aclVersion: acl.version,
+      };
+
       await this.idempotencyRepo.save(tx, {
         mutationId: command.mutationId as MutationId,
         response: result,
         schemaVersion: this.CURRENT_SCHEMA_VERSION,
         createdAt: new Date(),
       });
- 
+
       return result;
     });
   }
@@ -892,7 +1027,7 @@ export class BoardService<TTx = unknown> {
   // ==========================================================================
   // 🗑️ DELETE LIST
   // ==========================================================================
- 
+
   async deleteList(command: {
     listId: string;
     boardId: string;
@@ -900,47 +1035,58 @@ export class BoardService<TTx = unknown> {
     userId: string;
     mutationId: string;
     correlationId?: string;
-  }): Promise<{ success: true } | DomainFailure> {
+    traceId?: string;
+    spanId?: string;
+  }): Promise<ListMutationOutcome> {
     const correlationId = command.correlationId ?? crypto.randomUUID();
- 
+
     return this.txManager.serializable(async (tx) => {
-      const existing = await this.idempotencyRepo.findByMutationId(
-        tx,
-        command.mutationId as MutationId,
-      );
+      const existing =
+        await this.idempotencyRepo.findByMutationId<ListMutationOutcome>(
+          tx,
+          command.mutationId as MutationId,
+        );
       if (existing) {
-        return existing.response as { success: true };
+        return existing.response;
       }
- 
+
       const list = await this.listRepo.findById(command.listId as ListId, {
         tx,
         forUpdate: true,
         tenantId: command.tenantId,
       });
       if (!list) {
-        return makeDomainFailure("NOT_FOUND", correlationId, "List not found");
+        return makeReasonFailure("NOT_FOUND");
       }
       if (list.tenantId !== command.tenantId) {
-        return makeDomainFailure("FORBIDDEN", correlationId);
+        return makeReasonFailure("FORBIDDEN");
       }
       if (list.boardId !== command.boardId) {
-        return makeDomainFailure("TOPOLOGY_MISMATCH", correlationId);
+        return makeReasonFailure("TOPOLOGY_MISMATCH");
       }
- 
-      // Soft delete via save with deletedAt
+
+      // Soft delete via save with deletedAt + revision bump
       const saved = await this.listRepo.save(tx, {
-        entity: { ...list, deletedAt: new Date() },
+        entity: {
+          ...list,
+          deletedAt: new Date(),
+          revision: list.revision + 1,
+        },
         expectedRevision: list.revision,
       });
       if (!saved) {
-        return makeDomainFailure("STALE_REVISION", correlationId);
+        return makeReasonFailure("STALE_REVISION");
       }
- 
+
       const boardSequence = await this.sequenceRepo.nextBoardSequence(
         tx,
         command.boardId as BoardId,
       );
- 
+      const acl = await this.listRepo.getBoardAclForUpdate(
+        tx,
+        command.boardId as BoardId,
+      );
+
       await this.outboxRepo.append(tx, {
         eventId: crypto.randomUUID(),
         aggregateId: command.boardId,
@@ -958,7 +1104,7 @@ export class BoardService<TTx = unknown> {
           tenantId: command.tenantId,
         },
       });
- 
+
       await this.auditRepo.append(tx, {
         actorId: command.userId as UserId,
         tenantId: command.tenantId as TenantId,
@@ -969,16 +1115,22 @@ export class BoardService<TTx = unknown> {
         beforeState: { title: list.title, position: list.position },
         afterState: { deletedAt: new Date().toISOString() },
       });
- 
-      const result = { success: true as const };
- 
+
+      const result: ListMutationOutcome = {
+        success: true,
+        listId: command.listId,
+        boardSequence: String(boardSequence),
+        projectionSequence: String(boardSequence),
+        aclVersion: acl.version,
+      };
+
       await this.idempotencyRepo.save(tx, {
         mutationId: command.mutationId as MutationId,
         response: result,
         schemaVersion: this.CURRENT_SCHEMA_VERSION,
         createdAt: new Date(),
       });
- 
+
       return result;
     });
   }

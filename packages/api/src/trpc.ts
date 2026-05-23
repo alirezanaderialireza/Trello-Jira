@@ -206,30 +206,32 @@ const readModels = new BoardReadModels(
 // 🚀 Services
 // ============================================================================
 
+const boardService = new BoardService(
+  txManager,
+
+  repositories.card,
+
+  repositories.list,
+
+  repositories.outbox,
+
+  repositories.idempotency,
+
+  repositories.audit,
+
+  repositories.sequence,
+
+  lockManager,
+
+  logger,
+);
+
 const services = Object.freeze({
-  board: new BoardService(
-    txManager,
-
-    repositories.card,
-
-    repositories.list,
-
-    repositories.outbox,
-
-    repositories.idempotency,
-
-    repositories.audit,
-
-    repositories.sequence,
-
-    lockManager,
-
-    logger
-  ),
+  board: boardService,
 
   commands: {
     // =========================================================================
-    // ✅ Implemented
+    // ✅ Domain handlers (use-case driven, live in @repo/domain)
     // =========================================================================
 
     createList: new CreateListHandler(
@@ -243,7 +245,7 @@ const services = Object.freeze({
 
       repositories.sequence,
 
-      logger
+      logger,
     ),
 
     moveList: new MoveListHandler(
@@ -255,22 +257,49 @@ const services = Object.freeze({
 
       repositories.sequence,
 
-      logger
+      logger,
     ),
 
     // =========================================================================
-    // ⏳ TODO
+    // ✅ Adapter handlers — delegate to BoardService methods which already
+    // contain the rich command pipeline (idempotency, audit, outbox, sequence
+    // bump, ACL load, OCC). Each adapter exposes an `.execute()` method so the
+    // tRPC routers (cardRouter / boardRouter) can call them uniformly with the
+    // same shape as the dedicated CreateListHandler / MoveListHandler.
+    //
+    // Result contract for createCard / updateCard / deleteCard:
+    //   { success: true, cardId, listRevision, boardSequence, projectionSequence, aclVersion }
+    //   | { success: false, reason: DomainErrorReason }
+    //
+    // Result contract for updateList / deleteList:
+    //   { success: true, listId, boardSequence, projectionSequence, aclVersion }
+    //   | { success: false, reason: DomainErrorReason }
     // =========================================================================
 
-    createCard: {} as any,
+    createCard: {
+      execute: (cmd: Parameters<typeof boardService.createCard>[0]) =>
+        boardService.createCard(cmd),
+    },
 
-    updateCard: {} as any,
+    updateCard: {
+      execute: (cmd: Parameters<typeof boardService.updateCard>[0]) =>
+        boardService.updateCard(cmd),
+    },
 
-    deleteCard: {} as any,
+    deleteCard: {
+      execute: (cmd: Parameters<typeof boardService.deleteCard>[0]) =>
+        boardService.deleteCard(cmd),
+    },
 
-    updateList: {} as any,
+    updateList: {
+      execute: (cmd: Parameters<typeof boardService.updateList>[0]) =>
+        boardService.updateList(cmd),
+    },
 
-    deleteList: {} as any,
+    deleteList: {
+      execute: (cmd: Parameters<typeof boardService.deleteList>[0]) =>
+        boardService.deleteList(cmd),
+    },
   },
 });
 
