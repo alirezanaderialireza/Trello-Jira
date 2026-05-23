@@ -2,11 +2,30 @@
 // Client-side offline persistence + incremental replay coordination.
 // Uses IndexedDB (via abstract storage interface) for durable state.
 
-import type { BoardStoreState } from "../../features/board/store/useBoardStore";
-import { computeChecksumSync, type Checksum } from "../../features/board/store/sync/canonicalSerializer";
-import { telemetry } from "../../features/board/devtools/logEvent";
+import { computeChecksumSync, type Checksum } from "@/lib/integrity/canonicalSerializer";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
-export interface OfflineSnapshot { state: BoardStoreState; sequence: string; checksum: Checksum; savedAt: string; }
+// ─────────────────────────────────────────────────────────────────────────────
+// We deliberately keep this generic so the persistence engine has zero
+// knowledge of the board feature. The minimum contract is: every persisted
+// state must carry a string `boardSequence` so we can sequence the snapshot
+// against the realtime stream. Anything else in the state is opaque.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface OfflinePersistableState {
+  readonly boardSequence: string;
+  // Allow additional opaque fields. The integrity check uses the entire
+  // structure via canonicalSerializer, so consumers can include whatever
+  // they need without changing this type.
+  readonly [key: string]: unknown;
+}
+
+export interface OfflineSnapshot<TState extends OfflinePersistableState = OfflinePersistableState> {
+  state: TState;
+  sequence: string;
+  checksum: Checksum;
+  savedAt: string;
+}
 export interface PendingOfflineOp { id: string; type: string; payload: unknown; createdAt: number; }
 
 export interface OfflineStorage {
@@ -37,17 +56,25 @@ export class OfflineSyncManager {
     this.saveTimer = null;
   }
 
-  async saveState(state: BoardStoreState): Promise<void> {
+  async saveState<TState extends OfflinePersistableState>(state: TState): Promise<void> {
     if (!this.boardId) return;
     const checksum = computeChecksumSync(state);
-    const snapshot: OfflineSnapshot = { state, sequence: state.boardSequence, checksum, savedAt: new Date().toISOString() };
+    const snapshot: OfflineSnapshot<TState> = {
+      state,
+      sequence: state.boardSequence,
+      checksum,
+      savedAt: new Date().toISOString(),
+    };
     await this.storage.saveSnapshot(this.boardId, snapshot);
-    telemetry.log("STORE", "OFFLINE_SNAPSHOT_SAVED", { boardId: this.boardId, sequence: state.boardSequence });
+    telemetry.log("STORE", "OFFLINE_SNAPSHOT_SAVED", {
+      boardId: this.boardId,
+      sequence: state.boardSequence,
+    });
   }
 
-  async loadState(): Promise<OfflineSnapshot | null> {
+  async loadState<TState extends OfflinePersistableState = OfflinePersistableState>(): Promise<OfflineSnapshot<TState> | null> {
     if (!this.boardId) return null;
-    const snapshot = await this.storage.getSnapshot(this.boardId);
+    const snapshot = (await this.storage.getSnapshot(this.boardId)) as OfflineSnapshot<TState> | null;
     if (!snapshot) return null;
     // Verify integrity
     const current = computeChecksumSync(snapshot.state);

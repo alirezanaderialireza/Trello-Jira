@@ -1,7 +1,7 @@
 // apps/web/src/infrastructure/platform/multiTenantManager.ts
 // Tenant isolation + context propagation for multi-tenant boards.
 
-import { telemetry } from "../../features/board/devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 export interface TenantContext {
   readonly tenantId: string;

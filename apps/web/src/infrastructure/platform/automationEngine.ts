@@ -2,7 +2,7 @@
 // Rule-based automation engine with rate limiting and DLQ.
 
 import { eventBus, type BusEvent } from "./eventBus";
-import { telemetry } from "../../features/board/devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 export type TriggerCondition = (event: BusEvent) => boolean;
 export type AutomationAction = (event: BusEvent, ruleId: string) => void | Promise<void>;

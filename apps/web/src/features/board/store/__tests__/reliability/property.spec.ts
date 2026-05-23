@@ -29,7 +29,7 @@ import type { ReducerContext } from "../../event-application/context";
 import type { BoardStoreState } from "../../useBoardStore";
 import { ACTIVITY_WINDOW_SIZE } from "../../useBoardStore";
 import { replayEvents, type SequencedEvent } from "../../sync/replayEngine";
-import { computeChecksumSync } from "../../sync/canonicalSerializer";
+import { computeChecksumSync } from "@/lib/integrity/canonicalSerializer";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

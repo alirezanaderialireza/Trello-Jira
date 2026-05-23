@@ -20,7 +20,7 @@
 //   • Observable: flush count, drop count, avg batch size exposed to metrics.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { telemetry } from "../../../devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 // ============================================================================
 // 1.  Types

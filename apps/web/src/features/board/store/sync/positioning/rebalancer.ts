@@ -40,7 +40,7 @@ import {
   type Position,
 } from "@repo/domain/ordering";
 
-import { telemetry } from "../../../devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 // ============================================================================
 // 1.  Public types

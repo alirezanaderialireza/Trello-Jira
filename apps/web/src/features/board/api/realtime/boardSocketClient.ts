@@ -12,7 +12,7 @@ import { useBoardStore } from "../../store/useBoardStore";
 import { getSyncFSM } from "../../store/sync/syncFSMSingleton";
 import type { WsEvent } from "../../store/sync/syncContracts";
 import type { RealtimeMessage, RealtimeRequest } from "./types";
-import { telemetry } from "../../devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 class BoardSocketClient {
   private ws: WebSocket | null = null;

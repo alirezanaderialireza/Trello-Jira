@@ -62,7 +62,7 @@
 //
 // ============================================================================
 
-import { telemetry } from "../../devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 // ============================================================================
 // 📨 Message Protocol

@@ -2,7 +2,7 @@
 // Conflict-free replicated data type engine for collaborative text editing.
 // Implements a simplified RGA (Replicated Growable Array) for card descriptions/comments.
 
-import { telemetry } from "../../features/board/devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 export interface CrdtChar { readonly id: string; readonly value: string; readonly afterId: string | null; readonly deleted: boolean; readonly timestamp: number; readonly actorId: string; }
 export interface CrdtDocument { readonly id: string; chars: CrdtChar[]; version: number; }

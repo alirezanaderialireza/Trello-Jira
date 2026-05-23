@@ -6,7 +6,7 @@
 // and Phase 6 Replay Engine for full traceability.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { computeChecksumSync, type Checksum } from "../../features/board/store/sync/canonicalSerializer";
+import { computeChecksumSync, type Checksum } from "@/lib/integrity/canonicalSerializer";
 import { logger } from "./logging";
 
 // ============================================================================

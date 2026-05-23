@@ -58,8 +58,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { create } from "zustand";
-import { telemetry } from "../../../devtools/logEvent";
-import type { MutationLifecycleState } from "../../../devtools/debugStore";
+import { telemetry } from "@/lib/telemetry/logEvent";
+import type { MutationLifecycleState } from "@/lib/telemetry/debugStore";
 import {
   useBoardStore,
   type PendingMutation,

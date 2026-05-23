@@ -1,7 +1,7 @@
 // apps/web/src/features/board/store/useBoardStore.ts
 
 import { create } from "zustand";
-import { telemetry } from "../devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 import type {
   AppDomainEvent,

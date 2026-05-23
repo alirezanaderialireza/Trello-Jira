@@ -38,7 +38,7 @@
 // ============================================================================
 
 import type { PendingMutation } from "../../store/useBoardStore";
-import { telemetry } from "../../devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 // ============================================================================
 // ⚙️ Configuration
