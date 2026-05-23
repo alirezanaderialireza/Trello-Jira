@@ -7,11 +7,18 @@
 //      so the unsubscribe message is actually sent to the server
 //   3. Uses canonical WsEvent type from syncContracts
 //   4. Exposes getState() for useSyncOrchestrator effect handler
+//   5. Surfaces a `metrics` getter and `subscribe` method to keep the
+//      legacy BoardRealtimeClient (clientSyncFsm-based) compiling. That
+//      facade was the previous integration path and is still imported by
+//      useSyncStatus.ts / useOutboxProcessor.ts; until those switch to
+//      the SyncStateMachine path, this client must expose the surface
+//      they expect.
 
 import { useBoardStore } from "../../store/useBoardStore";
 import { getSyncFSM } from "../../store/sync/syncFSMSingleton";
 import type { WsEvent } from "../../store/sync/syncContracts";
 import type { RealtimeMessage, RealtimeRequest } from "./types";
+import type { ConnectionEvent, ConnectionMetrics, ConnectionState } from "./connectionFsm";
 import { telemetry } from "@/lib/telemetry/logEvent";
 
 class BoardSocketClient {
@@ -93,6 +100,54 @@ class BoardSocketClient {
 
   public getReadyState(): number {
     return this.ws?.readyState ?? WebSocket.CLOSED;
+  }
+
+  // ==========================================================================
+  // Compatibility surface for the legacy BoardRealtimeClient facade
+  // ──────────────────────────────────────────────────────────────────────────
+  // BoardRealtimeClient (the older realtime façade still used by
+  // useSyncStatus / useOutboxProcessor) was written against an earlier
+  // version of this client that owned a `ConnectionFSM` instance and
+  // exposed:
+  //   - boardSocket.metrics     (ConnectionMetrics snapshot)
+  //   - boardSocket.subscribe() (callback for ConnectionEvent)
+  //
+  // The current client delegates connection-state to SyncStateMachine via
+  // getSyncFSM() instead, so those slots no longer exist on the canonical
+  // path. Re-creating the full ConnectionFSM is out of scope for the
+  // build-fix we are doing here — instead we surface the minimum slots
+  // BoardRealtimeClient touches with a derived snapshot for `metrics` and
+  // a no-op observer registration for `subscribe`. That keeps the
+  // legacy facade type-checking; runtime behaviour is unchanged because
+  // the SyncStateMachine path is the one BoardPage / useSyncOrchestrator
+  // actually use.
+  // ==========================================================================
+
+  public get metrics(): ConnectionMetrics {
+    return {
+      state:             this.deriveConnectionState(),
+      reconnectAttempts: this.reconnectAttempts,
+      epoch:             0,
+      latencyMs:         null,
+      lastPongAt:        null,
+      pingInFlight:      false,
+    };
+  }
+
+  public subscribe(_cb: (event: ConnectionEvent) => void): () => void {
+    // Intentionally inert. See class comment above. Returning a no-op
+    // unsubscribe ensures BoardRealtimeClient's _wireSubscriptions /
+    // _unwireSubscriptions lifecycle still works — its `_unsubTransport`
+    // is set, called on cleanup, and never leaks.
+    return () => undefined;
+  }
+
+  private deriveConnectionState(): ConnectionState {
+    const readyState = this.ws?.readyState ?? WebSocket.CLOSED;
+    if (readyState === WebSocket.OPEN) return "connected";
+    if (readyState === WebSocket.CONNECTING) return "connecting";
+    if (this.reconnectAttempts > 0) return "reconnecting";
+    return "idle";
   }
 
   // Called by useSyncOrchestrator when FSM emits CONNECT_WS effect
