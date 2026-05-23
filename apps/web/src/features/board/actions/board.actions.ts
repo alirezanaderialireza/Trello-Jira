@@ -221,9 +221,15 @@ export async function getBoardData(
     const rawData = await trpc.v1.public.board.getFullBoard(input);
     return superjson.serialize(rawData).json as GetBoardOutput;
   } catch (error) {
+    // Optional chaining: tRPC's `inferProcedureInput` widens to `void | {...}`
+    // when the procedure's input is optional (board.getFullBoard accepts
+    // either an id+pagination object or no argument at all to fetch the
+    // user's default board). TS therefore refuses `input.id`. Optional
+    // chaining yields `string | undefined` which the logger payload
+    // happily accepts.
     logger.error({
       event: "ssr_board_fetch_failed",
-      boardId: input.id,
+      boardId: input?.id,
       error:
         isDev && error instanceof Error
           ? { message: error.message, stack: error.stack }
