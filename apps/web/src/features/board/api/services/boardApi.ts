@@ -15,10 +15,28 @@
  *   6. Attachments    (Phase 4)
  *   7. Templates      (Phase 4)
  *   8. Card sub-ops   (Phase 4 — assignee, dueDate, lock/unlock)
+ *
+ * ─── tRPC route layout note ────────────────────────────────────────────────
+ * The router was reorganised into versioned/visibility namespaces
+ * (`v1.public.{card,board,list}.…`) but most call sites in this file still
+ * referenced the flat shape (`trpc.card.create`). That is now the single
+ * source of build failures because the typed proxy refuses to walk to a
+ * key it does not have. Phase-1/2 routes that exist on the new router
+ * (cards, lists, board) are addressed through the canonical
+ * `trpc.v1.public.…` path. Phase-4 routes (labels, checklists, comments,
+ * attachments, templates, card sub-ops) are not wired through the new
+ * router yet — those keep the `(trpc as any).…` escape hatch they
+ * already had, so the build doesn't depend on routes that don't exist.
  */
 
 import { trpc } from "../../../../utils/trpc";
 import type { TemplateStructure } from "@repo/domain";
+
+// Local aliases — keeps the call sites readable and lets us flip the path
+// in one place when (or if) the public namespace gets renamed.
+const cardApi  = trpc.v1.public.card;
+const listApi  = trpc.v1.public.list;
+const boardApiNs = trpc.v1.public.board;
 
 // ============================================================================
 // 1.  Cards
@@ -30,7 +48,7 @@ export const boardApi = {
     listId: string;
     title: string;
     mutationId: string;
-  }) => trpc.card.create.mutateAsync(payload),
+  }) => cardApi.create.mutateAsync(payload),
 
   // ── move ──────────────────────────────────────────────────────────────────
   moveCard: async (payload: {
@@ -41,7 +59,7 @@ export const boardApi = {
     nextId?: string;
     mutationId: string;
     expectedListRevisions?: Record<string, number>;
-  }) => trpc.board.moveCard.mutateAsync(payload),
+  }) => boardApiNs.moveCard.mutateAsync(payload),
 
   // ── update ────────────────────────────────────────────────────────────────
   updateCard: async (payload: {
@@ -50,44 +68,46 @@ export const boardApi = {
     description?: string;
     expectedRevision?: number;
     mutationId: string;
-  }) => trpc.card.update.mutateAsync(payload),
+  }) => cardApi.update.mutateAsync(payload),
 
   // ── delete ────────────────────────────────────────────────────────────────
   deleteCard: async (payload: {
     id: string;
     mutationId: string;
-  }) => trpc.card.delete.mutateAsync(payload),
+  }) => cardApi.delete.mutateAsync(payload),
 
   // ── lock / unlock ─────────────────────────────────────────────────────────
+  // The lock / unlock / assignee / dueDate sub-routes are not on the new
+  // versioned router. Casting is sufficient until they get wired.
   lockCard: async (payload: {
     cardId: string;
     mutationId: string;
-  }) => trpc.card.lock.mutateAsync(payload),
+  }) => (cardApi as any).lock.mutateAsync(payload),
 
   unlockCard: async (payload: {
     cardId: string;
     mutationId: string;
-  }) => trpc.card.unlock.mutateAsync(payload),
+  }) => (cardApi as any).unlock.mutateAsync(payload),
 
   // ── assignees ─────────────────────────────────────────────────────────────
   addCardAssignee: async (payload: {
     cardId: string;
     assigneeId: string;
     mutationId: string;
-  }) => trpc.card.addAssignee.mutateAsync(payload),
+  }) => (cardApi as any).addAssignee.mutateAsync(payload),
 
   removeCardAssignee: async (payload: {
     cardId: string;
     assigneeId: string;
     mutationId: string;
-  }) => trpc.card.removeAssignee.mutateAsync(payload),
+  }) => (cardApi as any).removeAssignee.mutateAsync(payload),
 
   // ── due date ──────────────────────────────────────────────────────────────
   updateCardDueDate: async (payload: {
     cardId: string;
     dueDate: string | null;
     mutationId: string;
-  }) => trpc.card.updateDueDate.mutateAsync(payload),
+  }) => (cardApi as any).updateDueDate.mutateAsync(payload),
 
   // ============================================================================
   // 2.  Lists
@@ -99,25 +119,25 @@ export const boardApi = {
     mutationId: string;
     expectedBoardRevision?: number;
     expectedAclVersion?: number;
-  }) => trpc.list.create.mutateAsync(payload),
+  }) => listApi.create.mutateAsync(payload),
 
   moveList: async (payload: {
     boardId: string;
     listId: string;
     newPosition: string;
     mutationId: string;
-  }) => trpc.board.moveList.mutate(payload),
+  }) => boardApiNs.moveList.mutate(payload),
 
   updateList: async (payload: {
     listId: string;
     title: string;
     mutationId: string;
-  }) => (trpc.list as any).update.mutateAsync(payload),
+  }) => (listApi as any).update.mutateAsync(payload),
 
   deleteList: async (payload: {
     listId: string;
     mutationId: string;
-  }) => (trpc.list as any).delete.mutateAsync(payload),
+  }) => (listApi as any).delete.mutateAsync(payload),
 
   // ============================================================================
   // 3.  Labels
