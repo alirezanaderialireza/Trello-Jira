@@ -1,6 +1,6 @@
 import { eq, and, isNull, desc, sql } from "drizzle-orm";
 import type { DbTx } from "./board.repository";
-import type { ListRepository, List } from "@repo/domain";
+import type { ListRepository, List, FindOptions } from "@repo/domain";
 import { lists, boards } from "../schema";
 
 export class DrizzleListRepository implements ListRepository<DbTx> {
@@ -9,16 +9,22 @@ export class DrizzleListRepository implements ListRepository<DbTx> {
   // ==========================================================================  
   // 📥 Find By ID (یکپارچه با پشتیبانی از Lock و Multi-Tenant)
   // ==========================================================================
-  async findById(id: string, options?: { tx?: DbTx; forUpdate?: boolean }): Promise<List | null> {
+  async findById(id: string, options?: FindOptions<DbTx>): Promise<List | null> {
     const runner = options?.tx ?? this.db;
+    const conditions = [eq(lists.id, id), isNull(lists.deletedAt)] as any[];
+
+    if (options?.tenantId) {
+      conditions.push(eq(lists.tenantId, options.tenantId));
+    }
+
     let query = runner
       .select()
       .from(lists)
-      .where(and(eq(lists.id, id), isNull(lists.deletedAt)))
-      .limit(1);
+      .where(and(...conditions))
+      .limit(1) as any;
 
-    if (options?.forUpdate && (runner as any).for) {
-      query = (query as any).for("update");
+    if (options?.forUpdate) {
+      query = query.for("update");
     }
 
     const result = await query;
