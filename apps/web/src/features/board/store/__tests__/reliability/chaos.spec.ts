@@ -27,7 +27,7 @@ import type { BoardStoreState, WsEvent } from "../../useBoardStore";
 import { reconcileIncomingEvent } from "../../event-application/reconcileIncomingEvent";
 import { replayEvents, type SequencedEvent } from "../../sync/replayEngine";
 import { transition, type SyncState, type SyncMessage } from "../../sync/syncStateMachine";
-import { computeChecksumSync } from "../../sync/canonicalSerializer";
+import { computeChecksumSync } from "@/lib/integrity/canonicalSerializer";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

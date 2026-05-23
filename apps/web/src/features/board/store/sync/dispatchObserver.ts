@@ -35,8 +35,8 @@ import type { BoardStoreState } from "../useBoardStore";
 import type { ClientEventEnvelope } from "../event-application/types";
 import type { ReducerContext } from "../event-application/context";
 import { applyEvent } from "../event-application/dispatcher";
-import { telemetry } from "../../devtools/logEvent";
-import { canonicalJSON } from "./canonicalSerializer";
+import { telemetry } from "@/lib/telemetry/logEvent";
+import { canonicalJSON } from "@/lib/integrity/canonicalSerializer";
 
 // ============================================================================
 // 1.  Public Types

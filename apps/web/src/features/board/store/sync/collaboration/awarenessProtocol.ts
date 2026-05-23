@@ -50,7 +50,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { create } from "zustand";
-import { telemetry } from "../../../devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 import type { PresenceManager, PresenceState } from "./presenceManager";
 import type { TypingManager, TypingContext } from "./typingManager";
 import type { CursorManager, CursorPosition } from "./cursorManager";

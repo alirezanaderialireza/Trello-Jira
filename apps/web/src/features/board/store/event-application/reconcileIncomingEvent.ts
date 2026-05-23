@@ -12,7 +12,7 @@ import type { BoardState } from "../useBoardStore";
 import type { WsEvent } from "../sync/syncContracts";
 import type { ClientEventEnvelope } from "./types";
 import { applyEvent as dispatcherApplyEvent } from "./dispatcher";
-import { telemetry } from "../../devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 import { validateAndMigrateEvent } from "../sync/eventSchemaVersioning";
 import { getSyncFSM } from "../sync/syncFSMSingleton";
 

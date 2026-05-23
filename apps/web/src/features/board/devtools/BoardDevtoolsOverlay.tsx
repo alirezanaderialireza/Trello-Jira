@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useSyncExternalStore } from "react";
-import { useDebugStore } from "./debugStore";
+import { useDebugStore } from "@/lib/telemetry/debugStore";
 import { useBoardStore } from "../store/useBoardStore";
 import { getSyncFSM } from "../store/sync/syncFSMSingleton";
 import {

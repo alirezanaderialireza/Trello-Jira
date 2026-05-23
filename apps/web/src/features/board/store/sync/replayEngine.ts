@@ -31,7 +31,7 @@ import type { ClientEventEnvelope } from "../event-application/types";
 import type { ReducerContext } from "../event-application/context";
 import { applyEvent } from "../event-application/dispatcher";
 import { createBoardState } from "../test-utils/createBoardState";
-import { computeChecksumSync, type Checksum } from "./canonicalSerializer";
+import { computeChecksumSync, type Checksum } from "@/lib/integrity/canonicalSerializer";
 
 // ============================================================================
 // 1.  Public Types

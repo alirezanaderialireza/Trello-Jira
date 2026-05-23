@@ -185,32 +185,13 @@ const config = [
     },
     rules: {
       "boundaries/element-types": [
-        // ⚠️  Phase 0.6 transition note (apps/web only):
-        //
-        // This config has DETECTED inter-feature / cross-layer violations
-        // for a while, but the project never had a working `pnpm lint`
-        // step in CI, so the 50+ errors accumulated unnoticed. Promoting
-        // them to errors right now would block PR #46 (the package-level
-        // architecture linter) which is the real Phase 0.6 deliverable.
-        //
-        // Per the architecture-linter checklist (Phase F.4 — "warning
-        // mode → error mode after fixes"), we keep apps/web's existing
-        // detection ON but demote the severity to `"warn"` for ONE
-        // release cycle. The lint script in apps/web does NOT use
-        // `--max-warnings=0`, so warnings surface in dev/CI without
-        // blocking merges.
-        //
-        // Promotion path back to "error":
-        //   1. `pnpm --filter web lint` lists every offender.
-        //   2. Each violation is either refactored (preferred) or
-        //      annotated with `// eslint-disable-next-line ... -- ISSUE-NNN`.
-        //   3. When the count reaches zero, change "warn" → "error" here
-        //      and tighten the lint script with `--max-warnings=0`.
-        //
-        // The package-level architecture rules at the monorepo root stay
-        // strict (`"error"`) — they have a clean violation count today
-        // and we want to keep it that way.
-        "warn",
+        // Phase 0.6 follow-up — promoted from "warn" to "error" after the
+        // 16 historic infrastructure → feature violations were resolved by
+        // moving the shared utilities (telemetry / debugStore / canonical
+        // serializer) into `src/lib/` and making `OfflineSyncManager`
+        // generic in its persisted-state type. Architecture violations now
+        // block merges instead of accumulating silently.
+        "error",
         {
           default: "disallow",
           rules: boundaryRules,

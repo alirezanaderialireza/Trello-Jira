@@ -33,7 +33,7 @@
 //   • Observable — every transition logged to telemetry.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { telemetry } from "../../devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 // ============================================================================
 // 1.  States

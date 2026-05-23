@@ -1,4 +1,4 @@
-// apps/web/src/features/board/store/sync/canonicalSerializer.ts
+// apps/web/src/lib/integrity/canonicalSerializer.ts
 //
 // ─── Responsibility ──────────────────────────────────────────────────────────
 // Deterministic serialization and integrity-checking primitives for events,
