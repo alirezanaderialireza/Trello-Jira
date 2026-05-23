@@ -35,8 +35,8 @@ import {
   moveCardAction,
   moveListAction,
   deleteCardAction,
-  isActionFailure,
 } from "../actions/board.actions";
+import { isActionFailure } from "../actions/responseTypes";
 
 import { useBoardStore } from "../store/useBoardStore";
 import { useSyncOrchestrator } from "../store/sync/useSyncOrchestrator";

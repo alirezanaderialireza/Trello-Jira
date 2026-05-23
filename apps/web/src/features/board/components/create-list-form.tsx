@@ -10,7 +10,8 @@ import {
 
 import { toast } from "sonner";
 
-import { createListAction, isActionFailure } from "../actions/board.actions";
+import { createListAction } from "../actions/board.actions";
+import { isActionFailure } from "../actions/responseTypes";
 
 import { useBoardStore } from "../store/useBoardStore";
 

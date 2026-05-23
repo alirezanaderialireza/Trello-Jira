@@ -19,7 +19,8 @@ import {
 import { toast } from "sonner";
 
 import { useBoardStore } from "../store/useBoardStore";
-import { updateCardAction, isActionFailure } from "../actions/board.actions";
+import { updateCardAction } from "../actions/board.actions";
+import { isActionFailure } from "../actions/responseTypes";
 import { useCardModal } from "../hooks/useCardModal";
 
 // ============================================================================
