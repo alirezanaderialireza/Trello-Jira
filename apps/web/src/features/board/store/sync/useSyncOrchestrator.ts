@@ -111,10 +111,10 @@ export function useSyncOrchestrator(
               }
             }
 
-            fsm.send({ type: "GAP_RECOVERED" });
+            fsm.send({ type: "GAP_FILLED" });
           } catch (err: any) {
             console.error("[SyncOrchestrator] Pull missed events failed:", err);
-            fsm.send({ type: "GAP_UNRECOVERABLE" });
+            fsm.send({ type: "RESYNC_REQUIRED" });
           }
           break;
         }
@@ -164,10 +164,16 @@ export function useSyncOrchestrator(
                 syncStatus: "synced",
               });
 
-              fsm.send({ type: "RESYNC_COMPLETE" });
+              fsm.send({
+                type: "REPLAY_COMPLETE",
+                finalSequence: result.state.boardSequence,
+              });
             } else {
               console.error("[SyncOrchestrator] Rebuild failed:", result.error);
-              fsm.send({ type: "WS_DISCONNECTED" });
+              fsm.send({
+                type: "REPLAY_FAILED",
+                reason: result.error ?? "rebuild_failed",
+              });
             }
           } catch (err: any) {
             if (err?.name !== "AbortError") {
@@ -263,11 +269,16 @@ export function useSyncOrchestrator(
   // Public API
   // ──────────────────────────────────────────────────────────────────────────
   const triggerManualReconnect = useCallback(() => {
-    getSyncFSM().send({ type: "MANUAL_RECONNECT" });
+    // The new SyncStateMachine has no dedicated MANUAL_RECONNECT message —
+    // a manual user retry is the same shape as the auto-reconnect loop's
+    // first attempt, so we send RECONNECT_ATTEMPT with attempt=0. The FSM
+    // will route it through the reconnect path and trigger the
+    // SCHEDULE_RECONNECT effect.
+    getSyncFSM().send({ type: "RECONNECT_ATTEMPT", attempt: 0 });
   }, []);
 
   const triggerFullResync = useCallback(() => {
-    getSyncFSM().send({ type: "GAP_UNRECOVERABLE" });
+    getSyncFSM().send({ type: "RESYNC_REQUIRED" });
   }, []);
 
   return { triggerManualReconnect, triggerFullResync };
