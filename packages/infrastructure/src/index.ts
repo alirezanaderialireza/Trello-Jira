@@ -39,7 +39,7 @@ export type { ServiceScope, ServiceRegistration } from "./auth/serviceAuth/servi
 export { InternalAuthMiddleware } from "./auth/serviceAuth/internalAuthMiddleware";
 export type { InternalAuthContext, InternalAuthResult } from "./auth/serviceAuth/internalAuthMiddleware";
 
-export { MembershipCache } from "./redis/membershipCache";
+export { MembershipCache, MembershipLookupError } from "./redis/membershipCache";
 export type { MembershipEntry } from "./redis/membershipCache";
 
 export { AuditLogger } from "./audit/auditLogger";

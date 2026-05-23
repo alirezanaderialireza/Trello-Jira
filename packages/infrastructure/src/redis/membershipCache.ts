@@ -25,6 +25,27 @@ export interface MembershipEntry {
 }
 
 // ============================================================================
+// MembershipLookupError
+// ─────────────────────────────────────────────────────────────────────────────
+// Thrown by MembershipCache.loadFromDbAndCache when the underlying database
+// query throws. Distinguishes a real DB outage from "no record found" so
+// callers can degrade deliberately (fail-closed for security-sensitive
+// flows, fail-open with logging for read paths) instead of silently locking
+// all users out (Bug #8). A standard `cause` chain preserves the original
+// driver error for log aggregation.
+// ============================================================================
+
+export class MembershipLookupError extends Error {
+  readonly name = "MembershipLookupError";
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message);
+    if (options?.cause !== undefined) {
+      (this as { cause?: unknown }).cause = options.cause;
+    }
+  }
+}
+
+// ============================================================================
 // MembershipCache
 // ============================================================================
 
@@ -46,6 +67,13 @@ export class MembershipCache {
 
   // ==========================================================================
   // Get — cache-first, DB fallback
+  //
+  // Throws MembershipLookupError when the DB lookup itself errors (Bug #8).
+  // Returns null when the board does not exist for the given tenant; returns
+  // a MembershipEntry with role="NONE" when the board exists but the user is
+  // not a member. Callers MUST treat the thrown error and the null return as
+  // distinct outcomes — silently coalescing them locks every user out during
+  // a transient outage.
   // ==========================================================================
 
   async get(params: {
@@ -61,7 +89,8 @@ export class MembershipCache {
         return JSON.parse(cached) as MembershipEntry;
       }
     } catch {
-      // Redis unavailable — fall through to DB
+      // Redis unavailable — fall through to DB. A DB error here will
+      // propagate via MembershipLookupError; the caller decides policy.
     }
 
     return this.loadFromDbAndCache(params);
@@ -118,6 +147,10 @@ export class MembershipCache {
 
   // ==========================================================================
   // Private: load from DB and populate cache
+  //
+  // Bug #8 fix: distinguish "record not found" (legitimate null) from
+  // "DB exception" (must surface or log) so a transient outage does not
+  // silently lock every user out of every board.
   // ==========================================================================
 
   private async loadFromDbAndCache(params: {
@@ -125,8 +158,11 @@ export class MembershipCache {
     boardId: string;
     userId: string;
   }): Promise<MembershipEntry | null> {
+    let member: { role: string } | undefined;
+    let board: { aclVersion: number } | undefined;
+
     try {
-      const [member, board] = await Promise.all([
+      [member, board] = await Promise.all([
         this.db.query.boardMembers?.findFirst?.({
           where: (bm: any, { eq, and, isNull }: any) =>
             and(
@@ -147,26 +183,35 @@ export class MembershipCache {
           columns: { aclVersion: true },
         }),
       ]);
-
-      if (!board) return null; // Board doesn't exist or wrong tenant
-
-      const entry: MembershipEntry = {
-        role: member?.role ?? "NONE",
-        aclVersion: board.aclVersion ?? 1,
-        cachedAt: Date.now(),
-      };
-
-      const key = CACHE_KEY(params.tenantId, params.boardId, params.userId);
-      try {
-        await this.redis.set(key, JSON.stringify(entry), "EX", CACHE_TTL_SEC);
-      } catch {
-        // Cache population failure is non-fatal
-      }
-
-      return entry;
-    } catch {
-      return null;
+    } catch (err) {
+      // The DB lookup itself failed. Returning null here would be
+      // indistinguishable from "no membership record" and silently revoke
+      // access during an outage. Re-throw a typed error so the caller can
+      // fail-open / fail-closed deliberately and so the outage shows up in
+      // logs and metrics.
+      throw new MembershipLookupError(
+        `Membership lookup failed for tenant=${params.tenantId} board=${params.boardId} user=${params.userId}`,
+        { cause: err },
+      );
     }
+
+    // Board does not exist (or is in a different tenant). Legitimate null.
+    if (!board) return null;
+
+    const entry: MembershipEntry = {
+      role: member?.role ?? "NONE",
+      aclVersion: board.aclVersion ?? 1,
+      cachedAt: Date.now(),
+    };
+
+    const key = CACHE_KEY(params.tenantId, params.boardId, params.userId);
+    try {
+      await this.redis.set(key, JSON.stringify(entry), "EX", CACHE_TTL_SEC);
+    } catch {
+      // Cache population failure is non-fatal — TTL-bounded retry on next read.
+    }
+
+    return entry;
   }
 
   // ==========================================================================

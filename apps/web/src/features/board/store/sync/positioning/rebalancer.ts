@@ -93,14 +93,21 @@ export interface RebalanceConfig {
   /**
    * Maximum chain length that the balanced generator can handle in a single
    * pass. Beyond this, the rebalancer splits into segments.
-   * Default: 60 (POSITION_BASE - 2 ensures single-char positions)
+   *
+   * Must be small enough that `floor(POSITION_BASE / (segmentSize + 1)) ≥ 2`,
+   * otherwise generateBalancedPositions(segmentSize) would compute step = 1
+   * and throw InvalidPositionTopologyError (Bug #12 fix). For BASE = 62 the
+   * largest safe segment size is 30 (step = 2).
    */
   readonly maxSegmentSize: number;
 }
 
 const DEFAULT_CONFIG: RebalanceConfig = {
   hotThreshold: 1,
-  maxSegmentSize: 60, // Base62 - 2 safety margin
+  // Bug #12 alignment: 30 keeps step ≥ 2 across the entire BASE-62 alphabet.
+  // Previous default of 60 produced step = 1 and triggered the new
+  // "Insufficient rebalance space" guard immediately on first rebalance.
+  maxSegmentSize: 30,
 };
 
 // ============================================================================
