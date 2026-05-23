@@ -171,7 +171,7 @@ async function pollOnce(): Promise<number> {
   // touching the same rows. Holding the tx open until publish completes is
   // what gives us at-least-once delivery on crash recovery (Bug #7 fix).
   return db.transaction(async (tx) => {
-    const rows = (await tx.execute<ClaimedEvent>(sql`
+    const rows = (await tx.execute(sql`
       SELECT event_id, aggregate_id, aggregate_type, type, sequence,
              payload, correlation_id, occurred_at, event_version, retry_count
       FROM outbox_events
