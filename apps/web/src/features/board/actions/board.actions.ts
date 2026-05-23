@@ -221,15 +221,22 @@ export async function getBoardData(
     const rawData = await trpc.v1.public.board.getFullBoard(input);
     return superjson.serialize(rawData).json as GetBoardOutput;
   } catch (error) {
-    // Optional chaining: tRPC's `inferProcedureInput` widens to `void | {...}`
-    // when the procedure's input is optional (board.getFullBoard accepts
-    // either an id+pagination object or no argument at all to fetch the
-    // user's default board). TS therefore refuses `input.id`. Optional
-    // chaining yields `string | undefined` which the logger payload
-    // happily accepts.
+    // tRPC's `inferProcedureInput` widens GetBoardInput to
+    // `void | { id?: string; ... }` because board.getFullBoard accepts
+    // either an id+pagination object or no argument at all to fall back
+    // to the user's default board.
+    //
+    // With `strictNullChecks: false` in apps/web's tsconfig, optional
+    // chaining only filters `null | undefined`, not `void` — so
+    // `input?.id` still fails the type check on the void branch. We
+    // therefore narrow with a type assertion that strips `void` from the
+    // union before reading `.id`. Behaviour at runtime is unchanged
+    // (`void` values don't carry an `id` and yield `undefined` either way).
+    const inputForLog = input as Exclude<GetBoardInput, void> | undefined;
+
     logger.error({
       event: "ssr_board_fetch_failed",
-      boardId: input?.id,
+      boardId: inputForLog?.id,
       error:
         isDev && error instanceof Error
           ? { message: error.message, stack: error.stack }
