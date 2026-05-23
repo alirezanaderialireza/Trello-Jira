@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { createCardAction } from "../actions/board.actions";
+import { createCardAction, isActionFailure } from "../actions/board.actions";
 import { useBoardStore } from "../store/useBoardStore";
 
 // ============================================================================
@@ -243,7 +243,7 @@ export default function CreateCardForm({
       }
 
       // transport layer failure
-      if (!result.success) {
+      if (isActionFailure(result)) {
         throw new Error(
           result.message ||
             "Failed to create card."

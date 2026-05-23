@@ -19,7 +19,7 @@ import { toast } from "sonner";
 
 import { useBoardStore } from "../store/useBoardStore";
 
-import { updateCardAction } from "../actions/board.actions";
+import { updateCardAction, isActionFailure } from "../actions/board.actions";
 
 // ============================================================================
 // 🧠 Types
@@ -293,7 +293,7 @@ export const CardItem = memo(function CardItem({
       // SafeAction Layer
       // ----------------------------------------------------------------------
 
-      if (!result.success) {
+      if (isActionFailure(result)) {
         throw new Error(
           result.message ||
             "Server rejected the update."

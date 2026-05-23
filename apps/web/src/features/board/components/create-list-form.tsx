@@ -10,7 +10,7 @@ import {
 
 import { toast } from "sonner";
 
-import { createListAction } from "../actions/board.actions";
+import { createListAction, isActionFailure } from "../actions/board.actions";
 
 import { useBoardStore } from "../store/useBoardStore";
 
@@ -191,7 +191,7 @@ export default function CreateListForm({
       }
 
       // transport layer failure
-      if (!result.success) {
+      if (isActionFailure(result)) {
         throw new Error(
           result.message ||
             "Failed to create list."

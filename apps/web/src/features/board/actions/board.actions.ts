@@ -80,9 +80,19 @@ const getCaller = async (
 // Action Response Types
 // ============================================================================
 
-type ActionResponse<T> =
-  | { success: true; data: T }
-  | { success: false; code: string; message: string; isRetryable: boolean };
+export type ActionFailure = {
+  success: false;
+  code: string;
+  message: string;
+  isRetryable: boolean;
+};
+
+export type ActionSuccess<T> = {
+  success: true;
+  data: T;
+};
+
+export type ActionResponse<T> = ActionSuccess<T> | ActionFailure;
 
 // ============================================================================
 // Retryable Codes
@@ -97,6 +107,34 @@ const RETRYABLE_CODES = new Set([
   "PRECONDITION_FAILED",
   "DEADLOCK_DETECTED",
 ]);
+
+// ============================================================================
+// Type Guards (re-exported for callers)
+// ─────────────────────────────────────────────────────────────────────────────
+// Why these exist: Next 16 / TS latest fail to narrow the
+// `ActionResponse<T>` discriminated union from a plain `if (!result.success)`
+// check at some call sites — the union's generic parameter can defeat the
+// flow analyser depending on how the response was returned (await chain,
+// async wrapping, etc.). The result is errors like
+//   "Property 'message' does not exist on type ActionResponse<...>"
+// even though the runtime branch is correct.
+//
+// Exporting `isActionFailure` / `isActionSuccess` lets call sites narrow
+// explicitly. They also keep the runtime check trivial — a single
+// equality on `success`.
+// ============================================================================
+
+export function isActionFailure<T>(
+  response: ActionResponse<T>,
+): response is ActionFailure {
+  return response.success === false;
+}
+
+export function isActionSuccess<T>(
+  response: ActionResponse<T>,
+): response is ActionSuccess<T> {
+  return response.success === true;
+}
 
 // ============================================================================
 // Safe Action Factory
