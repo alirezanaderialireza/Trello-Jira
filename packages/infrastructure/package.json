@@ -5,7 +5,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./auth/argon2Hasher": "./src/auth/argon2Hasher.ts"
+    "./auth/argon2Hasher": "./src/auth/argon2Hasher.ts",
+    "./email": "./src/email/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
