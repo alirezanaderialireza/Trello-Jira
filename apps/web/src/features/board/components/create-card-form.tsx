@@ -8,7 +8,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { createCardAction, isActionFailure } from "../actions/board.actions";
+import { createCardAction } from "../actions/board.actions";
+import { isActionFailure } from "../actions/responseTypes";
 import { useBoardStore } from "../store/useBoardStore";
 
 // ============================================================================
