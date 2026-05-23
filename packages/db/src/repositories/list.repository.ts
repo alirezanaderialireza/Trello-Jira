@@ -50,8 +50,13 @@ export class DrizzleListRepository implements ListRepository<DbTx> {
     return result[0] ? this.mapToDomain(result[0] as any) : null;
   }
 
-  async create(tx: DbTx, list: List): Promise<void> {
-    await tx.insert(lists).values({
+  // ✅ Signature matches the ListRepository port: create(list, tx?).
+  // Previously this was (tx, list) which inverted the arguments and crashed
+  // at runtime because the caller passes (newList, tx) — `tx.insert(lists)`
+  // was being called on a List value rather than the Drizzle transaction.
+  async create(list: List, tx?: DbTx): Promise<void> {
+    const executor = tx ?? this.db;
+    await executor.insert(lists).values({
       id: list.id,
       tenantId: list.tenantId,
       boardId: list.boardId,

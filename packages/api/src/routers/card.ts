@@ -199,7 +199,7 @@ export const cardRouter = router({
         try {
           const result =
             await ctx.services.commands.updateCard.execute({
-              id: input.id,
+              cardId: input.id,
               title: input.title,
               description: input.description,
               expectedRevision: input.expectedRevision,
@@ -247,7 +247,7 @@ export const cardRouter = router({
         try {
           const result =
             await ctx.services.commands.deleteCard.execute({
-              id: input.id,
+              cardId: input.id,
               mutationId: input.mutationId,
               tenantId: ctx.session.tenantId,
               userId: ctx.session.user.id,
