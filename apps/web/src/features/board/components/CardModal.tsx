@@ -19,7 +19,7 @@ import {
 import { toast } from "sonner";
 
 import { useBoardStore } from "../store/useBoardStore";
-import { updateCardAction } from "../actions/board.actions";
+import { updateCardAction, isActionFailure } from "../actions/board.actions";
 import { useCardModal } from "../hooks/useCardModal";
 
 // ============================================================================
@@ -150,7 +150,7 @@ function useFieldSync(
       // SafeAction Layer
       // ------------------------------------------------------------
 
-      if (!result.success) {
+      if (isActionFailure(result)) {
         if (
           result.message?.includes("CONFLICT")
         ) {

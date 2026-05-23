@@ -32,9 +32,11 @@ import CreateListForm from "./create-list-form";
 import CardModal from "./CardModal";
 
 import {
+import {
   moveCardAction,
   moveListAction,
   deleteCardAction,
+  isActionFailure,
 } from "../actions/board.actions";
 
 import { useBoardStore } from "../store/useBoardStore";
@@ -540,7 +542,7 @@ export default function BoardView({
 
           // ── 4. createSafeAction wraps server failures in
           //    { success: false, code, message } — surface to user.
-          if (!result.success) {
+          if (isActionFailure(result)) {
             throw new Error(result.message);
           }
 
@@ -711,10 +713,7 @@ export default function BoardView({
               crypto.randomUUID(),
           });
 
-        if (
-          result &&
-          result.success === false
-        ) {
+        if (result && isActionFailure(result)) {
           throw new Error(result.message);
         }
       } catch {
