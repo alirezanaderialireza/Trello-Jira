@@ -6,20 +6,7 @@ import { QueryProvider } from "../providers/QueryProvider";
 import { SessionProvider } from "next-auth/react";
 import { RootErrorBoundary } from "../components/error/ErrorBoundary";
 import { GlobalErrorListener } from "../components/error/GlobalErrorListener";
-
-// ✅ fix: dynamic import برای devtools
-import dynamic from "next/dynamic";
-
-const BoardDevtoolsOverlay =
-  process.env.NODE_ENV === "development"
-    ? dynamic(
-        () =>
-          import("../features/board/devtools/BoardDevtoolsOverlay").then(
-            (mod) => mod.BoardDevtoolsOverlay,
-          ),
-        { ssr: false },
-      )
-    : null;
+import { DevtoolsClient } from "../components/dev/DevtoolsClient";
 
 export const metadata = {
   title: "Trello OS",
@@ -41,6 +28,13 @@ export default function RootLayout({
   // Both must live INSIDE <body> (they touch the DOM / browser APIs)
   // and BEFORE the providers so even a crash in SessionProvider /
   // QueryProvider is captured.
+  //
+  // <DevtoolsClient> is a client component wrapper that hosts the
+  // `next/dynamic({ ssr: false })` import for the dev overlay. Next.js 15+
+  // disallows ssr:false dynamic imports from a Server Component (and
+  // `app/layout.tsx` is one by default), so the import lives in a
+  // client component. In production the wrapper renders null and the
+  // lazy chunk is tree-shaken away by the static NODE_ENV check.
   return (
     <html lang="fa" dir="rtl">
       <body className="bg-gray-50 text-gray-900 antialiased">
@@ -49,9 +43,7 @@ export default function RootLayout({
           <SessionProvider>
             <QueryProvider>
               {children}
-
-              {/* Devtools فقط در development */}
-              {BoardDevtoolsOverlay && <BoardDevtoolsOverlay />}
+              <DevtoolsClient />
             </QueryProvider>
           </SessionProvider>
         </RootErrorBoundary>
