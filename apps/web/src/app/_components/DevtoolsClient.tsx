@@ -1,6 +1,6 @@
 "use client";
 
-// apps/web/src/components/dev/DevtoolsClient.tsx
+// apps/web/src/app/_components/DevtoolsClient.tsx
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // Devtools client wrapper.

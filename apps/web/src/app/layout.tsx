@@ -6,7 +6,7 @@ import { QueryProvider } from "../providers/QueryProvider";
 import { SessionProvider } from "next-auth/react";
 import { RootErrorBoundary } from "../components/error/ErrorBoundary";
 import { GlobalErrorListener } from "../components/error/GlobalErrorListener";
-import { DevtoolsClient } from "../components/dev/DevtoolsClient";
+import { DevtoolsClient } from "./_components/DevtoolsClient";
 
 export const metadata = {
   title: "Trello OS",
