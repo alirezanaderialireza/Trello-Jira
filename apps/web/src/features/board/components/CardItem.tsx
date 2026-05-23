@@ -305,13 +305,7 @@ export const CardItem = memo(function CardItem({
       // Domain Layer
       // ----------------------------------------------------------------------
 
-      if (
-        result.data &&
-        typeof result.data ===
-          "object" &&
-        "success" in result.data &&
-        !result.data.success
-      ) {
+      if (!result.data.success) {
         throw new Error(
           result.data.message ||
             "Domain rejected the update."

@@ -173,12 +173,7 @@ function useFieldSync(
       // Domain Layer
       // ------------------------------------------------------------
 
-      if (
-        result.data &&
-        typeof result.data === "object" &&
-        "success" in result.data &&
-        !result.data.success
-      ) {
+      if (!result.data.success) {
         if (
           result.data.reason ===
           "SYNC_CONFLICT"
