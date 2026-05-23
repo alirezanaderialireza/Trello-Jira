@@ -56,7 +56,13 @@ export function generateBalancedPositions(
     POSITION_BASE / (count + 1),
   );
 
-  if (step <= 0) {
+  // Bug #12 fix: a `step` of exactly 1 would lay positions at consecutive
+  // alphabet indices. The next insert between any two of them is impossible
+  // without lengthening the rank string, so the very next mutation triggers
+  // another rebalance — i.e. we'd loop. Treat anything ≤ 1 as
+  // "insufficient rebalance space" and surface the topology error instead
+  // of producing a chain that immediately needs the same operation again.
+  if (step <= 1) {
     throw new InvalidPositionTopologyError(
       "Insufficient rebalance space",
     );

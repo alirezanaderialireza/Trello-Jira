@@ -3,11 +3,12 @@
 // ✅ ارور ۱: حذف TransactionContext — generic TTx
 // ✅ ارور ۲: حذف "../../errors" — وجود ندارد
 
-import type { CardId, BoardId, TenantId } from "../../shared/ids";
+import type { CardId, BoardId } from "../../shared/ids";
 
 import type {
   CardRepository,
   OutboxRepository,
+  SequenceRepository,
   TransactionManager,
 } from "../../ports";
 
@@ -40,6 +41,7 @@ export async function deleteCardUseCase<TTx>(
   txManager: TransactionManager<TTx>,
   cardRepo: CardRepository<TTx>,
   outboxRepo: OutboxRepository<TTx>,
+  sequenceRepo: SequenceRepository<TTx>,
   deps: DeleteCardDeps,
 ): Promise<DeleteCardResult> {
   const cardId = command.cardId as CardId;
@@ -79,7 +81,22 @@ export async function deleteCardUseCase<TTx>(
     }
 
     // ----------------------------------------------------------------
-    // 3. Outbox event
+    // 3. Board sequence (monotonic per board) — required for the realtime
+    //    consumer ordering contract. Bug #2 fix: previously the outbox
+    //    event was stamped with `card.revision`, which is per-card and
+    //    therefore collides with other events for the same board (and
+    //    even with the card's own previous events). Subscribers ordered
+    //    by `sequence` would either skip events or replay them out of
+    //    order. We now ask the SequenceRepository for the next monotonic
+    //    `boardSequence`, matching update-card / move-card / create-card.
+    // ----------------------------------------------------------------
+    const boardSequence = await sequenceRepo.nextBoardSequence(
+      tx,
+      card.boardId as BoardId,
+    );
+
+    // ----------------------------------------------------------------
+    // 4. Outbox event
     // ----------------------------------------------------------------
     // ✅ ارور ۴: append(tx, event) مستقیم — نه { tx, event: {...} }
     await outboxRepo.append(tx, {
@@ -88,7 +105,7 @@ export async function deleteCardUseCase<TTx>(
       aggregateId: card.boardId,
       aggregateType: "BOARD",
       type: "CARD_DELETED",
-      sequence: card.revision,
+      sequence: boardSequence,
       occurredAt: deletedAt,
       correlationId: command.correlationId,
       payload: {

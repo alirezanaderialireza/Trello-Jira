@@ -46,6 +46,14 @@ export const outboxEvents = pgTable(
     // 🔹 Processing State
     // =========================================================================
     processedAt: timestamp("processed_at"), // نال بودن یعنی هنوز پردازش نشده
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Durable retry counter (added in migration 0005). Incremented by the
+    // outbox worker after every failed publish. Survives worker restarts so
+    // we honour OUTBOX_MAX_RETRIES even across process boundaries instead
+    // of relying on a process-local Map (Bug #13).
+    // ─────────────────────────────────────────────────────────────────────
+    retryCount: integer("retry_count").notNull().default(0),
   },
   (table) => ({
     // =========================================================================

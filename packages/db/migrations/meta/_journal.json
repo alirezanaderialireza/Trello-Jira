@@ -36,6 +36,13 @@
       "when": 1779372000000,
       "tag": "0004_rls_split_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1779373000000,
+      "tag": "0005_outbox_retry_count",
+      "breakpoints": true
     }
   ]
 }
