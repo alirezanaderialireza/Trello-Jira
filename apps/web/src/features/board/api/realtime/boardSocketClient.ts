@@ -58,7 +58,7 @@ class BoardSocketClient {
     if (token) this.token = token;
 
     // Signal FSM — triggers CONNECT_WS effect (handled by useSyncOrchestrator)
-    getSyncFSM().send({ type: "BOARD_LOADED", boardId });
+    getSyncFSM().send({ type: "CONNECT_REQUESTED", boardId });
 
     telemetry.log("WS_INGRESS", "CONNECTING", { url: this.url, boardId });
 
@@ -95,7 +95,7 @@ class BoardSocketClient {
       telemetry.log("WS_INGRESS", "DISCONNECTED_BY_CLIENT", {});
     }
 
-    getSyncFSM().send({ type: "BOARD_UNLOADED" });
+    getSyncFSM().send({ type: "DISCONNECT_REQUESTED" });
   }
 
   public getReadyState(): number {
@@ -162,7 +162,11 @@ class BoardSocketClient {
         this.ws.onerror = this.handleError.bind(this);
       } catch (err: any) {
         telemetry.log("WS_INGRESS", "RECONNECT_CONSTRUCT_ERROR", { error: err.message });
-        getSyncFSM().send({ type: "WS_DISCONNECTED" });
+        // The WebSocket constructor failed — there's no real CloseEvent to
+        // forward, so synthesise a CLOSED with the standard "abnormal" code
+        // (1006). The FSM only uses code/reason for telemetry; the state
+        // transition is identical for any non-clean close.
+        getSyncFSM().send({ type: "WS_CLOSED", code: 1006, reason: "construct_error" });
       }
     }
   }
@@ -219,7 +223,10 @@ class BoardSocketClient {
         case "SYSTEM":
           if (message.meta?.reason === "SUBSCRIBED") {
             telemetry.log("WS_INGRESS", "SUBSCRIBED_ACK", { boardId: this.boardId });
-            getSyncFSM().send({ type: "SUBSCRIBED" });
+            // The new SyncStateMachine treats WS_CONNECTED + the first
+            // EVENT_RECEIVED as an implicit subscription — it has no
+            // dedicated SUBSCRIBED message. The telemetry log above is
+            // retained for ops dashboards.
           }
           break;
 
@@ -228,7 +235,7 @@ class BoardSocketClient {
           telemetry.log("WS_INGRESS", "FATAL_RESYNC_ORDERED", {
             reason: message.meta?.reason,
           });
-          getSyncFSM().send({ type: "GAP_UNRECOVERABLE" });
+          getSyncFSM().send({ type: "RESYNC_REQUIRED" });
           break;
       }
     } catch (error: any) {
@@ -249,7 +256,7 @@ class BoardSocketClient {
 
     // Signal FSM — it will schedule reconnect via effect handler
     getSyncFSM().send({
-      type: "WS_DISCONNECTED",
+      type: "WS_CLOSED",
       code: event.code,
       reason: event.reason,
     });
