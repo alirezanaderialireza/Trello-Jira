@@ -6,21 +6,19 @@
 //   1. With ?token=...   → call /api/auth/verify-email and show the result.
 //   2. Without a token   → show "check your inbox" text + "resend" form
 //                          (the page user lands on after signup).
+//
+// ─── Suspense wrapper ───────────────────────────────────────────────────────
+// `useSearchParams()` can't be prerendered without a <Suspense> boundary in
+// Next 16. Inner component does the work, default export wraps it.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
 import Link from "next/link";
-
-// Disable static generation — reads `token` from the URL via
-// useSearchParams() which Next.js can't prerender without <Suspense>.
-// Auth pages should never be statically cached, so force-dynamic is the
-// correct semantics.
-export const dynamic = "force-dynamic";
 
 type VerifyStatus = "idle" | "loading" | "success" | "alreadyVerified" | "error";
 
-export default function VerifyEmailPage() {
+function VerifyEmailInner() {
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
 
@@ -183,5 +181,26 @@ export default function VerifyEmailPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// Shell rendered at build time. Matches the inner card so there's no
+// layout shift when the content hydrates on the client.
+function VerifyEmailFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-900">
+      <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 p-8 text-center">
+        <div className="h-8 w-8 mx-auto animate-spin rounded-full border-2 border-slate-600 border-t-blue-400 mb-4" />
+        <p className="text-slate-300">در حال بارگذاری...</p>
+      </div>
+    </div>
+  );
+}
+
+export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={<VerifyEmailFallback />}>
+      <VerifyEmailInner />
+    </Suspense>
   );
 }
