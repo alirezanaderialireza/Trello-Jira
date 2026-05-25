@@ -200,28 +200,23 @@ export default function CreateListForm({
       }
 
       // domain layer failure
-      // Bind result.data to a local const so TS narrowing on the
-      // discriminator survives subsequent property accesses. The
-      // ClientListMutationResult union has a `success: true` branch
-      // (without `message`) and a `success: false` branch (with
-      // `message`). Inline property-access narrowing is unreliable
-      // under apps/web's TS config (strictNullChecks: false) and
-      // breaks the production build.
-      const domainResult = result.data as
-        | {
-            success: true;
-            listId: string;
-            boardRevision: number;
-            boardSequence: string;
-            projectionSequence: string;
-            aclVersion?: number;
-          }
-        | {
-            success: false;
-            reason: string;
-            retryable: boolean;
-            message: string;
-          };
+      // Cast result.data to a flat structural type with every field
+      // optional (success-branch fields included for the reconciliation
+      // step below). This avoids the discriminated-union narrowing path:
+      // under apps/web's relaxed tsconfig (strictNullChecks: false), TS
+      // refuses to narrow on `domainResult.success` even when bound to
+      // a local const, breaking the production build with
+      //   Property 'message' does not exist on type
+      //     '{ success: true; ... } | { success: false; ... }'.
+      // A flat shape makes every access valid; the runtime check still
+      // gates the throw, and on the success path the optional fields
+      // resolve under strictNullChecks: false.
+      const domainResult = result.data as {
+        success: boolean;
+        message?: string;
+        listId?: string;
+        boardRevision?: number;
+      };
 
       if (!domainResult.success) {
         throw new Error(

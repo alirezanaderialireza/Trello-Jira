@@ -252,27 +252,26 @@ export default function CreateCardForm({
       }
 
       // domain layer failure
-      // Bind result.data to a local const so TS narrowing on the
-      // discriminator survives subsequent property accesses. Inline
-      // `result.data.success` then `result.data.message` is unreliable
-      // under apps/web's TS config (strictNullChecks: false) and
-      // breaks the production build with:
-      //   Property 'message' does not exist on type 'ClientCardMutationResult'.
-      const domainResult = result.data as
-        | {
-            success: true;
-            cardId: string;
-            listRevision: number;
-            boardSequence: string;
-            projectionSequence: string;
-            aclVersion?: number;
-          }
-        | {
-            success: false;
-            reason: string;
-            retryable: boolean;
-            message: string;
-          };
+      // Cast result.data to a flat structural type with every field
+      // optional (success-branch fields included for the reconciliation
+      // step below). This avoids the discriminated-union narrowing path:
+      // under apps/web's relaxed tsconfig (strictNullChecks: false), TS
+      // refuses to narrow on `domainResult.success` even when bound to
+      // a local const, breaking the production build with
+      //   Property 'message' does not exist on type
+      //     '{ success: true; ... } | { success: false; ... }'.
+      // A flat shape with optional fields makes every access valid;
+      // the runtime check (!domainResult.success) still gates the throw,
+      // and on the success path domainResult.cardId / .listRevision
+      // resolve to string | undefined / number | undefined respectively
+      // (assignable to BoardCard.id / .revision under
+      // strictNullChecks: false).
+      const domainResult = result.data as {
+        success: boolean;
+        message?: string;
+        cardId?: string;
+        listRevision?: number;
+      };
 
       if (!domainResult.success) {
         throw new Error(

@@ -172,28 +172,23 @@ function useFieldSync(
       // ------------------------------------------------------------
       // Domain Layer
       // ------------------------------------------------------------
-      // Bind result.data to a local const before narrowing.
-      // Property-access narrowing (`result.data.success` →
-      // `result.data.message` / `result.data.reason`) is unreliable
-      // in apps/web's TS config (strictNullChecks: false): TS forgets
-      // the discriminator on the second access and falls back to the
-      // full union. A local const stabilises the narrow.
+      // Cast result.data to a flat structural type with every field
+      // optional. This avoids the discriminated-union narrowing path:
+      // under apps/web's relaxed tsconfig (strictNullChecks: false),
+      // TS refuses to narrow on either `result.data.success` or a
+      // local-const-bound discriminator, breaking the production build
+      // with
+      //   Property 'message' does not exist on type
+      //     '{ success: true; ... } | { success: false; ... }'.
+      // The flat shape with optional fields makes every access valid;
+      // the runtime check (!domainResult.success) still gates writes.
+      // Mirrors the BoardView.tsx pattern for moveListAction.
 
-      const domainResult = result.data as
-        | {
-            success: true;
-            cardId: string;
-            listRevision: number;
-            boardSequence: string;
-            projectionSequence: string;
-            aclVersion?: number;
-          }
-        | {
-            success: false;
-            reason: string;
-            retryable: boolean;
-            message: string;
-          };
+      const domainResult = result.data as {
+        success: boolean;
+        message?: string;
+        reason?: string;
+      };
 
       if (!domainResult.success) {
         if (

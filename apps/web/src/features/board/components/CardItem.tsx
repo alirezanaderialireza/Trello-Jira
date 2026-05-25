@@ -304,29 +304,25 @@ export const CardItem = memo(function CardItem({
       // ----------------------------------------------------------------------
       // Domain Layer
       // ----------------------------------------------------------------------
-      // Bind result.data to a local const before narrowing.
-      // Property-access narrowing (`result.data.success` →
-      // `result.data.message`) is unreliable in apps/web's TS config
-      // (strictNullChecks: false): TS forgets the discriminator on the
-      // second access and falls back to the full union, raising
-      //   Property 'message' does not exist on type 'ClientCardMutationResult'.
-      // A local const stabilises the narrow.
+      // Cast result.data to a flat structural type with every field
+      // optional. This deliberately avoids the discriminated-union
+      // narrowing path entirely: under apps/web's relaxed tsconfig
+      // (strict: true inherited but strictNullChecks: false), TS's flow
+      // analyser refuses to narrow ClientCardMutationResult on either
+      // `result.data.success` or a local-const-bound `domainResult.success`,
+      // which made the production build fail with
+      //   Property 'message' does not exist on type
+      //     '{ success: true; cardId: string; ... } | { success: false; ... }'.
+      // A flat shape with `message?: string` removes the need to narrow:
+      // the field is always reachable, returns string | undefined, and
+      // the runtime check (!domainResult.success) still gates the throw.
+      // This mirrors the cast pattern BoardView.tsx already uses for
+      // moveListAction's response.
 
-      const domainResult = result.data as
-        | {
-            success: true;
-            cardId: string;
-            listRevision: number;
-            boardSequence: string;
-            projectionSequence: string;
-            aclVersion?: number;
-          }
-        | {
-            success: false;
-            reason: string;
-            retryable: boolean;
-            message: string;
-          };
+      const domainResult = result.data as {
+        success: boolean;
+        message?: string;
+      };
 
       if (!domainResult.success) {
         throw new Error(
