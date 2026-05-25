@@ -1,21 +1,39 @@
 // packages/db/src/repositories/workspaces.repository.ts
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { workspaces, workspaceMembers } from "../schema";
-import type { WorkspaceRepository, WorkspaceEntity, WorkspaceMemberEntity, WorkspaceSlug, WorkspaceRole } from "@repo/domain/workspaces";
+import type {
+  WorkspaceRepository,
+  WorkspaceEntity,
+  WorkspaceMemberEntity,
+  WorkspaceSlug,
+  WorkspaceRole,
+} from "@repo/domain/workspaces";
+import type { WorkspaceVisibility } from "../schema/workspaces";
+import { notDeleted } from "../lib/softDeleteFilter";
 
 export class DrizzleWorkspaceRepository implements WorkspaceRepository {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(private readonly db: any) {}
 
   async findById(id: string): Promise<WorkspaceEntity | null> {
-    const rows = await this.db.select().from(workspaces).where(and(eq(workspaces.id, id), isNull(workspaces.deletedAt))).limit(1);
+    const rows = await this.db
+      .select()
+      .from(workspaces)
+      .where(and(eq(workspaces.id, id), notDeleted(workspaces)))
+      .limit(1);
     return rows[0] ? this.mapWs(rows[0]) : null;
   }
 
   async findBySlug(slug: WorkspaceSlug): Promise<WorkspaceEntity | null> {
-    const rows = await this.db.select().from(workspaces).where(and(eq(workspaces.slug, slug), isNull(workspaces.deletedAt))).limit(1);
+    const rows = await this.db
+      .select()
+      .from(workspaces)
+      .where(and(eq(workspaces.slug, slug), notDeleted(workspaces)))
+      .limit(1);
     return rows[0] ? this.mapWs(rows[0]) : null;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async create(ws: WorkspaceEntity, tx?: any): Promise<void> {
     const db = tx ?? this.db;
     await db.insert(workspaces).values({
@@ -25,6 +43,7 @@ export class DrizzleWorkspaceRepository implements WorkspaceRepository {
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async update(ws: WorkspaceEntity, tx?: any): Promise<void> {
     const db = tx ?? this.db;
     await db.update(workspaces).set({
@@ -45,6 +64,7 @@ export class DrizzleWorkspaceRepository implements WorkspaceRepository {
     return rows.map(this.mapMember);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async addMember(member: WorkspaceMemberEntity, tx?: any): Promise<void> {
     const db = tx ?? this.db;
     await db.insert(workspaceMembers).values({
@@ -53,21 +73,109 @@ export class DrizzleWorkspaceRepository implements WorkspaceRepository {
     });
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async removeMember(workspaceId: string, userId: string, tx?: any): Promise<void> {
     const db = tx ?? this.db;
     await db.delete(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)));
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async updateMemberRole(workspaceId: string, userId: string, role: WorkspaceRole, tx?: any): Promise<void> {
     const db = tx ?? this.db;
     await db.update(workspaceMembers).set({ role }).where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)));
   }
 
-  private mapWs(row: any): WorkspaceEntity {
-    return { id: row.id, name: row.name, slug: row.slug as WorkspaceSlug, tier: row.tier, ownerId: row.ownerId, personalForUserId: row.personalForUserId, revision: row.revision, createdAt: row.createdAt, updatedAt: row.updatedAt, deletedAt: row.deletedAt };
+  // ────────────────────────────────────────────────────────────────────────
+  // Phase 1.1 (F1) lifecycle helpers
+  // ────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Soft-delete a workspace. Sets `deleted_at = now()`. Idempotent:
+   * re-soft-deleting a row updates `deleted_at` again, which is fine for
+   * the 30-day grace window because the janitor reads
+   * `deleted_at < now() - interval '30 days'`.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async softDelete(id: string, tx?: any): Promise<void> {
+    const db = tx ?? this.db;
+    await db
+      .update(workspaces)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(eq(workspaces.id, id));
   }
 
+  /**
+   * Restore a soft-deleted workspace. Caller is responsible for enforcing
+   * the 30-day undo window — this method just clears `deleted_at`.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async restore(id: string, tx?: any): Promise<void> {
+    const db = tx ?? this.db;
+    await db
+      .update(workspaces)
+      .set({ deletedAt: null, updatedAt: new Date() })
+      .where(eq(workspaces.id, id));
+  }
+
+  /**
+   * Set or clear the workspace background. `data === null` clears it.
+   * Shape validation lives in domain (Zod) — DB only enforces
+   * `jsonb_typeof = 'object'`.
+   */
+  async setBackground(
+    id: string,
+    data: Record<string, unknown> | null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tx?: any,
+  ): Promise<void> {
+    const db = tx ?? this.db;
+    await db
+      .update(workspaces)
+      .set({ backgroundData: data, updatedAt: new Date() })
+      .where(and(eq(workspaces.id, id), notDeleted(workspaces)));
+  }
+
+  /**
+   * Update the visibility flag. The CHECK constraint guards the value at
+   * the DB level; the WorkspaceVisibility type guards it at the type level.
+   */
+  async updateVisibility(
+    id: string,
+    visibility: WorkspaceVisibility,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tx?: any,
+  ): Promise<void> {
+    const db = tx ?? this.db;
+    await db
+      .update(workspaces)
+      .set({ visibility, updatedAt: new Date() })
+      .where(and(eq(workspaces.id, id), notDeleted(workspaces)));
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private mapWs(row: any): WorkspaceEntity {
+    return {
+      id: row.id,
+      name: row.name,
+      slug: row.slug as WorkspaceSlug,
+      tier: row.tier,
+      ownerId: row.ownerId,
+      personalForUserId: row.personalForUserId,
+      revision: row.revision,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      deletedAt: row.deletedAt,
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private mapMember(row: any): WorkspaceMemberEntity {
-    return { workspaceId: row.workspaceId, userId: row.userId, role: row.role as WorkspaceRole, joinedAt: row.joinedAt, invitedBy: row.invitedBy };
+    return {
+      workspaceId: row.workspaceId,
+      userId: row.userId,
+      role: row.role as WorkspaceRole,
+      joinedAt: row.joinedAt,
+      invitedBy: row.invitedBy,
+    };
   }
 }
