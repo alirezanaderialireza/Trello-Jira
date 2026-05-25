@@ -200,9 +200,32 @@ export default function CreateListForm({
       }
 
       // domain layer failure
-      if (!result.data.success) {
+      // Bind result.data to a local const so TS narrowing on the
+      // discriminator survives subsequent property accesses. The
+      // ClientListMutationResult union has a `success: true` branch
+      // (without `message`) and a `success: false` branch (with
+      // `message`). Inline property-access narrowing is unreliable
+      // under apps/web's TS config (strictNullChecks: false) and
+      // breaks the production build.
+      const domainResult = result.data as
+        | {
+            success: true;
+            listId: string;
+            boardRevision: number;
+            boardSequence: string;
+            projectionSequence: string;
+            aclVersion?: number;
+          }
+        | {
+            success: false;
+            reason: string;
+            retryable: boolean;
+            message: string;
+          };
+
+      if (!domainResult.success) {
         throw new Error(
-          result.data.message ||
+          domainResult.message ||
             "List creation rejected."
         );
       }
@@ -212,7 +235,7 @@ export default function CreateListForm({
       // =========================================================================
 
       const confirmedList = {
-        id: result.data.listId,
+        id: domainResult.listId,
 
         boardId,
 
@@ -223,7 +246,7 @@ export default function CreateListForm({
         cards: [],
 
         revision:
-          result.data.boardRevision,
+          domainResult.boardRevision,
 
         isOptimistic: false,
       };

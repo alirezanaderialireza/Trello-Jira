@@ -252,9 +252,31 @@ export default function CreateCardForm({
       }
 
       // domain layer failure
-      if (!result.data.success) {
+      // Bind result.data to a local const so TS narrowing on the
+      // discriminator survives subsequent property accesses. Inline
+      // `result.data.success` then `result.data.message` is unreliable
+      // under apps/web's TS config (strictNullChecks: false) and
+      // breaks the production build with:
+      //   Property 'message' does not exist on type 'ClientCardMutationResult'.
+      const domainResult = result.data as
+        | {
+            success: true;
+            cardId: string;
+            listRevision: number;
+            boardSequence: string;
+            projectionSequence: string;
+            aclVersion?: number;
+          }
+        | {
+            success: false;
+            reason: string;
+            retryable: boolean;
+            message: string;
+          };
+
+      if (!domainResult.success) {
         throw new Error(
-          result.data.message ||
+          domainResult.message ||
             "Card creation rejected."
         );
       }
@@ -264,7 +286,7 @@ export default function CreateCardForm({
       // =========================================================================
 
       const confirmedCard: BoardCard = {
-        id: result.data.cardId,
+        id: domainResult.cardId,
 
         boardId,
 
@@ -275,7 +297,7 @@ export default function CreateCardForm({
         position: optimisticPosition,
 
         revision:
-          result.data.listRevision,
+          domainResult.listRevision,
 
         isOptimistic: false,
       };

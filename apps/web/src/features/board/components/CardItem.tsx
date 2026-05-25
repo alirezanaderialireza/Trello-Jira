@@ -304,10 +304,33 @@ export const CardItem = memo(function CardItem({
       // ----------------------------------------------------------------------
       // Domain Layer
       // ----------------------------------------------------------------------
+      // Bind result.data to a local const before narrowing.
+      // Property-access narrowing (`result.data.success` →
+      // `result.data.message`) is unreliable in apps/web's TS config
+      // (strictNullChecks: false): TS forgets the discriminator on the
+      // second access and falls back to the full union, raising
+      //   Property 'message' does not exist on type 'ClientCardMutationResult'.
+      // A local const stabilises the narrow.
 
-      if (!result.data.success) {
+      const domainResult = result.data as
+        | {
+            success: true;
+            cardId: string;
+            listRevision: number;
+            boardSequence: string;
+            projectionSequence: string;
+            aclVersion?: number;
+          }
+        | {
+            success: false;
+            reason: string;
+            retryable: boolean;
+            message: string;
+          };
+
+      if (!domainResult.success) {
         throw new Error(
-          result.data.message ||
+          domainResult.message ||
             "Domain rejected the update."
         );
       }

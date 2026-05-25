@@ -172,10 +172,32 @@ function useFieldSync(
       // ------------------------------------------------------------
       // Domain Layer
       // ------------------------------------------------------------
+      // Bind result.data to a local const before narrowing.
+      // Property-access narrowing (`result.data.success` →
+      // `result.data.message` / `result.data.reason`) is unreliable
+      // in apps/web's TS config (strictNullChecks: false): TS forgets
+      // the discriminator on the second access and falls back to the
+      // full union. A local const stabilises the narrow.
 
-      if (!result.data.success) {
+      const domainResult = result.data as
+        | {
+            success: true;
+            cardId: string;
+            listRevision: number;
+            boardSequence: string;
+            projectionSequence: string;
+            aclVersion?: number;
+          }
+        | {
+            success: false;
+            reason: string;
+            retryable: boolean;
+            message: string;
+          };
+
+      if (!domainResult.success) {
         if (
-          result.data.reason ===
+          domainResult.reason ===
           "SYNC_CONFLICT"
         ) {
           setStatus("conflicted");
@@ -188,7 +210,7 @@ function useFieldSync(
         }
 
         throw new Error(
-          result.data.message ||
+          domainResult.message ||
             "Domain update failed."
         );
       }
