@@ -30,7 +30,7 @@
 // state machine" requirement.
 // ============================================================================
 
-import { telemetry } from "../../devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 // ============================================================================
 // 🔌 Physical Connection States

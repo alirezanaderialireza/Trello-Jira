@@ -11,6 +11,7 @@ import {
 import { toast } from "sonner";
 
 import { createListAction } from "../actions/board.actions";
+import { isActionFailure } from "../actions/responseTypes";
 
 import { useBoardStore } from "../store/useBoardStore";
 
@@ -191,7 +192,7 @@ export default function CreateListForm({
       }
 
       // transport layer failure
-      if (!result.success) {
+      if (isActionFailure(result)) {
         throw new Error(
           result.message ||
             "Failed to create list."
@@ -199,9 +200,27 @@ export default function CreateListForm({
       }
 
       // domain layer failure
-      if (!result.data.success) {
+      // Cast result.data to a flat structural type with every field
+      // optional (success-branch fields included for the reconciliation
+      // step below). This avoids the discriminated-union narrowing path:
+      // under apps/web's relaxed tsconfig (strictNullChecks: false), TS
+      // refuses to narrow on `domainResult.success` even when bound to
+      // a local const, breaking the production build with
+      //   Property 'message' does not exist on type
+      //     '{ success: true; ... } | { success: false; ... }'.
+      // A flat shape makes every access valid; the runtime check still
+      // gates the throw, and on the success path the optional fields
+      // resolve under strictNullChecks: false.
+      const domainResult = result.data as {
+        success: boolean;
+        message?: string;
+        listId?: string;
+        boardRevision?: number;
+      };
+
+      if (!domainResult.success) {
         throw new Error(
-          result.data.message ||
+          domainResult.message ||
             "List creation rejected."
         );
       }
@@ -211,7 +230,7 @@ export default function CreateListForm({
       // =========================================================================
 
       const confirmedList = {
-        id: result.data.listId,
+        id: domainResult.listId,
 
         boardId,
 
@@ -222,7 +241,7 @@ export default function CreateListForm({
         cards: [],
 
         revision:
-          result.data.boardRevision,
+          domainResult.boardRevision,
 
         isOptimistic: false,
       };

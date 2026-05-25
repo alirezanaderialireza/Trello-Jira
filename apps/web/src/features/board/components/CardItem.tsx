@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { useBoardStore } from "../store/useBoardStore";
 
 import { updateCardAction } from "../actions/board.actions";
+import { isActionFailure } from "../actions/responseTypes";
 
 // ============================================================================
 // 🧠 Types
@@ -293,7 +294,7 @@ export const CardItem = memo(function CardItem({
       // SafeAction Layer
       // ----------------------------------------------------------------------
 
-      if (!result.success) {
+      if (isActionFailure(result)) {
         throw new Error(
           result.message ||
             "Server rejected the update."
@@ -303,16 +304,29 @@ export const CardItem = memo(function CardItem({
       // ----------------------------------------------------------------------
       // Domain Layer
       // ----------------------------------------------------------------------
+      // Cast result.data to a flat structural type with every field
+      // optional. This deliberately avoids the discriminated-union
+      // narrowing path entirely: under apps/web's relaxed tsconfig
+      // (strict: true inherited but strictNullChecks: false), TS's flow
+      // analyser refuses to narrow ClientCardMutationResult on either
+      // `result.data.success` or a local-const-bound `domainResult.success`,
+      // which made the production build fail with
+      //   Property 'message' does not exist on type
+      //     '{ success: true; cardId: string; ... } | { success: false; ... }'.
+      // A flat shape with `message?: string` removes the need to narrow:
+      // the field is always reachable, returns string | undefined, and
+      // the runtime check (!domainResult.success) still gates the throw.
+      // This mirrors the cast pattern BoardView.tsx already uses for
+      // moveListAction's response.
 
-      if (
-        result.data &&
-        typeof result.data ===
-          "object" &&
-        "success" in result.data &&
-        !result.data.success
-      ) {
+      const domainResult = result.data as {
+        success: boolean;
+        message?: string;
+      };
+
+      if (!domainResult.success) {
         throw new Error(
-          result.data.message ||
+          domainResult.message ||
             "Domain rejected the update."
         );
       }

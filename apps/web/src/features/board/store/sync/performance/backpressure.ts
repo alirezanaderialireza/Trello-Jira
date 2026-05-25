@@ -18,7 +18,7 @@
 // duration, and adjusts the mode accordingly.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { telemetry } from "../../../devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 // ============================================================================
 // 1.  Types

@@ -9,6 +9,7 @@ import {
 import { toast } from "sonner";
 
 import { createCardAction } from "../actions/board.actions";
+import { isActionFailure } from "../actions/responseTypes";
 import { useBoardStore } from "../store/useBoardStore";
 
 // ============================================================================
@@ -243,7 +244,7 @@ export default function CreateCardForm({
       }
 
       // transport layer failure
-      if (!result.success) {
+      if (isActionFailure(result)) {
         throw new Error(
           result.message ||
             "Failed to create card."
@@ -251,9 +252,30 @@ export default function CreateCardForm({
       }
 
       // domain layer failure
-      if (!result.data.success) {
+      // Cast result.data to a flat structural type with every field
+      // optional (success-branch fields included for the reconciliation
+      // step below). This avoids the discriminated-union narrowing path:
+      // under apps/web's relaxed tsconfig (strictNullChecks: false), TS
+      // refuses to narrow on `domainResult.success` even when bound to
+      // a local const, breaking the production build with
+      //   Property 'message' does not exist on type
+      //     '{ success: true; ... } | { success: false; ... }'.
+      // A flat shape with optional fields makes every access valid;
+      // the runtime check (!domainResult.success) still gates the throw,
+      // and on the success path domainResult.cardId / .listRevision
+      // resolve to string | undefined / number | undefined respectively
+      // (assignable to BoardCard.id / .revision under
+      // strictNullChecks: false).
+      const domainResult = result.data as {
+        success: boolean;
+        message?: string;
+        cardId?: string;
+        listRevision?: number;
+      };
+
+      if (!domainResult.success) {
         throw new Error(
-          result.data.message ||
+          domainResult.message ||
             "Card creation rejected."
         );
       }
@@ -263,7 +285,7 @@ export default function CreateCardForm({
       // =========================================================================
 
       const confirmedCard: BoardCard = {
-        id: result.data.cardId,
+        id: domainResult.cardId,
 
         boardId,
 
@@ -274,7 +296,7 @@ export default function CreateCardForm({
         position: optimisticPosition,
 
         revision:
-          result.data.listRevision,
+          domainResult.listRevision,
 
         isOptimistic: false,
       };

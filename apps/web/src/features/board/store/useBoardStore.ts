@@ -1,7 +1,7 @@
 // apps/web/src/features/board/store/useBoardStore.ts
 
 import { create } from "zustand";
-import { telemetry } from "../devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 import type {
   AppDomainEvent,
@@ -183,11 +183,45 @@ export interface WsEvent {
   payload: AppDomainEvent;
 }
 
+/**
+ * SyncStatus — extended union that covers both the legacy 4-value enum that
+ * boardRealtimeClient / useSyncStatus depend on AND the FSM-derived values
+ * that reconcileIncomingEvent / useSyncOrchestrator write.
+ *
+ * Legacy values (written by boardRealtimeClient + read by useSyncStatus):
+ *   "healthy"     — connected, no gap
+ *   "gap_detected"— sequence gap detected, buffering
+ *   "reconnecting"— WS dropped, retrying
+ *   "desynced"    — unrecoverable, full resync required
+ *
+ * FSM-derived values (written by reconcileIncomingEvent + useSyncOrchestrator):
+ *   "synced"      — equivalent to "healthy"
+ *   "catching_up" — equivalent to "gap_detected"
+ *   "offline"     — equivalent to "desynced" (transport terminal)
+ *   "IDLE" | "CONNECTING" | "HEALTHY" | "GAP" | "REPLAYING" | "DESYNCED"
+ *                 — raw FSM SyncState values mirrored by useSyncOrchestrator
+ *
+ * UI consumers should use useSyncStatus() which normalises all values into
+ * UISyncStatus — never switch on this type directly.
+ */
 export type SyncStatus =
+  // ── Legacy values (boardRealtimeClient path) ─────────────────────────────
   | "healthy"
   | "gap_detected"
   | "reconnecting"
-  | "desynced";
+  | "desynced"
+  // ── FSM-derived values (reconcileIncomingEvent + useSyncOrchestrator) ────
+  | "synced"
+  | "catching_up"
+  | "offline"
+  // ── Raw FSM SyncState values (useSyncOrchestrator mirror path) ───────────
+  | "IDLE"
+  | "CONNECTING"
+  | "HEALTHY"
+  | "GAP"
+  | "REPLAYING"
+  | "DESYNCED"
+  | "RECONNECTING";
 
 // ============================================================================
 // 🌟 PURE STORE STATE — Phase 4 additions

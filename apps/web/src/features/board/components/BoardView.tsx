@@ -36,6 +36,7 @@ import {
   moveListAction,
   deleteCardAction,
 } from "../actions/board.actions";
+import { isActionFailure } from "../actions/responseTypes";
 
 import { useBoardStore } from "../store/useBoardStore";
 import { useSyncOrchestrator } from "../store/sync/useSyncOrchestrator";
@@ -540,7 +541,7 @@ export default function BoardView({
 
           // ── 4. createSafeAction wraps server failures in
           //    { success: false, code, message } — surface to user.
-          if (!result.success) {
+          if (isActionFailure(result)) {
             throw new Error(result.message);
           }
 
@@ -711,10 +712,7 @@ export default function BoardView({
               crypto.randomUUID(),
           });
 
-        if (
-          result &&
-          result.success === false
-        ) {
+        if (result && isActionFailure(result)) {
           throw new Error(result.message);
         }
       } catch {

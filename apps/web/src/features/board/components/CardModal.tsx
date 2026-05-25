@@ -20,6 +20,7 @@ import { toast } from "sonner";
 
 import { useBoardStore } from "../store/useBoardStore";
 import { updateCardAction } from "../actions/board.actions";
+import { isActionFailure } from "../actions/responseTypes";
 import { useCardModal } from "../hooks/useCardModal";
 
 // ============================================================================
@@ -150,7 +151,7 @@ function useFieldSync(
       // SafeAction Layer
       // ------------------------------------------------------------
 
-      if (!result.success) {
+      if (isActionFailure(result)) {
         if (
           result.message?.includes("CONFLICT")
         ) {
@@ -171,15 +172,27 @@ function useFieldSync(
       // ------------------------------------------------------------
       // Domain Layer
       // ------------------------------------------------------------
+      // Cast result.data to a flat structural type with every field
+      // optional. This avoids the discriminated-union narrowing path:
+      // under apps/web's relaxed tsconfig (strictNullChecks: false),
+      // TS refuses to narrow on either `result.data.success` or a
+      // local-const-bound discriminator, breaking the production build
+      // with
+      //   Property 'message' does not exist on type
+      //     '{ success: true; ... } | { success: false; ... }'.
+      // The flat shape with optional fields makes every access valid;
+      // the runtime check (!domainResult.success) still gates writes.
+      // Mirrors the BoardView.tsx pattern for moveListAction.
 
-      if (
-        result.data &&
-        typeof result.data === "object" &&
-        "success" in result.data &&
-        !result.data.success
-      ) {
+      const domainResult = result.data as {
+        success: boolean;
+        message?: string;
+        reason?: string;
+      };
+
+      if (!domainResult.success) {
         if (
-          result.data.reason ===
+          domainResult.reason ===
           "SYNC_CONFLICT"
         ) {
           setStatus("conflicted");
@@ -192,7 +205,7 @@ function useFieldSync(
         }
 
         throw new Error(
-          result.data.message ||
+          domainResult.message ||
             "Domain update failed."
         );
       }

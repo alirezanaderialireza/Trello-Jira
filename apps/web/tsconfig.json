@@ -17,7 +17,24 @@
       ]
     },
     "noImplicitAny": false,
-    "strictNullChecks": false
+    "strictNullChecks": false,
+
+    // apps/web is a Next.js application, not a publishable package, and
+    // never emits .d.ts. Inheriting composite + declaration from
+    // packages/config/typescript/base.json forces tsc to verify that
+    // every exported value's type is *portable* — nameable without
+    // referencing a deep sub-path of any dependency. That made the build
+    // fail every time a tRPC handler / Auth.js helper / replay-engine
+    // helper inferred a type that reached into a non-public node_modules
+    // path (next-auth/lib/types, @repo/api/src/routers/card, ...) — a
+    // moving target driven entirely by upstream package internals.
+    // Disabling composite + declaration here removes that portability
+    // requirement. The base flags still apply to every @repo/* package,
+    // so cross-package typing is unaffected.
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "incremental": false
   },
   "include": [
     "src",

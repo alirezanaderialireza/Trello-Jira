@@ -4,7 +4,7 @@
 // Reduces bandwidth and storage by transmitting only changed slices.
 
 import type { BoardStoreState, BoardSnapshot } from "../../useBoardStore";
-import { computeChecksumSync, type Checksum } from "../canonicalSerializer";
+import { computeChecksumSync, type Checksum } from "@/lib/integrity/canonicalSerializer";
 
 export interface CompactionResult {
   readonly delta: Partial<BoardSnapshot>;

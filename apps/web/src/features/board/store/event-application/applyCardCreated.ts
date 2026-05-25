@@ -38,8 +38,15 @@ export function applyCardCreated(
 ): Partial<BoardStoreState> {
   const { event } = envelope;
 
+  // boardId comes through the payload too — must be carried into newCard
+  // so the store entity satisfies CardDto (which has `boardId: string`
+  // as a required field). Without it the production type-check fails:
+  //   Property 'boardId' is missing in type
+  //     '{ id; listId; title; position; revision; isOptimistic }'
+  //   but required in type 'CardDto'.
   const {
     cardId,
+    boardId,
     listId,
     title,
     position,
@@ -76,6 +83,7 @@ export function applyCardCreated(
 
     id: cardId,
 
+    boardId,
     listId,
     title,
     position,

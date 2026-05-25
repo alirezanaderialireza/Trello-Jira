@@ -66,7 +66,7 @@ import { clientSyncFsm }       from "./clientSyncFsm";
 import { OutboxProcessor }     from "./outboxProcessor";
 import { tabCoordination }     from "./tabCoordination";
 import { useBoardStore }        from "../../store/useBoardStore";
-import { telemetry }            from "../../devtools/logEvent";
+import { telemetry }            from "@/lib/telemetry/logEvent";
 
 import type { ConnectionEvent, ConnectionMetrics } from "./connectionFsm";
 import type { SyncStateChangeEvent, ClientSyncState } from "./clientSyncFsm";

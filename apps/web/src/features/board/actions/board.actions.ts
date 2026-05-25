@@ -6,6 +6,13 @@
 // authenticated Auth.js session via `getWebSession()`, and constructs a tRPC
 // caller with that real session injected. There is no longer a hardcoded
 // dev-user fallback — unauthenticated callers get a proper UNAUTHORIZED error.
+//
+// ─── Why ActionResponse / type guards live in a sibling module ──────────────
+// `"use server"` makes EVERY export from this file a Server Action, and
+// Next.js requires Server Actions to be async functions. Sync helpers
+// (type aliases, type guards, etc.) therefore cannot live next to the
+// actions; they have been moved to ./responseTypes.ts and are re-imported
+// here purely as a type for the action factory's return signature.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { appRouter, createContext } from "@repo/api";
@@ -13,6 +20,7 @@ import { TRPCError, inferProcedureInput } from "@trpc/server";
 import superjson from "superjson";
 import { headers } from "next/headers";
 import { getWebSession } from "@/auth/getServerSession";
+import type { ActionResponse } from "./responseTypes";
 
 // ============================================================================
 // Inline Logger (until @repo/infrastructure exposes a browser-safe logger)
@@ -75,14 +83,6 @@ const getCaller = async (
 
   return appRouter.createCaller(ctx);
 };
-
-// ============================================================================
-// Action Response Types
-// ============================================================================
-
-type ActionResponse<T> =
-  | { success: true; data: T }
-  | { success: false; code: string; message: string; isRetryable: boolean };
 
 // ============================================================================
 // Retryable Codes
@@ -221,9 +221,22 @@ export async function getBoardData(
     const rawData = await trpc.v1.public.board.getFullBoard(input);
     return superjson.serialize(rawData).json as GetBoardOutput;
   } catch (error) {
+    // tRPC's `inferProcedureInput` widens GetBoardInput to
+    // `void | { id?: string; ... }` because board.getFullBoard accepts
+    // either an id+pagination object or no argument at all to fall back
+    // to the user's default board.
+    //
+    // With `strictNullChecks: false` in apps/web's tsconfig, optional
+    // chaining only filters `null | undefined`, not `void` — so
+    // `input?.id` still fails the type check on the void branch. We
+    // therefore narrow with a type assertion that strips `void` from the
+    // union before reading `.id`. Behaviour at runtime is unchanged
+    // (`void` values don't carry an `id` and yield `undefined` either way).
+    const inputForLog = input as Exclude<GetBoardInput, void> | undefined;
+
     logger.error({
       event: "ssr_board_fetch_failed",
-      boardId: input.id,
+      boardId: inputForLog?.id,
       error:
         isDev && error instanceof Error
           ? { message: error.message, stack: error.stack }

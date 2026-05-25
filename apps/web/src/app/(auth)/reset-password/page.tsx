@@ -9,13 +9,17 @@
 // Validation here mirrors the server-side rules so users get instant
 // feedback. The server is the source of truth — anything that slips past the
 // client check is rejected there too.
+//
+// ─── Suspense wrapper ───────────────────────────────────────────────────────
+// `useSearchParams()` can't be prerendered without a <Suspense> boundary in
+// Next 16. Inner component does the work, default export wraps it.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 
-export default function ResetPasswordPage() {
+function ResetPasswordForm() {
   const params = useSearchParams();
   const router = useRouter();
 
@@ -142,5 +146,26 @@ export default function ResetPasswordPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+// Shell rendered at build time. Matches the form's outer chrome so there's
+// no layout shift when the inner content hydrates on the client.
+function ResetPasswordFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-900">
+      <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 p-8 shadow-2xl">
+        <h1 className="text-2xl font-bold text-white text-center mb-6">تنظیم رمز عبور جدید</h1>
+        <div className="h-40" />
+      </div>
+    </div>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={<ResetPasswordFallback />}>
+      <ResetPasswordForm />
+    </Suspense>
   );
 }

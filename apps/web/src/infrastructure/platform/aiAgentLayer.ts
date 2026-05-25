@@ -2,7 +2,7 @@
 // AI agent orchestration — event-driven, sandboxed, rate-limited, auditable.
 
 import { eventBus, type BusEvent } from "./eventBus";
-import { telemetry } from "../../features/board/devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 export type AgentStatus = "idle" | "processing" | "disabled" | "error";
 

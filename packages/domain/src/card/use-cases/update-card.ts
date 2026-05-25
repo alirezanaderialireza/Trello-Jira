@@ -190,10 +190,17 @@ export async function updateCardUseCase<TTx>(
     // ----------------------------------------------------------------
     // 8. Save idempotency
     // ----------------------------------------------------------------
+    // Bug #1 fix: the response must reflect the NEW revision (post-save).
+    // Previously this returned `updatedCard.revision`, but `updatedCard`
+    // was constructed by spreading `card` (revision = N) without bumping;
+    // the OCC save in step 4 increments the row from N to N+1 in the DB.
+    // Returning N caused the next client mutation to send
+    // `expectedRevision: N` and trigger a spurious STALE_REVISION even
+    // though no real conflict had occurred.
     const response: UpdateCardResult = {
       success: true,
       cardId: card.id,
-      revision: updatedCard.revision,
+      revision: updatedCard.revision + 1,
     };
 
     // ✅ ارور ۱۳: mutationId branded

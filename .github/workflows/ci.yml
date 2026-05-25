@@ -27,7 +27,11 @@ jobs:
       # `packages/*` and the apps/web client; new violations block CI.
       - name: Architecture lint
         run: pnpm lint
-      # Typecheck backend packages (web excluded — tRPC v10/v11 mismatch)
+      # Typecheck backend packages
+      # apps/web stays excluded for now: the historic 142 tsc errors there
+      # are documented as "no regression from base" (PR #43) and a
+      # follow-up PR will drive that count to zero before promoting it
+      # into the CI matrix.
       - run: pnpm turbo typecheck --filter=@repo/db --filter=@repo/domain --filter=@repo/auth --filter=@repo/api --filter=@repo/infrastructure --filter=@repo/ws-server --filter=@repo/outbox-worker
       # Tests — domain + date engine (pre-existing chaos/property tests excluded)
       - name: Domain tests
@@ -42,3 +46,15 @@ jobs:
           DATABASE_URL: postgresql://trello:ci@localhost:5432/trello_test
           REDIS_URL: redis://localhost:6379
           JWT_SECRET: ci-secret
+      # Production build — restored after PR #41 aligned @trpc/server to v11.
+      # Validates that Next.js can compile apps/web end-to-end (server build,
+      # static optimisation, route trees) including the workspace packages
+      # listed under `transpilePackages` in next.config.mjs.
+      - name: Build
+        run: pnpm turbo build --filter=web
+        env:
+          DATABASE_URL: postgresql://trello:ci@localhost:5432/trello_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: ci-secret
+          NEXTAUTH_SECRET: ci-secret-for-build-only
+          AUTH_TRUST_HOST: "true"

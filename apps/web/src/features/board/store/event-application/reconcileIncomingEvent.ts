@@ -12,7 +12,7 @@ import type { BoardState } from "../useBoardStore";
 import type { WsEvent } from "../sync/syncContracts";
 import type { ClientEventEnvelope } from "./types";
 import { applyEvent as dispatcherApplyEvent } from "./dispatcher";
-import { telemetry } from "../../devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 import { validateAndMigrateEvent } from "../sync/eventSchemaVersioning";
 import { getSyncFSM } from "../sync/syncFSMSingleton";
 
@@ -112,12 +112,13 @@ export function reconcileIncomingEvent(
     const fsm = getSyncFSM();
     if (fsm) {
       if (isOverflow) {
-        fsm.send({ type: "GAP_UNRECOVERABLE" });
+        fsm.send({ type: "RESYNC_REQUIRED" });
       } else {
         fsm.send({
           type: "GAP_DETECTED",
           expectedSeq: String(currentSeq + 1n),
           receivedSeq: wsEvent.sequence,
+          bufferSize,
         });
       }
     }
@@ -213,7 +214,7 @@ export function reconcileIncomingEvent(
 
     // All buffered events drained → gap recovered
     if (Object.keys(nextBuffer).length === 0 && state.syncStatus === "catching_up") {
-      fsm?.send({ type: "GAP_RECOVERED" });
+      fsm?.send({ type: "GAP_FILLED" });
     }
   }
 

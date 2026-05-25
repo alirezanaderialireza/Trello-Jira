@@ -54,7 +54,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useBoardStore, type BoardStoreState } from "../../useBoardStore";
-import { telemetry } from "../../../devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 import type { Position } from "@repo/domain/ordering";
 import { PositionCollisionError } from "@repo/domain/ordering";
 

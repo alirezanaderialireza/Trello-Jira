@@ -44,7 +44,7 @@ import type {
 } from "@repo/domain";
 
 import type { BoardStoreState } from "../useBoardStore";
-import { telemetry } from "../../devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 import type { ClientEventEnvelope } from "./types";
 import type { ReducerContext } from "./context";

@@ -4,7 +4,7 @@
 // plugin hooks, and AI agent inputs flow through this single bus.
 
 import type { AppDomainEvent } from "@repo/domain";
-import { telemetry } from "../../features/board/devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 export type BusEventKind = "domain" | "automation" | "plugin" | "agent" | "system";
 

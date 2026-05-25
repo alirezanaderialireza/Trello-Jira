@@ -32,7 +32,11 @@ let running = true;
 function generateBalancedPositions(count: number): string[] {
   if (count === 0) return [];
   const step = Math.floor(BASE / (count + 1));
-  if (step <= 0) {
+  // Bug #12 alignment: also fall through to the multi-char strategy when
+  // step is exactly 1, otherwise the single-char output is already as
+  // dense as the input and the worker would re-rebalance the list on
+  // its very next scan.
+  if (step <= 1) {
     // Multi-character needed for very large lists
     const positions: string[] = [];
     for (let i = 0; i < count; i++) {

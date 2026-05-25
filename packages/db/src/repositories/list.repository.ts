@@ -1,6 +1,6 @@
 import { eq, and, isNull, desc, sql } from "drizzle-orm";
 import type { DbTx } from "./board.repository";
-import type { ListRepository, List } from "@repo/domain";
+import type { ListRepository, List, FindOptions } from "@repo/domain";
 import { lists, boards } from "../schema";
 
 export class DrizzleListRepository implements ListRepository<DbTx> {
@@ -9,16 +9,22 @@ export class DrizzleListRepository implements ListRepository<DbTx> {
   // ==========================================================================  
   // 📥 Find By ID (یکپارچه با پشتیبانی از Lock و Multi-Tenant)
   // ==========================================================================
-  async findById(id: string, options?: { tx?: DbTx; forUpdate?: boolean }): Promise<List | null> {
+  async findById(id: string, options?: FindOptions<DbTx>): Promise<List | null> {
     const runner = options?.tx ?? this.db;
+    const conditions = [eq(lists.id, id), isNull(lists.deletedAt)] as any[];
+
+    if (options?.tenantId) {
+      conditions.push(eq(lists.tenantId, options.tenantId));
+    }
+
     let query = runner
       .select()
       .from(lists)
-      .where(and(eq(lists.id, id), isNull(lists.deletedAt)))
-      .limit(1);
+      .where(and(...conditions))
+      .limit(1) as any;
 
-    if (options?.forUpdate && (runner as any).for) {
-      query = (query as any).for("update");
+    if (options?.forUpdate) {
+      query = query.for("update");
     }
 
     const result = await query;
@@ -50,8 +56,13 @@ export class DrizzleListRepository implements ListRepository<DbTx> {
     return result[0] ? this.mapToDomain(result[0] as any) : null;
   }
 
-  async create(tx: DbTx, list: List): Promise<void> {
-    await tx.insert(lists).values({
+  // ✅ Signature matches the ListRepository port: create(list, tx?).
+  // Previously this was (tx, list) which inverted the arguments and crashed
+  // at runtime because the caller passes (newList, tx) — `tx.insert(lists)`
+  // was being called on a List value rather than the Drizzle transaction.
+  async create(list: List, tx?: DbTx): Promise<void> {
+    const executor = tx ?? this.db;
+    await executor.insert(lists).values({
       id: list.id,
       tenantId: list.tenantId,
       boardId: list.boardId,

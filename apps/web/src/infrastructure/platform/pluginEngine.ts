@@ -2,7 +2,7 @@
 // Plugin registration, event subscriptions, sandboxed execution.
 
 import { eventBus, type BusEvent, type BusSubscriber } from "./eventBus";
-import { telemetry } from "../../features/board/devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 export type PluginStatus = "registered" | "active" | "disabled" | "error";
 

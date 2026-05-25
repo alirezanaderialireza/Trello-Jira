@@ -50,7 +50,7 @@
 //   board_closed        → idle
 // ============================================================================
 
-import { telemetry } from "../../devtools/logEvent";
+import { telemetry } from "@/lib/telemetry/logEvent";
 import type { SyncStatus } from "../../store/useBoardStore";
 
 // ============================================================================

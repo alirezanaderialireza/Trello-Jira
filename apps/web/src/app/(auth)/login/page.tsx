@@ -1,10 +1,29 @@
 "use client";
+// ─────────────────────────────────────────────────────────────────────────────
+// Login page.
+//
+// Reads `callbackUrl` from the URL via `useSearchParams()` so the user is
+// returned to wherever they were trying to reach before the redirect.
+//
+// ─── Why the default export is a Suspense wrapper ───────────────────────────
+// Next.js refuses to statically prerender a client component that calls
+// `useSearchParams()` at the top level:
+//
+//   ⨯ useSearchParams() should be wrapped in a suspense boundary at
+//     page "/login"
+//
+// `export const dynamic = "force-dynamic"` is *ignored* on a client
+// component in Next 16 + Turbopack — only segment-level files (layout.tsx /
+// route.ts) honour it. The idiomatic fix is to move the hook into an inner
+// component and wrap it in <Suspense>. Next then prerenders the fallback
+// at build time and resolves the params on the client.
+// ─────────────────────────────────────────────────────────────────────────────
 import { signIn } from "next-auth/react";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") || "/workspaces";
@@ -50,5 +69,26 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Shell rendered at build time. Matches the form's outer chrome so there's
+// no layout shift when the inner content hydrates on the client.
+function LoginFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-900">
+      <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 p-8 shadow-2xl">
+        <h1 className="text-2xl font-bold text-white text-center mb-6">ورود به Trello OS</h1>
+        <div className="h-40" />
+      </div>
+    </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginFallback />}>
+      <LoginForm />
+    </Suspense>
   );
 }

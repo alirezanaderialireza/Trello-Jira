@@ -7,12 +7,19 @@
 //      so the unsubscribe message is actually sent to the server
 //   3. Uses canonical WsEvent type from syncContracts
 //   4. Exposes getState() for useSyncOrchestrator effect handler
+//   5. Surfaces a `metrics` getter and `subscribe` method to keep the
+//      legacy BoardRealtimeClient (clientSyncFsm-based) compiling. That
+//      facade was the previous integration path and is still imported by
+//      useSyncStatus.ts / useOutboxProcessor.ts; until those switch to
+//      the SyncStateMachine path, this client must expose the surface
+//      they expect.
 
 import { useBoardStore } from "../../store/useBoardStore";
 import { getSyncFSM } from "../../store/sync/syncFSMSingleton";
 import type { WsEvent } from "../../store/sync/syncContracts";
 import type { RealtimeMessage, RealtimeRequest } from "./types";
-import { telemetry } from "../../devtools/logEvent";
+import type { ConnectionEvent, ConnectionMetrics, ConnectionState } from "./connectionFsm";
+import { telemetry } from "@/lib/telemetry/logEvent";
 
 class BoardSocketClient {
   private ws: WebSocket | null = null;
@@ -51,7 +58,7 @@ class BoardSocketClient {
     if (token) this.token = token;
 
     // Signal FSM — triggers CONNECT_WS effect (handled by useSyncOrchestrator)
-    getSyncFSM().send({ type: "BOARD_LOADED", boardId });
+    getSyncFSM().send({ type: "CONNECT_REQUESTED", boardId });
 
     telemetry.log("WS_INGRESS", "CONNECTING", { url: this.url, boardId });
 
@@ -88,11 +95,59 @@ class BoardSocketClient {
       telemetry.log("WS_INGRESS", "DISCONNECTED_BY_CLIENT", {});
     }
 
-    getSyncFSM().send({ type: "BOARD_UNLOADED" });
+    getSyncFSM().send({ type: "DISCONNECT_REQUESTED" });
   }
 
   public getReadyState(): number {
     return this.ws?.readyState ?? WebSocket.CLOSED;
+  }
+
+  // ==========================================================================
+  // Compatibility surface for the legacy BoardRealtimeClient facade
+  // ──────────────────────────────────────────────────────────────────────────
+  // BoardRealtimeClient (the older realtime façade still used by
+  // useSyncStatus / useOutboxProcessor) was written against an earlier
+  // version of this client that owned a `ConnectionFSM` instance and
+  // exposed:
+  //   - boardSocket.metrics     (ConnectionMetrics snapshot)
+  //   - boardSocket.subscribe() (callback for ConnectionEvent)
+  //
+  // The current client delegates connection-state to SyncStateMachine via
+  // getSyncFSM() instead, so those slots no longer exist on the canonical
+  // path. Re-creating the full ConnectionFSM is out of scope for the
+  // build-fix we are doing here — instead we surface the minimum slots
+  // BoardRealtimeClient touches with a derived snapshot for `metrics` and
+  // a no-op observer registration for `subscribe`. That keeps the
+  // legacy facade type-checking; runtime behaviour is unchanged because
+  // the SyncStateMachine path is the one BoardPage / useSyncOrchestrator
+  // actually use.
+  // ==========================================================================
+
+  public get metrics(): ConnectionMetrics {
+    return {
+      state:             this.deriveConnectionState(),
+      reconnectAttempts: this.reconnectAttempts,
+      epoch:             0,
+      latencyMs:         null,
+      lastPongAt:        null,
+      pingInFlight:      false,
+    };
+  }
+
+  public subscribe(_cb: (event: ConnectionEvent) => void): () => void {
+    // Intentionally inert. See class comment above. Returning a no-op
+    // unsubscribe ensures BoardRealtimeClient's _wireSubscriptions /
+    // _unwireSubscriptions lifecycle still works — its `_unsubTransport`
+    // is set, called on cleanup, and never leaks.
+    return () => undefined;
+  }
+
+  private deriveConnectionState(): ConnectionState {
+    const readyState = this.ws?.readyState ?? WebSocket.CLOSED;
+    if (readyState === WebSocket.OPEN) return "connected";
+    if (readyState === WebSocket.CONNECTING) return "connecting";
+    if (this.reconnectAttempts > 0) return "reconnecting";
+    return "idle";
   }
 
   // Called by useSyncOrchestrator when FSM emits CONNECT_WS effect
@@ -107,7 +162,11 @@ class BoardSocketClient {
         this.ws.onerror = this.handleError.bind(this);
       } catch (err: any) {
         telemetry.log("WS_INGRESS", "RECONNECT_CONSTRUCT_ERROR", { error: err.message });
-        getSyncFSM().send({ type: "WS_DISCONNECTED" });
+        // The WebSocket constructor failed — there's no real CloseEvent to
+        // forward, so synthesise a CLOSED with the standard "abnormal" code
+        // (1006). The FSM only uses code/reason for telemetry; the state
+        // transition is identical for any non-clean close.
+        getSyncFSM().send({ type: "WS_CLOSED", code: 1006, reason: "construct_error" });
       }
     }
   }
@@ -164,7 +223,10 @@ class BoardSocketClient {
         case "SYSTEM":
           if (message.meta?.reason === "SUBSCRIBED") {
             telemetry.log("WS_INGRESS", "SUBSCRIBED_ACK", { boardId: this.boardId });
-            getSyncFSM().send({ type: "SUBSCRIBED" });
+            // The new SyncStateMachine treats WS_CONNECTED + the first
+            // EVENT_RECEIVED as an implicit subscription — it has no
+            // dedicated SUBSCRIBED message. The telemetry log above is
+            // retained for ops dashboards.
           }
           break;
 
@@ -173,7 +235,7 @@ class BoardSocketClient {
           telemetry.log("WS_INGRESS", "FATAL_RESYNC_ORDERED", {
             reason: message.meta?.reason,
           });
-          getSyncFSM().send({ type: "GAP_UNRECOVERABLE" });
+          getSyncFSM().send({ type: "RESYNC_REQUIRED" });
           break;
       }
     } catch (error: any) {
@@ -194,7 +256,7 @@ class BoardSocketClient {
 
     // Signal FSM — it will schedule reconnect via effect handler
     getSyncFSM().send({
-      type: "WS_DISCONNECTED",
+      type: "WS_CLOSED",
       code: event.code,
       reason: event.reason,
     });
