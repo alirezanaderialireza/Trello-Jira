@@ -2,7 +2,15 @@
   "tasks": {
     "test": {
       "dependsOn": ["^test"],
-      "cache": true
+      "cache": true,
+      "env": [
+        "DATABASE_URL",
+        "REDIS_URL",
+        "JWT_SECRET",
+        "NEXTAUTH_SECRET",
+        "AUTH_TRUST_HOST",
+        "NODE_ENV"
+      ]
     },
     "typecheck": {
       "cache": true
@@ -13,7 +21,15 @@
     "build": {
       "dependsOn": ["^build"],
       "outputs": [".next/**", "!.next/cache/**", "dist/**"],
-      "cache": true
+      "cache": true,
+      "env": [
+        "DATABASE_URL",
+        "REDIS_URL",
+        "JWT_SECRET",
+        "NEXTAUTH_SECRET",
+        "AUTH_TRUST_HOST",
+        "NODE_ENV"
+      ]
     },
     "dev": {
       "cache": false,
