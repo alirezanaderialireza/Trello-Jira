@@ -1,6 +1,6 @@
 // packages/db/src/schema/users.ts
 
-import { pgTable, uuid, varchar, text, timestamp, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { pgTable, uuid, varchar, text, timestamp, jsonb, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const users = pgTable(
@@ -15,6 +15,14 @@ export const users = pgTable(
     locale: varchar("locale", { length: 10 }).notNull().default("fa"),
     timezone: varchar("timezone", { length: 64 }).notNull().default("Asia/Tehran"),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+
+    // Phase 1.1 (mig 0006) — profile + preferences. `preferences` shape is
+    // validated by domain-layer Zod (added in F2/F3); the DB CHECK only
+    // enforces that the value is a JSON object.
+    avatarUrl: text("avatar_url"),
+    bio: text("bio"),
+    preferences: jsonb("preferences").notNull().default(sql`'{}'::jsonb`),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
