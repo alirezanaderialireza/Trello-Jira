@@ -15,6 +15,12 @@ import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 
+// Disable static generation — reads `token` / `email` from the URL via
+// useSearchParams() which Next.js can't prerender without <Suspense>.
+// Auth pages should never be statically cached, so force-dynamic is the
+// correct semantics.
+export const dynamic = "force-dynamic";
+
 export default function ResetPasswordPage() {
   const params = useSearchParams();
   const router = useRouter();

@@ -4,6 +4,16 @@ import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Disable static generation. This page reads `callbackUrl` from the URL via
+// `useSearchParams()`, which Next.js refuses to statically prerender unless
+// the consuming component is wrapped in <Suspense>. Auth pages should never
+// be statically cached anyway — they branch on per-request URL params and on
+// session cookies. `force-dynamic` makes Next render at request time, which
+// is the correct semantics here and sidesteps the prerender pass.
+// ─────────────────────────────────────────────────────────────────────────────
+export const dynamic = "force-dynamic";
+
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();

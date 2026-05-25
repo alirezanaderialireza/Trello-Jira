@@ -12,6 +12,12 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+// Disable static generation — reads `token` from the URL via
+// useSearchParams() which Next.js can't prerender without <Suspense>.
+// Auth pages should never be statically cached, so force-dynamic is the
+// correct semantics.
+export const dynamic = "force-dynamic";
+
 type VerifyStatus = "idle" | "loading" | "success" | "alreadyVerified" | "error";
 
 export default function VerifyEmailPage() {
