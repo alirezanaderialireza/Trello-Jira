@@ -37,6 +37,7 @@
 //     For F3a.1 callers (single-tab create/update flows) this is fine.
 
 import type { Context } from "../trpc";
+import type { MutationId } from "@repo/domain";
 
 /**
  * Wrap a procedure body in an idempotency check.
@@ -60,9 +61,14 @@ export async function withIdempotency<T>(
     return body();
   }
 
+  // Cross the api → domain boundary: the public-facing input is a plain
+  // UUID string (Zod-validated), the domain port wants the `MutationId`
+  // branded type. The cast is the conventional spot for this conversion.
+  const branded = idempotencyKey as MutationId;
+
   const cached = await ctx.repos.idempotency.findByMutationId<T>(
     ctx.infra.db,
-    idempotencyKey,
+    branded,
   );
   if (cached) {
     return cached.response;
@@ -71,7 +77,7 @@ export async function withIdempotency<T>(
   const result = await body();
 
   await ctx.repos.idempotency.save<T>(ctx.infra.db, {
-    mutationId: idempotencyKey,
+    mutationId: branded,
     response: result,
     schemaVersion,
     createdAt: new Date(),

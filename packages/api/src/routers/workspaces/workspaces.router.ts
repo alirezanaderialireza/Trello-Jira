@@ -268,7 +268,7 @@ export const workspacesRouter = router({
           aggregateType: "workspace",
           type: "workspace.created",
           occurredAt: now,
-          correlationId: input.idempotencyKey ?? null,
+          correlationId: input.idempotencyKey ?? undefined,
           payload: {
             workspaceId: wsId,
             slug,
@@ -340,7 +340,7 @@ export const workspacesRouter = router({
           aggregateType: "workspace",
           type: "workspace.updated",
           occurredAt: new Date(),
-          correlationId: input.idempotencyKey ?? null,
+          correlationId: input.idempotencyKey ?? undefined,
           payload: {
             workspaceId: input.workspaceId,
             fieldsChanged,
@@ -376,7 +376,7 @@ export const workspacesRouter = router({
           aggregateType: "workspace",
           type: "workspace.background_changed",
           occurredAt: new Date(),
-          correlationId: input.idempotencyKey ?? null,
+          correlationId: input.idempotencyKey ?? undefined,
           payload: {
             workspaceId: input.workspaceId,
             changedBy: ctx.session.user.id,
@@ -430,7 +430,7 @@ export const workspacesRouter = router({
           aggregateType: "workspace",
           type: "workspace.visibility_changed",
           occurredAt: new Date(),
-          correlationId: input.idempotencyKey ?? null,
+          correlationId: input.idempotencyKey ?? undefined,
           payload: {
             workspaceId: input.workspaceId,
             from: previousVisibility,
@@ -498,7 +498,7 @@ export const workspacesRouter = router({
           aggregateType: "workspace",
           type: "workspace.soft_deleted",
           occurredAt: now,
-          correlationId: input.idempotencyKey ?? null,
+          correlationId: input.idempotencyKey ?? undefined,
           payload: {
             workspaceId: input.workspaceId,
             deletedAt: now.toISOString(),
@@ -575,7 +575,7 @@ export const workspacesRouter = router({
           aggregateType: "workspace",
           type: "workspace.restored",
           occurredAt: now,
-          correlationId: input.idempotencyKey ?? null,
+          correlationId: input.idempotencyKey ?? undefined,
           payload: {
             workspaceId: input.workspaceId,
             restoredAt: now.toISOString(),
