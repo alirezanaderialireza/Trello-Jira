@@ -102,7 +102,6 @@ const AssignableRoleSchema = z.enum(["ADMIN", "MEMBER", "VIEWER"]);
  * `loadWorkspaceMembership` helper, alongside the bug fixes flagged on
  * PR #50.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function requireMembership(
   ctx: any,
   workspaceId: string,
@@ -619,21 +618,16 @@ export const workspacesRouter = router({
           isNull(boardMembers.removedAt),
         ),
       });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const memberBoardIds = new Set(memberships.map((m: any) => m.boardId));
       const roleByBoard = new Map<string, string>(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         memberships.map((m: any) => [m.boardId, m.role]),
       );
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let visible = wsBoards.filter((b: any) => memberBoardIds.has(b.id));
       if (!input.includeArchived) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         visible = visible.filter((b: any) => !b.archivedAt);
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return visible.map((b: any) => ({
         id: b.id,
         title: b.title,

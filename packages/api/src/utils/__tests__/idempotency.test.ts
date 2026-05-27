@@ -35,7 +35,6 @@ function makeCtx(initial: FakeRecord[] = []) {
   const ctx = {
     repos: { idempotency: { findByMutationId, save } },
     infra: { db: { __tag: "fake-tx" } },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 
   return { ctx, store, findByMutationId, save };
