@@ -17,6 +17,11 @@ import { activityRouter } from "./routers/card-features/activity.router";
 // 🏢 Workspaces
 import { workspacesRouter } from "./routers/workspaces/workspaces.router";
 
+// 👤 User & Sidebar (F3b)
+import { userBoardMetadataRouter } from "./routers/userBoardMetadata.router";
+import { userProfileRouter } from "./routers/userProfile.router";
+import { sidebarRouter } from "./routers/sidebar.router";
+
 // ⚡ Realtime & Sync
 import { realtimeSyncRouter } from "./routers/realtime/sync.router";
 import { presenceRouter } from "./routers/realtime/presence.router";
@@ -51,6 +56,10 @@ export const appRouter = router({
       activity: activityRouter,
       // 🏢 Workspaces
       workspace: workspacesRouter,
+      // 👤 User & Sidebar (F3b)
+      userBoardMetadata: userBoardMetadataRouter,
+      userProfile: userProfileRouter,
+      sidebar: sidebarRouter,
     }),
 
     // ------------------------------------------------------------------------
