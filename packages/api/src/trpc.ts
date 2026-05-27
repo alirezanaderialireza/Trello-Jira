@@ -937,3 +937,45 @@ export const boardProtectedProcedure =
     .use(tenantGuard)
     .use(tenantContextMiddleware)
     .use(boardMemberGuard);
+
+// ============================================================================
+// 🚀 F2 — Authorization-aware Procedure Re-exports
+// ============================================================================
+//
+// These builders live in `./middleware/` and compose with the
+// `protectedProcedure` / `boardProtectedProcedure` defined above. Re-exporting
+// them here gives F3 routers a single import surface — `import {
+// workspaceMemberProcedure, boardAdminProcedure, ... } from "../trpc"` —
+// which mirrors the existing convention for `protectedProcedure` and keeps
+// the per-router import block one line.
+//
+// The circular shape (trpc.ts ↔ middleware/*) is benign here because the
+// re-export sits at the bottom of the file, AFTER every procedure builder
+// it depends on has been evaluated. ES module live-binding then resolves
+// the import in `middleware/*` at evaluation time without surprise.
+// ============================================================================
+
+export {
+  loadWorkspaceMembership,
+  requireWorkspaceManagerRole,
+  requireWorkspaceOwnerRole,
+  workspaceMemberProcedure,
+  workspaceAdminProcedure,
+  workspaceOwnerProcedure,
+} from "./middleware/workspaceRoleProcedures";
+
+export type { WorkspaceMembershipContext } from "./middleware/workspaceRoleProcedures";
+
+export {
+  requireBoardManagerRole,
+  boardMemberProcedure,
+  boardAdminProcedure,
+} from "./middleware/boardRoleProcedures";
+
+export {
+  assertWorkspaceWritable,
+  assertBoardWritable,
+  workspaceAdminWriteProcedure,
+  boardAdminWriteProcedure,
+  makeBoardAdminWriteProcedure,
+} from "./middleware/writeProcedures";
