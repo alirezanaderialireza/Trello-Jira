@@ -17,7 +17,6 @@ import { notArchived, notDeleted } from "../lib/softDeleteFilter";
 // Transaction Type
 // ============================================================================
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type DbTx = any;
 
 // ============================================================================
@@ -34,7 +33,6 @@ export type DbTx = any;
 // semi-join over the (tiny) workspaces table; cost is negligible.
 // ============================================================================
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function activeWorkspaceTenantsSubquery(db: any) {
   return db
     .select({ id: workspaces.id })

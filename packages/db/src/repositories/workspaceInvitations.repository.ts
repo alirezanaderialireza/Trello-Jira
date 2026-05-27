@@ -93,7 +93,6 @@ const DEFAULT_EXPIRES_IN_DAYS = 7;
 const MAX_TOKEN_RETRIES = 3;
 
 export class DrizzleWorkspaceInvitationsRepository {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(private readonly db: any) {}
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -112,7 +111,6 @@ export class DrizzleWorkspaceInvitationsRepository {
       invitedUserId?: string | null;
       expiresInDays?: number;
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tx?: any,
   ): Promise<WorkspaceInvitation> {
     const db = tx ?? this.db;
@@ -234,7 +232,6 @@ export class DrizzleWorkspaceInvitationsRepository {
   async revoke(
     invitationId: string,
     revokedByUserId: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tx?: any,
   ): Promise<void> {
     const db = tx ?? this.db;
@@ -264,7 +261,6 @@ export class DrizzleWorkspaceInvitationsRepository {
   async markAccepted(
     invitationId: string,
     acceptedByUserId: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tx?: any,
   ): Promise<void> {
     const db = tx ?? this.db;
