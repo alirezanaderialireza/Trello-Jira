@@ -154,3 +154,37 @@ export class InsufficientRoleError extends Error {
 export class PersonalWorkspaceCannotBeDeletedError extends Error {
   constructor() { super("PERSONAL_WORKSPACE_CANNOT_BE_DELETED"); this.name = "PersonalWorkspaceCannotBeDeletedError"; }
 }
+
+// ── Lifecycle Errors (F3a.1) ────────────────────────────────────────────────
+//
+// These mirror the `SoftDeleteWorkspaceFailureReason` /
+// `RestoreWorkspaceFailureReason` discriminants in the use-cases, but are
+// available as throwable errors for places that prefer try/catch over
+// Result-types (e.g. service-role connection paths that bridge to
+// procedural code).
+
+export class WorkspaceAlreadyDeletedError extends Error {
+  constructor(workspaceId: string) {
+    super(`WORKSPACE_ALREADY_DELETED: ${workspaceId}`);
+    this.name = "WorkspaceAlreadyDeletedError";
+  }
+}
+
+export class WorkspaceNotDeletedError extends Error {
+  constructor(workspaceId: string) {
+    super(`WORKSPACE_NOT_DELETED: ${workspaceId}`);
+    this.name = "WorkspaceNotDeletedError";
+  }
+}
+
+export class WorkspaceRestoreWindowExpiredError extends Error {
+  constructor(workspaceId: string) {
+    super(`WORKSPACE_RESTORE_WINDOW_EXPIRED: ${workspaceId}`);
+    this.name = "WorkspaceRestoreWindowExpiredError";
+  }
+}
+
+// ── Re-exports: Use Cases ───────────────────────────────────────────────────
+
+export * from "./use-cases/softDeleteWorkspace";
+export * from "./use-cases/restoreWorkspace";
