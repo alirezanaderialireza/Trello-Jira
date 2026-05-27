@@ -57,7 +57,6 @@ export function requireBoardManagerRole(role: string | undefined): void {
 
 export const boardAdminProcedure = boardProtectedProcedure.use(
   async ({ ctx, next }) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const role = (ctx as any).boardMembership?.role as string | undefined;
     requireBoardManagerRole(role);
     return next();

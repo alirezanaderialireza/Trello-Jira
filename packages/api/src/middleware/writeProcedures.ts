@@ -98,7 +98,6 @@ export function assertBoardWritable(
 
 export const workspaceAdminWriteProcedure = workspaceAdminProcedure.use(
   async ({ ctx, next }) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const workspaceId = (ctx as any).workspaceMembership.workspaceId as string;
     const ws = await ctx.infra.db.query.workspaces.findFirst({
       where: eq(workspaces.id, workspaceId),
@@ -123,7 +122,6 @@ export function makeBoardAdminWriteProcedure(
   opts: { allowArchived?: boolean } = {},
 ) {
   return boardAdminProcedure.use(async ({ ctx, next }) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const boardId = (ctx as any).boardMembership.boardId as string;
     const board = await ctx.infra.db.query.boards.findFirst({
       where: eq(boards.id, boardId),

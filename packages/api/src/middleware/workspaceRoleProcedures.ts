@@ -50,7 +50,6 @@ export interface WorkspaceMembershipContext {
  * public surface — F3 routers should use the builders below.
  */
 export async function loadWorkspaceMembership(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ctx: any,
   getRawInput: () => Promise<unknown>,
 ): Promise<WorkspaceMembershipContext> {
