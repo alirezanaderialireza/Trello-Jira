@@ -1,6 +1,6 @@
 // packages/db/src/repositories/board.repository.ts
 
-import { eq, and, isNull, sql } from "drizzle-orm";
+import { eq, and, inArray, sql } from "drizzle-orm";
 import type {
   BoardRepository,
   Board,
@@ -9,13 +9,36 @@ import type {
   Revision,
   FindOptions,
 } from "@repo/domain";
-import { boards } from "../schema";
+import { boards, workspaces } from "../schema";
+import type { BoardVisibility } from "../schema/boards";
+import { notArchived, notDeleted } from "../lib/softDeleteFilter";
 
 // ============================================================================
 // Transaction Type
 // ============================================================================
 
 export type DbTx = any;
+
+// ============================================================================
+// D8 — cascade-filter helper
+//
+// A board whose parent workspace was soft-deleted must vanish from every
+// read path even though `boards.deleted_at` is still NULL. Doing this at
+// the DB layer (instead of relying on every router to remember) means the
+// rule cannot be forgotten by a future feature.
+//
+// We express it as a `tenant_id IN (SELECT id FROM workspaces WHERE
+// deleted_at IS NULL)` predicate so the SELECT shape is unchanged — no JOIN
+// reshape, no `mapToDomain` rewrite. PostgreSQL plans this as a hash
+// semi-join over the (tiny) workspaces table; cost is negligible.
+// ============================================================================
+
+function activeWorkspaceTenantsSubquery(db: any) {
+  return db
+    .select({ id: workspaces.id })
+    .from(workspaces)
+    .where(notDeleted(workspaces));
+}
 
 // ============================================================================
 // DrizzleBoardRepository
@@ -25,7 +48,8 @@ export class DrizzleBoardRepository implements BoardRepository<DbTx> {
   constructor(private readonly db: DbTx) {}
 
   // ==========================================================================
-  // findById — Tenant-safe, Soft Delete-aware
+  // findById — Tenant-safe, soft-delete-aware, archived-aware (opt-in),
+  //            cascade-aware (D8).
   // ==========================================================================
 
   async findById(
@@ -33,13 +57,17 @@ export class DrizzleBoardRepository implements BoardRepository<DbTx> {
     options?: FindOptions<DbTx>,
   ): Promise<Board | null> {
     const db = options?.tx ?? this.db;
-    const conditions = [eq(boards.id, id), isNull(boards.deletedAt)];
+    const conditions = [
+      eq(boards.id, id),
+      notDeleted(boards),
+      // D8 — if the parent workspace was soft-deleted, hide the board.
+      inArray(boards.tenantId, activeWorkspaceTenantsSubquery(db)),
+    ];
 
     if (options?.tenantId) {
       conditions.push(eq(boards.tenantId, options.tenantId));
     }
 
-    // ✅ FOR UPDATE — از FindOptions.forUpdate می‌خوانیم نه متد جداگانه
     const query = db
       .select()
       .from(boards)
@@ -55,8 +83,7 @@ export class DrizzleBoardRepository implements BoardRepository<DbTx> {
   }
 
   // ==========================================================================
-  // create — ✅ fix: امضا با interface هماهنگ شد: create(board, tx?)
-  // قبلاً: create(tx, board) — برعکس interface بود
+  // create — interface-aligned (board, tx?)
   // ==========================================================================
 
   async create(board: Board, tx?: DbTx): Promise<void> {
@@ -76,9 +103,7 @@ export class DrizzleBoardRepository implements BoardRepository<DbTx> {
   }
 
   // ==========================================================================
-  // save — OCC-safe
-  // ✅ fix: expectedRevision حذف شد — interface این پارامتر را ندارد
-  // OCC از طریق WHERE clause روی revision انجام می‌شود اگر board.revision تغییر کرده باشد
+  // save — OCC-safe (legacy DbTx-first signature)
   // ==========================================================================
 
   async save(tx: DbTx, board: Board): Promise<void> {
@@ -91,11 +116,11 @@ export class DrizzleBoardRepository implements BoardRepository<DbTx> {
         archivedAt: board.archivedAt ?? null,
         updatedAt: new Date(),
       })
-      .where(and(eq(boards.id, board.id), isNull(boards.deletedAt)));
+      .where(and(eq(boards.id, board.id), notDeleted(boards)));
   }
 
   // ==========================================================================
-  // incrementRevision — Atomic, returns new revision
+  // incrementRevision — atomic, returns new revision
   // ==========================================================================
 
   async incrementRevision(tx: DbTx, boardId: BoardId): Promise<number> {
@@ -105,7 +130,7 @@ export class DrizzleBoardRepository implements BoardRepository<DbTx> {
         revision: sql`${boards.revision} + 1`,
         updatedAt: new Date(),
       })
-      .where(and(eq(boards.id, boardId), isNull(boards.deletedAt)))
+      .where(and(eq(boards.id, boardId), notDeleted(boards)))
       .returning({ revision: boards.revision });
 
     if (!result.length) {
@@ -113,6 +138,76 @@ export class DrizzleBoardRepository implements BoardRepository<DbTx> {
     }
 
     return result[0].revision as number;
+  }
+
+  // ==========================================================================
+  // Phase 1.1 (F1) lifecycle helpers
+  //
+  // archive  → hide from sidebar/listing, keep readable on direct URL.
+  // unarchive→ inverse.
+  // softDelete → enter the 30-day grace window; sidebar invalidates.
+  // restore  → exit the grace window.
+  // setBackground / updateVisibility → settings drawer write paths.
+  //
+  // All four lifecycle setters intentionally do NOT join workspaces — a
+  // soft-deleted workspace's boards are never updated again. The cascade
+  // filter is for read paths only.
+  // ==========================================================================
+
+  async archive(id: BoardId, tx?: DbTx): Promise<void> {
+    const db = tx ?? this.db;
+    await db
+      .update(boards)
+      .set({ archivedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(boards.id, id), notDeleted(boards)));
+  }
+
+  async unarchive(id: BoardId, tx?: DbTx): Promise<void> {
+    const db = tx ?? this.db;
+    await db
+      .update(boards)
+      .set({ archivedAt: null, updatedAt: new Date() })
+      .where(and(eq(boards.id, id), notDeleted(boards)));
+  }
+
+  async softDelete(id: BoardId, tx?: DbTx): Promise<void> {
+    const db = tx ?? this.db;
+    await db
+      .update(boards)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(eq(boards.id, id));
+  }
+
+  async restore(id: BoardId, tx?: DbTx): Promise<void> {
+    const db = tx ?? this.db;
+    await db
+      .update(boards)
+      .set({ deletedAt: null, updatedAt: new Date() })
+      .where(eq(boards.id, id));
+  }
+
+  async setBackground(
+    id: BoardId,
+    data: Record<string, unknown> | null,
+    tx?: DbTx,
+  ): Promise<void> {
+    const db = tx ?? this.db;
+    await db
+      .update(boards)
+      .set({ backgroundData: data, updatedAt: new Date() })
+      .where(and(eq(boards.id, id), notDeleted(boards)));
+  }
+
+  async updateVisibility(
+    id: BoardId,
+    visibility: BoardVisibility,
+    tx?: DbTx,
+  ): Promise<void> {
+    const db = tx ?? this.db;
+    await db
+      .update(boards)
+      .set({ visibility, updatedAt: new Date() })
+      .where(and(eq(boards.id, id), notDeleted(boards)));
   }
 
   // ==========================================================================
@@ -133,3 +228,8 @@ export class DrizzleBoardRepository implements BoardRepository<DbTx> {
     };
   }
 }
+
+// Re-export so callers that compose `notArchived(boards)` outside the
+// repository (e.g. router list handlers in F3) can use the same helper
+// without importing from two places.
+export { notArchived };

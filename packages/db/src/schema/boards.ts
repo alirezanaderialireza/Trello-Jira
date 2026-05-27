@@ -4,12 +4,24 @@ import {
   pgTable,
   uuid,
   text,
+  varchar,
   integer,
   timestamp,
+  jsonb,
   index,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { workspaces } from "./workspaces";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `visibility` mirrors the CHECK constraint added in migration
+// 0006_phase11_shell_foundation.sql.  Keep the literal union and the SQL
+// CHECK in sync.
+//   workspace = visible to every workspace member
+//   private   = only board members
+//   public    = anyone with the link (future use)
+// ─────────────────────────────────────────────────────────────────────────────
+export type BoardVisibility = "workspace" | "private" | "public";
 
 export const boards = pgTable(
   "boards",
@@ -53,6 +65,16 @@ export const boards = pgTable(
     currentSequence: integer("current_sequence")
       .notNull()
       .default(0),
+
+    // =========================================================================
+    // 🔹 Phase 1.1 (mig 0006) — UX columns
+    // =========================================================================
+    description: text("description"),
+    visibility: varchar("visibility", { length: 10 })
+      .$type<BoardVisibility>()
+      .notNull()
+      .default("workspace"),
+    backgroundData: jsonb("background_data"),
 
     // =========================================================================
     // 🔹 Lifecycle

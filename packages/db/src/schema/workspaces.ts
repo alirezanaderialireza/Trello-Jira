@@ -1,8 +1,15 @@
 // packages/db/src/schema/workspaces.ts
 
-import { pgTable, uuid, varchar, integer, timestamp, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { pgTable, uuid, varchar, text, integer, timestamp, jsonb, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { users } from "./users";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `visibility` mirrors the CHECK constraint added in migration
+// 0006_phase11_shell_foundation.sql. Keep the literal union and the SQL
+// CHECK in sync.
+// ─────────────────────────────────────────────────────────────────────────────
+export type WorkspaceVisibility = "private" | "public";
 
 export const workspaces = pgTable(
   "workspaces",
@@ -14,6 +21,15 @@ export const workspaces = pgTable(
     ownerId: uuid("owner_id").references(() => users.id, { onDelete: "restrict" }).notNull(),
     personalForUserId: uuid("personal_for_user_id").references(() => users.id, { onDelete: "cascade" }),
     revision: integer("revision").notNull().default(1),
+
+    // Phase 1.1 (mig 0006) — UX columns
+    description: text("description"),
+    visibility: varchar("visibility", { length: 10 })
+      .$type<WorkspaceVisibility>()
+      .notNull()
+      .default("private"),
+    backgroundData: jsonb("background_data"),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),

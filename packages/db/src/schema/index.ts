@@ -14,5 +14,7 @@ export * from "./comments";
 export * from "./users";
 export * from "./workspaces";
 export * from "./workspaceMembers";
+export * from "./workspaceInvitations";
+export * from "./userBoardMetadata";
 export * from "./authTables";
 export * from "./sessions";

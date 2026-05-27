@@ -43,6 +43,13 @@
       "when": 1779373000000,
       "tag": "0005_outbox_retry_count",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779374000000,
+      "tag": "0006_phase11_shell_foundation",
+      "breakpoints": true
     }
   ]
 }
