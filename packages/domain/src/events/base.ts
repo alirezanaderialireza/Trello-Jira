@@ -62,7 +62,15 @@ export type DomainEventType =
   | "workspace.soft_deleted"
   | "workspace.restored"
   | "workspace.background_changed"
-  | "workspace.visibility_changed";
+  | "workspace.visibility_changed"
+  // ── Workspace.Member (F3a.2) ────────────────────────────────────────────
+  // Sub-resource events still live under aggregateType "workspace" (the
+  // membership row IS a workspace fact); only the type literal carries the
+  // sub-resource hierarchy.
+  | "workspace.member.role_updated"
+  | "workspace.member.removed"
+  | "workspace.member.left"
+  | "workspace.member.ownership_transferred";
 
 export type AggregateType =
   | "board"
