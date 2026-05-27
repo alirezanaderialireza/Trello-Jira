@@ -39,8 +39,8 @@ export interface BoardUnarchivedEvent extends DomainEvent<"board.unarchived", Bo
 
 export interface BoardVisibilityChangedPayload {
   readonly boardId: string;
-  readonly from: "PUBLIC" | "PRIVATE" | "TEAM";
-  readonly to: "PUBLIC" | "PRIVATE" | "TEAM";
+  readonly from: "workspace" | "private" | "public";
+  readonly to: "workspace" | "private" | "public";
   readonly changedBy: string;
 }
 export interface BoardVisibilityChangedEvent
