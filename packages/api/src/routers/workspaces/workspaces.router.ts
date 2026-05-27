@@ -19,12 +19,12 @@
 //
 // Procedures still using the legacy `requireMembership` helper:
 //
-//     listBoards, inviteMember, updateMemberRole, removeMember,
-//     transferOwnership
+//     listBoards, inviteMember
 //
-// — those land in F3a.2 (members router) and F3a.3 (invitations router)
-// where they will be refactored alongside the bug-fixes flagged on PR #50
-// (transferOwnership tx wrap, removeMember last-owner race).
+// — `listBoards` lands in F3b (board-level router); `inviteMember` is
+// deprecated by F3a.3 in favour of the email/token-based invitations
+// flow. Members lifecycle (updateRole / remove / leave / transferOwnership)
+// has moved to the F3a.2 sub-router below — see `./members.router.ts`.
 //
 // Type-safety contract:
 //   • Roles come from `WORKSPACE_ROLES` (single source of truth — domain).
@@ -61,6 +61,8 @@ import {
   type WorkspaceRole,
   type WorkspaceSlug,
 } from "@repo/domain/workspaces";
+
+import { workspaceMembersRouter } from "./members.router";
 
 // ─── Shared schemas ─────────────────────────────────────────────────────────
 
@@ -130,6 +132,14 @@ async function requireMembership(
 // ─── Router ─────────────────────────────────────────────────────────────────
 
 export const workspacesRouter = router({
+  // ── F3a.2: workspace members sub-router ───────────────────────────────────
+  //
+  // Mounted as `v1.public.workspace.members.*`. See ./members.router.ts
+  // for the five procedures (list / updateRole / remove / leave /
+  // transferOwnership) and the row-lock-based fixes for the PR #50
+  // bugs in the legacy implementation.
+  members: workspaceMembersRouter,
+
   // ── F3a.1: list workspaces the caller belongs to ──────────────────────────
   //
   // Refactored to use `repo.listForUser()` (single round-trip with counts)
@@ -588,11 +598,11 @@ export const workspacesRouter = router({
     }),
 
   // ════════════════════════════════════════════════════════════════════════
-  // BELOW: legacy procedures (out of F3a.1 scope, refactored in F3a.2/F3a.3)
+  // BELOW: legacy procedures (out of F3a scope, refactored in later sub-PRs)
   // ════════════════════════════════════════════════════════════════════════
 
   // ── list boards in a workspace the caller can see ─────────────────────────
-  // F3b will move this to a board-level router. F3a.1 leaves it untouched.
+  // F3b will move this to a board-level router. F3a.x leaves it untouched.
   listBoards: protectedProcedure
     .input(z.object({ workspaceId: IdSchema, includeArchived: z.boolean().default(false) }))
     .query(async ({ input, ctx }) => {
@@ -672,149 +682,6 @@ export const workspacesRouter = router({
         invitedBy: ctx.session.user.id,
       });
       return { success: true, alreadyMember: false };
-    }),
-
-  // ── update a member's role (F3a.2 will refactor) ──────────────────────────
-  updateMemberRole: protectedProcedure
-    .input(
-      z.object({
-        workspaceId: IdSchema,
-        userId: IdSchema,
-        role: AssignableRoleSchema,
-      }),
-    )
-    .mutation(async ({ input, ctx }) => {
-      const { role: callerRole } = await requireMembership(ctx, input.workspaceId);
-      if (!canManageMembers(callerRole)) {
-        throw new TRPCError({ code: "FORBIDDEN" });
-      }
-
-      const target = await ctx.infra.db.query.workspaceMembers.findFirst({
-        where: and(
-          eq(workspaceMembers.workspaceId, input.workspaceId),
-          eq(workspaceMembers.userId, input.userId),
-        ),
-      });
-      if (!target) throw new TRPCError({ code: "NOT_FOUND" });
-
-      if (target.role === "OWNER") {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message:
-            "Cannot demote an OWNER. Use transferOwnership to hand the role off first.",
-        });
-      }
-
-      await ctx.infra.db
-        .update(workspaceMembers)
-        .set({ role: input.role })
-        .where(
-          and(
-            eq(workspaceMembers.workspaceId, input.workspaceId),
-            eq(workspaceMembers.userId, input.userId),
-          ),
-        );
-      return { success: true };
-    }),
-
-  // ── remove a member (F3a.2 will refactor + fix last-owner race) ───────────
-  removeMember: protectedProcedure
-    .input(z.object({ workspaceId: IdSchema, userId: IdSchema }))
-    .mutation(async ({ input, ctx }) => {
-      const { role: callerRole } = await requireMembership(ctx, input.workspaceId);
-      if (!canManageMembers(callerRole)) {
-        throw new TRPCError({ code: "FORBIDDEN" });
-      }
-
-      const target = await ctx.infra.db.query.workspaceMembers.findFirst({
-        where: and(
-          eq(workspaceMembers.workspaceId, input.workspaceId),
-          eq(workspaceMembers.userId, input.userId),
-        ),
-      });
-      if (!target) throw new TRPCError({ code: "NOT_FOUND" });
-
-      if (target.role === "OWNER") {
-        const owners = await ctx.infra.db.query.workspaceMembers.findMany({
-          where: and(
-            eq(workspaceMembers.workspaceId, input.workspaceId),
-            eq(workspaceMembers.role, "OWNER"),
-          ),
-        });
-        if (owners.length <= 1) {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "Cannot remove the last owner.",
-          });
-        }
-      }
-
-      await ctx.infra.db
-        .delete(workspaceMembers)
-        .where(
-          and(
-            eq(workspaceMembers.workspaceId, input.workspaceId),
-            eq(workspaceMembers.userId, input.userId),
-          ),
-        );
-      return { success: true };
-    }),
-
-  // ── transfer ownership (F3a.2 will refactor + wrap in tx) ─────────────────
-  transferOwnership: protectedProcedure
-    .input(z.object({ workspaceId: IdSchema, newOwnerId: IdSchema }))
-    .mutation(async ({ input, ctx }) => {
-      const { role: callerRole } = await requireMembership(ctx, input.workspaceId);
-      if (callerRole !== "OWNER") {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only the current owner can transfer ownership.",
-        });
-      }
-      if (input.newOwnerId === ctx.session.user.id) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Cannot transfer ownership to yourself.",
-        });
-      }
-
-      const newOwnerMembership =
-        await ctx.infra.db.query.workspaceMembers.findFirst({
-          where: and(
-            eq(workspaceMembers.workspaceId, input.workspaceId),
-            eq(workspaceMembers.userId, input.newOwnerId),
-          ),
-        });
-      if (!newOwnerMembership) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "The new owner must already be a member of the workspace.",
-        });
-      }
-
-      await ctx.infra.db
-        .update(workspaceMembers)
-        .set({ role: "OWNER" satisfies WorkspaceRole })
-        .where(
-          and(
-            eq(workspaceMembers.workspaceId, input.workspaceId),
-            eq(workspaceMembers.userId, input.newOwnerId),
-          ),
-        );
-      await ctx.infra.db
-        .update(workspaceMembers)
-        .set({ role: "ADMIN" satisfies WorkspaceRole })
-        .where(
-          and(
-            eq(workspaceMembers.workspaceId, input.workspaceId),
-            eq(workspaceMembers.userId, ctx.session.user.id),
-          ),
-        );
-      await ctx.infra.db
-        .update(workspaces)
-        .set({ ownerId: input.newOwnerId, updatedAt: new Date() })
-        .where(eq(workspaces.id, input.workspaceId));
-      return { success: true };
     }),
 });
 
