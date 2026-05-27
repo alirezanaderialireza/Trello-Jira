@@ -51,7 +51,18 @@ export type DomainEventType =
   | "template.deleted"
   | "template.applied"
   // ── Activity (internal projection event) ────────────────────────────────
-  | "activity.recorded";
+  | "activity.recorded"
+  // ── Workspace (F3a.1) ───────────────────────────────────────────────────
+  // Convention: `workspace.<verb>` for the workspace aggregate itself,
+  // `workspace.<sub>.<verb>` for sub-resources (member, invitation) — see
+  // F3a.2/F3a.3. Multi-word verbs use snake_case to match the existing
+  // event-type style (e.g. `board.visibility_changed`).
+  | "workspace.created"
+  | "workspace.updated"
+  | "workspace.soft_deleted"
+  | "workspace.restored"
+  | "workspace.background_changed"
+  | "workspace.visibility_changed";
 
 export type AggregateType =
   | "board"
@@ -62,7 +73,8 @@ export type AggregateType =
   | "comment"
   | "attachment"
   | "template"
-  | "activity";
+  | "activity"
+  | "workspace";
 
 /**
  * ------------------------------------------------------------------

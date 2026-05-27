@@ -17,6 +17,7 @@ export * from "./checklist.events";
 export * from "./comment.events";
 export * from "./attachment.events";
 export * from "./template.events";
+export * from "./workspace.events";
 
 import type { CardEvent }       from "./card.events";
 import type { ListEvent }       from "./list.events";
@@ -26,6 +27,7 @@ import type { ChecklistEvent }  from "./checklist.events";
 import type { CommentEvent }    from "./comment.events";
 import type { AttachmentEvent } from "./attachment.events";
 import type { TemplateEvent }   from "./template.events";
+import type { WorkspaceEvent }  from "./workspace.events";
 
 /**
  * ------------------------------------------------------------------
@@ -42,4 +44,5 @@ export type AppDomainEvent =
   | ChecklistEvent
   | CommentEvent
   | AttachmentEvent
-  | TemplateEvent;
+  | TemplateEvent
+  | WorkspaceEvent;
