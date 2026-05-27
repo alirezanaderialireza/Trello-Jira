@@ -45,7 +45,6 @@ export class DrizzleUserBoardMetadataRepository {
   // Drizzle types are deeply generic and pull node_modules into every
   // consumer's typecheck graph. Every other repository in this package
   // does the same.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(private readonly db: any) {}
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -64,7 +63,6 @@ export class DrizzleUserBoardMetadataRepository {
       tenantId: string;
       isStarred: boolean;
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tx?: any,
   ): Promise<void> {
     const db = tx ?? this.db;
@@ -102,7 +100,6 @@ export class DrizzleUserBoardMetadataRepository {
       boardId: string;
       tenantId: string;
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tx?: any,
   ): Promise<void> {
     const db = tx ?? this.db;

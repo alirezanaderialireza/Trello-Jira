@@ -36,7 +36,6 @@ export type WorkspaceDetail = {
 };
 
 export class DrizzleWorkspaceRepository implements WorkspaceRepository {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(private readonly db: any) {}
 
   async findById(id: string): Promise<WorkspaceEntity | null> {
@@ -57,7 +56,6 @@ export class DrizzleWorkspaceRepository implements WorkspaceRepository {
     return rows[0] ? this.mapWs(rows[0]) : null;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async create(ws: WorkspaceEntity, tx?: any): Promise<void> {
     const db = tx ?? this.db;
     await db.insert(workspaces).values({
@@ -67,7 +65,6 @@ export class DrizzleWorkspaceRepository implements WorkspaceRepository {
     });
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async update(ws: WorkspaceEntity, tx?: any): Promise<void> {
     const db = tx ?? this.db;
     await db.update(workspaces).set({
@@ -223,7 +220,6 @@ export class DrizzleWorkspaceRepository implements WorkspaceRepository {
   async updateMetadata(
     id: string,
     fields: Partial<{ name: string; description: string | null; slug: string }>,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tx?: any,
   ): Promise<void> {
     const db = tx ?? this.db;
@@ -237,7 +233,6 @@ export class DrizzleWorkspaceRepository implements WorkspaceRepository {
       .where(and(eq(workspaces.id, id), notDeleted(workspaces)));
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async addMember(member: WorkspaceMemberEntity, tx?: any): Promise<void> {
     const db = tx ?? this.db;
     await db.insert(workspaceMembers).values({
@@ -246,13 +241,11 @@ export class DrizzleWorkspaceRepository implements WorkspaceRepository {
     });
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async removeMember(workspaceId: string, userId: string, tx?: any): Promise<void> {
     const db = tx ?? this.db;
     await db.delete(workspaceMembers).where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)));
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async updateMemberRole(workspaceId: string, userId: string, role: WorkspaceRole, tx?: any): Promise<void> {
     const db = tx ?? this.db;
     await db.update(workspaceMembers).set({ role }).where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)));
@@ -268,7 +261,6 @@ export class DrizzleWorkspaceRepository implements WorkspaceRepository {
    * the 30-day grace window because the janitor reads
    * `deleted_at < now() - interval '30 days'`.
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async softDelete(id: string, tx?: any): Promise<void> {
     const db = tx ?? this.db;
     await db
@@ -281,7 +273,6 @@ export class DrizzleWorkspaceRepository implements WorkspaceRepository {
    * Restore a soft-deleted workspace. Caller is responsible for enforcing
    * the 30-day undo window — this method just clears `deleted_at`.
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async restore(id: string, tx?: any): Promise<void> {
     const db = tx ?? this.db;
     await db
@@ -298,7 +289,6 @@ export class DrizzleWorkspaceRepository implements WorkspaceRepository {
   async setBackground(
     id: string,
     data: Record<string, unknown> | null,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tx?: any,
   ): Promise<void> {
     const db = tx ?? this.db;
@@ -315,7 +305,6 @@ export class DrizzleWorkspaceRepository implements WorkspaceRepository {
   async updateVisibility(
     id: string,
     visibility: WorkspaceVisibility,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tx?: any,
   ): Promise<void> {
     const db = tx ?? this.db;
@@ -325,7 +314,6 @@ export class DrizzleWorkspaceRepository implements WorkspaceRepository {
       .where(and(eq(workspaces.id, id), notDeleted(workspaces)));
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private mapWs(row: any): WorkspaceEntity {
     return {
       id: row.id,
@@ -341,7 +329,6 @@ export class DrizzleWorkspaceRepository implements WorkspaceRepository {
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private mapMember(row: any): WorkspaceMemberEntity {
     return {
       workspaceId: row.workspaceId,
