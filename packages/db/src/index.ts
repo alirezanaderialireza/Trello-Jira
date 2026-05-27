@@ -20,6 +20,7 @@ import { DrizzleIdempotencyRepository } from "./repositories/idempotency.reposit
 import { DrizzleSequenceRepository } from "./repositories/sequence.repository";
 import { DrizzleWorkspaceRepository } from "./repositories/workspaces.repository";
 import { DrizzleWorkspaceInvitationsRepository } from "./repositories/workspaceInvitations.repository";
+import { DrizzleUserBoardMetadataRepository } from "./repositories/userBoardMetadata.repository";
 
 import { BoardReadModels } from "./projections/board.read-models";
 
@@ -80,11 +81,15 @@ export {
   DrizzleSequenceRepository,
   DrizzleWorkspaceRepository,
   DrizzleWorkspaceInvitationsRepository,
+  DrizzleUserBoardMetadataRepository,
   BoardReadModels,
 };
 
 // F3a.3 invitation repository errors
 export { DuplicateActiveInvitationError, TokenGenerationExhaustedError } from "./repositories/workspaceInvitations.repository";
+
+// F3b sidebar projection types
+export type { SidebarBoardLink } from "./repositories/userBoardMetadata.repository";
 
 // F3a.1 read-side projection types
 export type { WorkspaceListItem, WorkspaceDetail, WorkspaceMemberWithUser } from "./repositories/workspaces.repository";

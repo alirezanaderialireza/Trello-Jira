@@ -28,6 +28,18 @@ export type DomainEventType =
   | "board.archived"
   | "board.unarchived"
   | "board.visibility_changed"
+  // ── Board lifecycle (F3b) ───────────────────────────────────────────────
+  | "board.soft_deleted"
+  | "board.restored"
+  | "board.background_changed"
+  // ── Board members (F3b) ─────────────────────────────────────────────────
+  // Naming convention mirrors `workspace.member.*` from F3a.2: the
+  // membership row is a sub-resource of the board aggregate, so events
+  // live under `aggregateType: "board"` with `aggregateId: boardId` and
+  // the affected userId in the payload.
+  | "board.member.added"
+  | "board.member.role_changed"
+  | "board.member.removed"
   // ── Label ───────────────────────────────────────────────────────────────
   | "label.created"
   | "label.updated"

@@ -1,95 +1,82 @@
 // packages/api/src/routers/board-members.ts
 //
-// Board membership management: list members, invite, remove, change role.
-// All mutations require OWNER or ADMIN role on the target board.
+// ─────────────────────────────────────────────────────────────────────────────
+// Board membership router (F3b refactor).
+//
+// F3b changes:
+//   • All four procedures migrated from the legacy assertBoardAdminOrOwner
+//     helper to F2 role-aware procedure builders (boardMemberProcedure for
+//     reads, boardAdminProcedure for writes). The previous inline role
+//     check is now performed by the procedure pipeline.
+//   • inviteMember now enforces the workspace-member-first invariant:
+//     a user cannot be invited to a board until they are a member of the
+//     board's parent workspace. This blocks the "stranger in board" class
+//     of bugs where a user has board access but cannot navigate the
+//     workspace context. Validation lives in domain/board/use-cases/
+//     addBoardMember.ts so the rule can be unit-tested without a tRPC
+//     pipeline.
+//   • Every mutation emits a board.member.* outbox event in the same RLS-
+//     enforced transaction as the write.
+//   • Every mutation accepts an optional idempotencyKey and is wrapped in
+//     withIdempotency() for replay safety.
+//   • Redundant `eq(boardMembers.tenantId, ctx.session.tenantId)` filters
+//     removed — tenantContextMiddleware sets the RLS GUC, and the F2
+//     boardMemberGuard already established the board's tenant context.
+//
+// Public surface (procedure names) preserved unchanged:
+//   getMembers / inviteMember / removeMember / changeRole.
+//
+// `inviteMember` keeps its name (not renamed to addMember) per D10 from
+// the F3b plan: BoardMembersPanel.tsx in the existing frontend already
+// calls trpc.v1.public.boardMembers.inviteMember.useMutation(), and a
+// rename would be a breaking change. A future namespace migration phase
+// can rename + add a Trello-faithful invitation flow.
+//
+// `userId` is validated as `z.string().min(1).max(128)` (NOT uuid) per
+// D9 in the F3b plan: the underlying schema (boardMembers.user_id) is
+// `varchar(128)` deliberately — the plain-uuid contract is owned by the
+// application layer in F3c. Tightening to `.uuid()` here would diverge
+// from the DB schema authority.
+// ─────────────────────────────────────────────────────────────────────────────
 
 import crypto from "node:crypto";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { eq, and, isNull } from "drizzle-orm";
 
-import { router, protectedProcedure } from "../trpc";
-import { boardMembers, boards } from "@repo/db";
+import { router } from "../trpc";
+import { boardMemberProcedure, boardAdminProcedure } from "../middleware/boardRoleProcedures";
+import { throwAddBoardMemberError } from "../middleware/invariants/boardInvariants";
+import { withIdempotency } from "../utils/idempotency";
+import { boardMembers, boards, workspaceMembers } from "@repo/db";
+import { addBoardMember, type BoardMemberRole } from "@repo/domain";
 
-// ============================================================================
-// Schemas
-// ============================================================================
+// ─── Schemas ────────────────────────────────────────────────────────────────
 
 const BoardIdSchema = z.string().uuid();
+/**
+ * userId is varchar(128) at the DB schema layer, not strictly UUID, per
+ * D9 from the F3b plan. Keep this contract until a separate phase
+ * migrates the column to uuid + FK on users.id.
+ */
 const UserIdSchema = z.string().min(1).max(128);
 const RoleSchema = z.enum(["ADMIN", "MEMBER"]);
+const IdempotencyKeySchema = z.string().uuid().optional();
 
-// ============================================================================
-// Helpers
-// ============================================================================
-
-async function assertBoardAdminOrOwner(ctx: any, boardId: string) {
-  const membership = await ctx.infra.db.query.boardMembers.findFirst({
-    where: and(
-      eq(boardMembers.boardId, boardId),
-      eq(boardMembers.userId, ctx.session.user.id),
-      eq(boardMembers.tenantId, ctx.session.tenantId),
-      isNull(boardMembers.removedAt),
-    ),
-  });
-
-  if (!membership) {
-    throw new TRPCError({ code: "NOT_FOUND", message: "Board not found." });
-  }
-
-  if (membership.role !== "OWNER" && membership.role !== "ADMIN") {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required to manage members." });
-  }
-
-  return membership;
-}
-
-async function assertBoardExists(ctx: any, boardId: string) {
-  const board = await ctx.infra.db.query.boards.findFirst({
-    where: and(
-      eq(boards.id, boardId),
-      eq(boards.tenantId, ctx.session.tenantId),
-      isNull(boards.deletedAt),
-    ),
-  });
-
-  if (!board) {
-    throw new TRPCError({ code: "NOT_FOUND", message: "Board not found." });
-  }
-
-  return board;
-}
-
-// ============================================================================
-// Router
-// ============================================================================
+// ─── Router ─────────────────────────────────────────────────────────────────
 
 export const boardMembersRouter = router({
-  // ==========================================================================
-  // GET BOARD MEMBERS
-  // ==========================================================================
-
-  getMembers: protectedProcedure
+  // ── getMembers (any active member can read) ──────────────────────────────
+  //
+  // boardMemberProcedure (= boardProtectedProcedure) verifies the caller
+  // has an active membership row before this resolver runs and exposes
+  // ctx.boardMembership.role for the response.
+  getMembers: boardMemberProcedure
     .input(z.object({ boardId: BoardIdSchema }))
     .query(async ({ input, ctx }) => {
-      // Any member of the board can view other members
-      const selfMembership = await ctx.infra.db.query.boardMembers.findFirst({
-        where: and(
-          eq(boardMembers.boardId, input.boardId),
-          eq(boardMembers.userId, ctx.session.user.id),
-          eq(boardMembers.tenantId, ctx.session.tenantId),
-          isNull(boardMembers.removedAt),
-        ),
-      });
-
-      if (!selfMembership) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Board not found." });
-      }
-
       const members = await ctx.infra.db.query.boardMembers.findMany({
         where: and(
           eq(boardMembers.boardId, input.boardId),
-          eq(boardMembers.tenantId, ctx.session.tenantId),
           isNull(boardMembers.removedAt),
         ),
       });
@@ -101,206 +88,310 @@ export const boardMembersRouter = router({
           role: m.role,
           joinedAt: m.createdAt.toISOString(),
         })),
-        currentUserRole: selfMembership.role,
+        currentUserRole: (ctx as any).boardMembership.role,
       };
     }),
 
-  // ==========================================================================
-  // INVITE MEMBER (add user to board)
-  // ==========================================================================
-
-  inviteMember: protectedProcedure
+  // ── inviteMember (admin) ─────────────────────────────────────────────────
+  //
+  // F3b changes:
+  //   • F2 boardAdminProcedure replaces inline assertBoardAdminOrOwner.
+  //   • workspace-member-first invariant enforced via the addBoardMember
+  //     domain use case. The router does the workspace membership lookup
+  //     and passes the boolean into the use case.
+  //   • Outbox event board.member.added emitted with wasReactivated flag
+  //     so subscribers can distinguish a fresh add from a re-add.
+  inviteMember: boardAdminProcedure
     .input(
       z.object({
         boardId: BoardIdSchema,
         userId: UserIdSchema,
         role: RoleSchema.default("MEMBER"),
+        idempotencyKey: IdempotencyKeySchema,
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      await assertBoardAdminOrOwner(ctx, input.boardId);
-      await assertBoardExists(ctx, input.boardId);
+      return withIdempotency(ctx, input.idempotencyKey, "v1", async () => {
+        // Resolve the board's tenant (= workspace) for the invariant check.
+        // boardMemberGuard already loaded the board into the request, so
+        // we need its tenantId here.
+        const board = await ctx.infra.db.query.boards.findFirst({
+          where: and(eq(boards.id, input.boardId), isNull(boards.deletedAt)),
+        });
+        if (!board) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "بورد یافت نشد." });
+        }
 
-      // Cannot invite yourself
-      if (input.userId === ctx.session.user.id) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot invite yourself." });
-      }
+        // Workspace-member-first lookup. The user must already be a
+        // member of the parent workspace.
+        const workspaceMembership =
+          await ctx.infra.db.query.workspaceMembers.findFirst({
+            where: and(
+              eq(workspaceMembers.workspaceId, board.tenantId),
+              eq(workspaceMembers.userId, input.userId),
+            ),
+          });
 
-      // Check if already a member (not removed)
-      const existing = await ctx.infra.db.query.boardMembers.findFirst({
-        where: and(
-          eq(boardMembers.boardId, input.boardId),
-          eq(boardMembers.userId, input.userId),
-          eq(boardMembers.tenantId, ctx.session.tenantId),
-          isNull(boardMembers.removedAt),
-        ),
-      });
-
-      if (existing) {
-        // Already a member — idempotent, return success without duplicate
-        return { success: true, alreadyMember: true, memberId: existing.id };
-      }
-
-      // Check if previously removed — reactivate instead of creating new row
-      const previouslyRemoved = await ctx.infra.db.query.boardMembers.findFirst({
-        where: and(
-          eq(boardMembers.boardId, input.boardId),
-          eq(boardMembers.userId, input.userId),
-          eq(boardMembers.tenantId, ctx.session.tenantId),
-        ),
-      });
-
-      const now = new Date();
-
-      if (previouslyRemoved) {
-        // Reactivate
-        await ctx.infra.db
-          .update(boardMembers)
-          .set({
-            removedAt: null,
-            role: input.role,
-            updatedAt: now,
-          })
-          .where(eq(boardMembers.id, previouslyRemoved.id));
-
-        ctx.infra.logger.info({
-          event: "board_member_reactivated",
-          boardId: input.boardId,
-          userId: input.userId,
-          role: input.role,
-          invitedBy: ctx.session.user.id,
+        // Existing board membership state (active or soft-removed).
+        const existing = await ctx.infra.db.query.boardMembers.findFirst({
+          where: and(
+            eq(boardMembers.boardId, input.boardId),
+            eq(boardMembers.userId, input.userId),
+          ),
         });
 
-        return { success: true, alreadyMember: false, memberId: previouslyRemoved.id };
-      }
+        // Domain use case — pure validation + state-machine decision.
+        const result = addBoardMember({
+          callerUserId: ctx.session.user.id,
+          targetUserId: input.userId,
+          targetIsWorkspaceMember: Boolean(workspaceMembership),
+          existingMembership: existing
+            ? { id: existing.id, removedAt: existing.removedAt ?? null }
+            : null,
+        });
 
-      // Create new membership
-      const memberId = crypto.randomUUID();
-      await ctx.infra.db.insert(boardMembers).values({
-        id: memberId,
-        tenantId: ctx.session.tenantId,
-        boardId: input.boardId,
-        userId: input.userId,
-        role: input.role,
-        revision: 1,
-        createdAt: now,
-        updatedAt: now,
+        if (!result.success) {
+          throwAddBoardMemberError(result.reason);
+        }
+
+        const now = new Date();
+
+        // Branch on the action the use case decided.
+        switch (result.action) {
+          case "ALREADY_ACTIVE_MEMBER":
+            // Idempotent — return success without write or event.
+            return {
+              success: true,
+              alreadyMember: true,
+              memberId: existing!.id,
+            };
+
+          case "REACTIVATE_REMOVED_ROW": {
+            await ctx.infra.db
+              .update(boardMembers)
+              .set({
+                removedAt: null,
+                role: input.role,
+                updatedAt: now,
+              })
+              .where(eq(boardMembers.id, existing!.id));
+
+            await ctx.repos.outbox.append(ctx.infra.db, {
+              eventId: crypto.randomUUID(),
+              eventVersion: "v1",
+              aggregateId: input.boardId,
+              aggregateType: "board",
+              type: "board.member.added",
+              occurredAt: now,
+              correlationId: input.idempotencyKey ?? undefined,
+              payload: {
+                boardId: input.boardId,
+                tenantId: board.tenantId,
+                userId: input.userId,
+                role: input.role as BoardMemberRole,
+                addedBy: ctx.session.user.id,
+                wasReactivated: true,
+              },
+            });
+
+            return {
+              success: true,
+              alreadyMember: false,
+              memberId: existing!.id,
+            };
+          }
+
+          case "INSERT_NEW_ROW": {
+            const memberId = crypto.randomUUID();
+            await ctx.infra.db.insert(boardMembers).values({
+              id: memberId,
+              tenantId: board.tenantId,
+              boardId: input.boardId,
+              userId: input.userId,
+              role: input.role,
+              revision: 1,
+              createdAt: now,
+              updatedAt: now,
+            });
+
+            await ctx.repos.outbox.append(ctx.infra.db, {
+              eventId: crypto.randomUUID(),
+              eventVersion: "v1",
+              aggregateId: input.boardId,
+              aggregateType: "board",
+              type: "board.member.added",
+              occurredAt: now,
+              correlationId: input.idempotencyKey ?? undefined,
+              payload: {
+                boardId: input.boardId,
+                tenantId: board.tenantId,
+                userId: input.userId,
+                role: input.role as BoardMemberRole,
+                addedBy: ctx.session.user.id,
+                wasReactivated: false,
+              },
+            });
+
+            return { success: true, alreadyMember: false, memberId };
+          }
+        }
       });
-
-      ctx.infra.logger.info({
-        event: "board_member_invited",
-        boardId: input.boardId,
-        userId: input.userId,
-        role: input.role,
-        invitedBy: ctx.session.user.id,
-      });
-
-      return { success: true, alreadyMember: false, memberId };
     }),
 
-  // ==========================================================================
-  // REMOVE MEMBER (soft delete — sets removedAt)
-  // ==========================================================================
-
-  removeMember: protectedProcedure
+  // ── removeMember (admin) ─────────────────────────────────────────────────
+  //
+  // Cannot remove self (use leave-board flow when added in a future phase).
+  // ADMIN cannot remove an OWNER.
+  removeMember: boardAdminProcedure
     .input(
       z.object({
         boardId: BoardIdSchema,
         userId: UserIdSchema,
+        idempotencyKey: IdempotencyKeySchema,
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const adminMembership = await assertBoardAdminOrOwner(ctx, input.boardId);
+      return withIdempotency(ctx, input.idempotencyKey, "v1", async () => {
+        const callerRole = (ctx as any).boardMembership.role as string;
 
-      // Cannot remove yourself (use "leave board" instead, or transfer ownership)
-      if (input.userId === ctx.session.user.id) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot remove yourself. Transfer ownership first." });
-      }
+        if (input.userId === ctx.session.user.id) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "نمی‌توانید خودتان را حذف کنید. ابتدا مالکیت را منتقل کنید یا از بورد خارج شوید.",
+          });
+        }
 
-      // Cannot remove OWNER unless you are also OWNER
-      const targetMembership = await ctx.infra.db.query.boardMembers.findFirst({
-        where: and(
-          eq(boardMembers.boardId, input.boardId),
-          eq(boardMembers.userId, input.userId),
-          eq(boardMembers.tenantId, ctx.session.tenantId),
-          isNull(boardMembers.removedAt),
-        ),
+        const target = await ctx.infra.db.query.boardMembers.findFirst({
+          where: and(
+            eq(boardMembers.boardId, input.boardId),
+            eq(boardMembers.userId, input.userId),
+            isNull(boardMembers.removedAt),
+          ),
+        });
+
+        if (!target) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "این کاربر عضو بورد نیست.",
+          });
+        }
+
+        if (target.role === "OWNER" && callerRole !== "OWNER") {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "تنها مالک می‌تواند مالک دیگری را حذف کند.",
+          });
+        }
+
+        const now = new Date();
+
+        await ctx.infra.db
+          .update(boardMembers)
+          .set({ removedAt: now, updatedAt: now })
+          .where(eq(boardMembers.id, target.id));
+
+        await ctx.repos.outbox.append(ctx.infra.db, {
+          eventId: crypto.randomUUID(),
+          eventVersion: "v1",
+          aggregateId: input.boardId,
+          aggregateType: "board",
+          type: "board.member.removed",
+          occurredAt: now,
+          correlationId: input.idempotencyKey ?? undefined,
+          payload: {
+            boardId: input.boardId,
+            userId: input.userId,
+            removedBy: ctx.session.user.id,
+          },
+        });
+
+        return { success: true };
       });
-
-      if (!targetMembership) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Member not found." });
-      }
-
-      if (targetMembership.role === "OWNER" && adminMembership.role !== "OWNER") {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Only an owner can remove another owner." });
-      }
-
-      await ctx.infra.db
-        .update(boardMembers)
-        .set({ removedAt: new Date(), updatedAt: new Date() })
-        .where(eq(boardMembers.id, targetMembership.id));
-
-      ctx.infra.logger.info({
-        event: "board_member_removed",
-        boardId: input.boardId,
-        userId: input.userId,
-        removedBy: ctx.session.user.id,
-      });
-
-      return { success: true };
     }),
 
-  // ==========================================================================
-  // CHANGE MEMBER ROLE
-  // ==========================================================================
-
-  changeRole: protectedProcedure
+  // ── changeRole (admin) ───────────────────────────────────────────────────
+  //
+  // Only OWNER can promote to ADMIN. OWNER role cannot be changed
+  // through this procedure (would require an ownership-transfer flow,
+  // out of F3b scope).
+  changeRole: boardAdminProcedure
     .input(
       z.object({
         boardId: BoardIdSchema,
         userId: UserIdSchema,
         newRole: RoleSchema,
+        idempotencyKey: IdempotencyKeySchema,
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const adminMembership = await assertBoardAdminOrOwner(ctx, input.boardId);
+      return withIdempotency(ctx, input.idempotencyKey, "v1", async () => {
+        const callerRole = (ctx as any).boardMembership.role as string;
 
-      // Only OWNER can promote/demote to ADMIN
-      if (input.newRole === "ADMIN" && adminMembership.role !== "OWNER") {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Only the owner can promote to admin." });
-      }
+        if (input.newRole === "ADMIN" && callerRole !== "OWNER") {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "تنها مالک می‌تواند کاربر را به مدیر ارتقا دهد.",
+          });
+        }
 
-      const targetMembership = await ctx.infra.db.query.boardMembers.findFirst({
-        where: and(
-          eq(boardMembers.boardId, input.boardId),
-          eq(boardMembers.userId, input.userId),
-          eq(boardMembers.tenantId, ctx.session.tenantId),
-          isNull(boardMembers.removedAt),
-        ),
+        const target = await ctx.infra.db.query.boardMembers.findFirst({
+          where: and(
+            eq(boardMembers.boardId, input.boardId),
+            eq(boardMembers.userId, input.userId),
+            isNull(boardMembers.removedAt),
+          ),
+        });
+
+        if (!target) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "این کاربر عضو بورد نیست.",
+          });
+        }
+
+        if (target.role === "OWNER") {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "نقش مالک از این مسیر قابل تغییر نیست.",
+          });
+        }
+
+        // No-op short-circuit — silent success, no event.
+        if (target.role === input.newRole) {
+          return {
+            success: true,
+            unchanged: true,
+            role: input.newRole,
+          };
+        }
+
+        const fromRole = target.role as BoardMemberRole;
+        const now = new Date();
+
+        await ctx.infra.db
+          .update(boardMembers)
+          .set({ role: input.newRole, updatedAt: now })
+          .where(eq(boardMembers.id, target.id));
+
+        await ctx.repos.outbox.append(ctx.infra.db, {
+          eventId: crypto.randomUUID(),
+          eventVersion: "v1",
+          aggregateId: input.boardId,
+          aggregateType: "board",
+          type: "board.member.role_changed",
+          occurredAt: now,
+          correlationId: input.idempotencyKey ?? undefined,
+          payload: {
+            boardId: input.boardId,
+            userId: input.userId,
+            fromRole,
+            toRole: input.newRole as BoardMemberRole,
+            changedBy: ctx.session.user.id,
+          },
+        });
+
+        return { success: true, unchanged: false, role: input.newRole };
       });
-
-      if (!targetMembership) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Member not found." });
-      }
-
-      if (targetMembership.role === "OWNER") {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Cannot change the owner's role." });
-      }
-
-      await ctx.infra.db
-        .update(boardMembers)
-        .set({ role: input.newRole, updatedAt: new Date() })
-        .where(eq(boardMembers.id, targetMembership.id));
-
-      ctx.infra.logger.info({
-        event: "board_member_role_changed",
-        boardId: input.boardId,
-        userId: input.userId,
-        oldRole: targetMembership.role,
-        newRole: input.newRole,
-        changedBy: ctx.session.user.id,
-      });
-
-      return { success: true };
     }),
 });

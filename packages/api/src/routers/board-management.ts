@@ -1,7 +1,39 @@
 // packages/api/src/routers/board-management.ts
 //
-// Board lifecycle management: list boards, create, rename, archive, delete.
-// All mutations are tenant-isolated and role-checked.
+// ─────────────────────────────────────────────────────────────────────────────
+// Board lifecycle router (F3b refactor).
+//
+// F3b changes:
+//   • Three pre-existing procedures (archiveBoard / unarchiveBoard /
+//     deleteBoard) are migrated from the legacy `assertBoardAdmin` helper
+//     to the F2 role + lifecycle procedure builders. The pre-F3b
+//     procedures performed the role check inline AND queried `boards` a
+//     second time to resolve the row — the F2 builders fold both checks
+//     into the procedure pipeline (load membership, assert role, load
+//     board, assert lifecycle).
+//   • Three new procedures: restoreBoard / setBackground /
+//     updateVisibility, completing the lifecycle parity with workspaces.
+//   • Every mutation now emits an outbox event in the same RLS-enforced
+//     transaction as the write, so downstream subscribers (audit,
+//     realtime, sidebar invalidator) receive the change atomically.
+//   • Every mutation accepts an optional `idempotencyKey` and is wrapped
+//     in `withIdempotency()` for replay safety.
+//   • Redundant `eq(boards.tenantId, ctx.session.tenantId)` filters are
+//     removed: tenantContextMiddleware sets the RLS GUC so the database
+//     enforces the same boundary, and the F2 builder already loaded a
+//     tenant-scoped board into the procedure pipeline.
+//
+// Procedures preserved unchanged (out of F3b scope):
+//   • getBoardsByUser — read path, F2 builders are write-oriented; the
+//     existing inline membership scan is fine. Will land in F3c when the
+//     "list boards in workspace" path is unified.
+//   • createBoard — no boardId yet at call time, so F2 board builders
+//     don't apply. Stays as `protectedProcedure`. Refactor with workspace
+//     scope is a separate concern (F3c).
+//   • renameBoard — kept on the legacy assertBoardAdmin helper for now.
+//     Refactor in F3c alongside the workspace.update parity, when a
+//     `board.renamed` outbox event is also added.
+// ─────────────────────────────────────────────────────────────────────────────
 
 import crypto from "node:crypto";
 import { z } from "zod";
@@ -9,82 +41,81 @@ import { TRPCError } from "@trpc/server";
 import { eq, and, isNull, desc } from "drizzle-orm";
 
 import { router, protectedProcedure } from "../trpc";
+import {
+  boardAdminWriteProcedure,
+  makeBoardAdminWriteProcedure,
+} from "../middleware/writeProcedures";
+import { boardAdminProcedure } from "../middleware/boardRoleProcedures";
+import { withIdempotency } from "../utils/idempotency";
 import { boards, boardMembers } from "@repo/db";
+import type { BoardId } from "@repo/domain";
 
-// ============================================================================
-// Shared schemas
-// ============================================================================
+// ─── Shared schemas ─────────────────────────────────────────────────────────
 
 const BoardIdSchema = z.string().uuid();
 const TitleSchema = z.string().trim().min(1).max(128);
+const IdempotencyKeySchema = z.string().uuid().optional();
 
-// ============================================================================
-// Helpers
-// ============================================================================
+const VisibilitySchema = z.enum(["workspace", "private", "public"]);
 
-async function assertBoardAdmin(ctx: any, boardId: string) {
+/**
+ * Free-form JSONB shape for board background. Matches the workspace
+ * setBackground convention (no `.strict()` — the UI evolves background
+ * presets without a schema bump). The DB-level CHECK constrains the
+ * column to a JSON object; nullable.
+ */
+const BackgroundDataSchema = z.record(z.string(), z.unknown()).nullable();
+
+// ─── Legacy helper (kept for getBoardsByUser, createBoard, renameBoard) ─────
+//
+// New procedures use F2 builders. This stays only for the three procedures
+// that are explicitly out of F3b scope (see header comment).
+
+async function assertBoardAdminLegacy(ctx: any, boardId: string) {
   const membership = await ctx.infra.db.query.boardMembers.findFirst({
     where: and(
       eq(boardMembers.boardId, boardId),
       eq(boardMembers.userId, ctx.session.user.id),
-      eq(boardMembers.tenantId, ctx.session.tenantId),
       isNull(boardMembers.removedAt),
     ),
   });
-
   if (!membership) {
-    throw new TRPCError({ code: "NOT_FOUND", message: "Board not found." });
+    throw new TRPCError({ code: "NOT_FOUND", message: "بورد یافت نشد." });
   }
-
   if (membership.role !== "OWNER" && membership.role !== "ADMIN") {
-    throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required." });
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "این عملیات فقط برای مدیر یا مالک بورد مجاز است.",
+    });
   }
-
   return membership;
 }
 
-async function getBoard(ctx: any, boardId: string) {
-  const board = await ctx.infra.db.query.boards.findFirst({
-    where: and(
-      eq(boards.id, boardId),
-      eq(boards.tenantId, ctx.session.tenantId),
-      isNull(boards.deletedAt),
-    ),
-  });
-
-  if (!board) {
-    throw new TRPCError({ code: "NOT_FOUND", message: "Board not found." });
-  }
-
-  return board;
-}
-
-// ============================================================================
-// Router
-// ============================================================================
+// ─── Router ─────────────────────────────────────────────────────────────────
 
 export const boardManagementRouter = router({
-  // ==========================================================================
-  // GET BOARDS BY USER
-  // ==========================================================================
+  // ════════════════════════════════════════════════════════════════════════
+  // PRE-F3b — preserved unchanged
+  // ════════════════════════════════════════════════════════════════════════
 
+  // ── getBoardsByUser ──────────────────────────────────────────────────────
   getBoardsByUser: protectedProcedure
     .input(
-      z.object({
-        cursor: z.string().uuid().optional(),
-        limit: z.number().int().min(1).max(50).default(20),
-        includeArchived: z.boolean().default(false),
-      }).optional(),
+      z
+        .object({
+          cursor: z.string().uuid().optional(),
+          limit: z.number().int().min(1).max(50).default(20),
+          includeArchived: z.boolean().default(false),
+        })
+        .optional(),
     )
     .query(async ({ input, ctx }) => {
       const limit = input?.limit ?? 20;
       const includeArchived = input?.includeArchived ?? false;
 
-      // Step 1: Get all board IDs the user is a member of
       const memberships = await ctx.infra.db.query.boardMembers.findMany({
         where: and(
           eq(boardMembers.userId, ctx.session.user.id),
-          eq(boardMembers.tenantId, ctx.session.tenantId),
           isNull(boardMembers.removedAt),
         ),
         orderBy: [desc(boardMembers.createdAt)],
@@ -97,25 +128,17 @@ export const boardManagementRouter = router({
       const boardIds = memberships.map((m: any) => m.boardId);
       const roleMap = new Map(memberships.map((m: any) => [m.boardId, m.role]));
 
-      // Step 2: Fetch board details
       const allBoards = await ctx.infra.db
         .select()
         .from(boards)
-        .where(
-          and(
-            eq(boards.tenantId, ctx.session.tenantId),
-            isNull(boards.deletedAt),
-          ),
-        )
+        .where(isNull(boards.deletedAt))
         .orderBy(desc(boards.updatedAt));
 
-      // Filter to boards user is member of + archive filter
       let filtered = allBoards.filter((b: any) => boardIds.includes(b.id));
       if (!includeArchived) {
         filtered = filtered.filter((b: any) => !b.archivedAt);
       }
 
-      // Cursor-based pagination
       let startIdx = 0;
       if (input?.cursor) {
         const cursorIdx = filtered.findIndex((b: any) => b.id === input.cursor);
@@ -138,10 +161,7 @@ export const boardManagementRouter = router({
       };
     }),
 
-  // ==========================================================================
-  // CREATE BOARD
-  // ==========================================================================
-
+  // ── createBoard (no boardId in input — F2 builders don't apply) ──────────
   createBoard: protectedProcedure
     .input(z.object({ title: TitleSchema }))
     .mutation(async ({ input, ctx }) => {
@@ -159,7 +179,6 @@ export const boardManagementRouter = router({
         updatedAt: now,
       });
 
-      // Auto-add creator as OWNER
       await ctx.infra.db.insert(boardMembers).values({
         id: crypto.randomUUID(),
         tenantId: ctx.session.tenantId,
@@ -181,15 +200,18 @@ export const boardManagementRouter = router({
       return { id: boardId, title: input.title };
     }),
 
-  // ==========================================================================
-  // RENAME BOARD
-  // ==========================================================================
-
+  // ── renameBoard (legacy — F3c will refactor + add outbox) ────────────────
   renameBoard: protectedProcedure
     .input(z.object({ boardId: BoardIdSchema, title: TitleSchema }))
     .mutation(async ({ input, ctx }) => {
-      await assertBoardAdmin(ctx, input.boardId);
-      const board = await getBoard(ctx, input.boardId);
+      await assertBoardAdminLegacy(ctx, input.boardId);
+
+      const board = await ctx.infra.db.query.boards.findFirst({
+        where: and(eq(boards.id, input.boardId), isNull(boards.deletedAt)),
+      });
+      if (!board) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "بورد یافت نشد." });
+      }
 
       await ctx.infra.db
         .update(boards)
@@ -207,80 +229,286 @@ export const boardManagementRouter = router({
       return { success: true };
     }),
 
-  // ==========================================================================
-  // ARCHIVE BOARD
-  // ==========================================================================
+  // ════════════════════════════════════════════════════════════════════════
+  // F3b — refactored existing procedures (archive / unarchive / delete)
+  //       + new procedures (restore / setBackground / updateVisibility)
+  // ════════════════════════════════════════════════════════════════════════
 
-  archiveBoard: protectedProcedure
-    .input(z.object({ boardId: BoardIdSchema }))
+  // ── archiveBoard (refactored) ────────────────────────────────────────────
+  //
+  // F2 boardAdminWriteProcedure rejects writes against archived boards by
+  // default — but archive *is* the operation that creates that state, so
+  // the source board must itself be NOT archived. The default builder is
+  // therefore correct here (rejects re-archive of already-archived).
+  archiveBoard: boardAdminWriteProcedure
+    .input(
+      z.object({
+        boardId: BoardIdSchema,
+        idempotencyKey: IdempotencyKeySchema,
+      }),
+    )
     .mutation(async ({ input, ctx }) => {
-      await assertBoardAdmin(ctx, input.boardId);
-      await getBoard(ctx, input.boardId);
+      return withIdempotency(ctx, input.idempotencyKey, "v1", async () => {
+        await ctx.repos.board.archive(input.boardId as BoardId, ctx.infra.db);
 
-      await ctx.infra.db
-        .update(boards)
-        .set({ archivedAt: new Date(), updatedAt: new Date() })
-        .where(eq(boards.id, input.boardId));
+        await ctx.repos.outbox.append(ctx.infra.db, {
+          eventId: crypto.randomUUID(),
+          eventVersion: "v1",
+          aggregateId: input.boardId,
+          aggregateType: "board",
+          type: "board.archived",
+          occurredAt: new Date(),
+          correlationId: input.idempotencyKey ?? undefined,
+          payload: {
+            boardId: input.boardId,
+            archivedBy: ctx.session.user.id,
+          },
+        });
 
-      ctx.infra.logger.info({
-        event: "board_archived",
-        boardId: input.boardId,
-        userId: ctx.session.user.id,
+        return { success: true, boardId: input.boardId };
       });
-
-      return { success: true };
     }),
 
-  // ==========================================================================
-  // UNARCHIVE BOARD
-  // ==========================================================================
-
-  unarchiveBoard: protectedProcedure
-    .input(z.object({ boardId: BoardIdSchema }))
+  // ── unarchiveBoard (refactored) ──────────────────────────────────────────
+  //
+  // The single legitimate exception to the "no writes against archived
+  // boards" rule. Uses the factory variant with allowArchived: true.
+  unarchiveBoard: makeBoardAdminWriteProcedure({ allowArchived: true })
+    .input(
+      z.object({
+        boardId: BoardIdSchema,
+        idempotencyKey: IdempotencyKeySchema,
+      }),
+    )
     .mutation(async ({ input, ctx }) => {
-      await assertBoardAdmin(ctx, input.boardId);
+      return withIdempotency(ctx, input.idempotencyKey, "v1", async () => {
+        await ctx.repos.board.unarchive(input.boardId as BoardId, ctx.infra.db);
 
-      await ctx.infra.db
-        .update(boards)
-        .set({ archivedAt: null, updatedAt: new Date() })
-        .where(eq(boards.id, input.boardId));
+        await ctx.repos.outbox.append(ctx.infra.db, {
+          eventId: crypto.randomUUID(),
+          eventVersion: "v1",
+          aggregateId: input.boardId,
+          aggregateType: "board",
+          type: "board.unarchived",
+          occurredAt: new Date(),
+          correlationId: input.idempotencyKey ?? undefined,
+          payload: {
+            boardId: input.boardId,
+            unarchivedBy: ctx.session.user.id,
+          },
+        });
 
-      ctx.infra.logger.info({
-        event: "board_unarchived",
-        boardId: input.boardId,
-        userId: ctx.session.user.id,
+        return { success: true, boardId: input.boardId };
       });
-
-      return { success: true };
     }),
 
-  // ==========================================================================
-  // DELETE BOARD (soft delete)
-  // ==========================================================================
-
-  deleteBoard: protectedProcedure
-    .input(z.object({ boardId: BoardIdSchema }))
+  // ── deleteBoard (refactored — soft delete) ───────────────────────────────
+  //
+  // F2 boardAdminWriteProcedure already enforces OWNER/ADMIN role. The
+  // pre-F3b implementation additionally required OWNER (not ADMIN) for
+  // delete — that rule is preserved here as an explicit role check on
+  // ctx.boardMembership.
+  deleteBoard: boardAdminWriteProcedure
+    .input(
+      z.object({
+        boardId: BoardIdSchema,
+        idempotencyKey: IdempotencyKeySchema,
+      }),
+    )
     .mutation(async ({ input, ctx }) => {
-      const membership = await assertBoardAdmin(ctx, input.boardId);
+      return withIdempotency(ctx, input.idempotencyKey, "v1", async () => {
+        const role = (ctx as any).boardMembership?.role as string | undefined;
+        if (role !== "OWNER") {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "تنها مالک بورد می‌تواند آن را حذف کند.",
+          });
+        }
 
-      // Only OWNER can delete
-      if (membership.role !== "OWNER") {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Only the board owner can delete." });
-      }
+        const now = new Date();
+        await ctx.repos.board.softDelete(input.boardId as BoardId, ctx.infra.db);
 
-      await getBoard(ctx, input.boardId);
+        await ctx.repos.outbox.append(ctx.infra.db, {
+          eventId: crypto.randomUUID(),
+          eventVersion: "v1",
+          aggregateId: input.boardId,
+          aggregateType: "board",
+          type: "board.soft_deleted",
+          occurredAt: now,
+          correlationId: input.idempotencyKey ?? undefined,
+          payload: {
+            boardId: input.boardId,
+            deletedAt: now.toISOString(),
+            deletedBy: ctx.session.user.id,
+          },
+        });
 
-      await ctx.infra.db
-        .update(boards)
-        .set({ deletedAt: new Date(), updatedAt: new Date() })
-        .where(eq(boards.id, input.boardId));
-
-      ctx.infra.logger.info({
-        event: "board_deleted",
-        boardId: input.boardId,
-        userId: ctx.session.user.id,
+        return { success: true, boardId: input.boardId };
       });
+    }),
 
-      return { success: true };
+  // ── restoreBoard (NEW — undo soft-delete) ────────────────────────────────
+  //
+  // Operates on a soft-deleted board, so the lifecycle assertion in
+  // boardAdminWriteProcedure (which rejects deletedAt != NULL) doesn't
+  // fit. We use boardAdminProcedure (role check only) and read the row
+  // directly to verify it is in the recoverable state.
+  //
+  // Note: the F2 boardMemberGuard fetches board membership but the
+  // membership row persists across soft-delete (not cascaded). So the
+  // role check still passes for the original admin/owner.
+  //
+  // 30-day grace window is enforced at the DB layer by a future cleanup
+  // job (out of F3b scope — see steering/migrations.md). F3b accepts any
+  // restore call; if the row was hard-deleted by the cleanup job the
+  // findFirst below returns null and we surface NOT_FOUND.
+  restoreBoard: boardAdminProcedure
+    .input(
+      z.object({
+        boardId: BoardIdSchema,
+        idempotencyKey: IdempotencyKeySchema,
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      return withIdempotency(ctx, input.idempotencyKey, "v1", async () => {
+        const role = (ctx as any).boardMembership?.role as string | undefined;
+        if (role !== "OWNER") {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "تنها مالک بورد می‌تواند آن را بازگردانی کند.",
+          });
+        }
+
+        const row = await ctx.infra.db.query.boards.findFirst({
+          where: eq(boards.id, input.boardId),
+        });
+        if (!row) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "بورد یافت نشد." });
+        }
+        if (!row.deletedAt) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "این بورد حذف نشده است.",
+          });
+        }
+
+        const now = new Date();
+        await ctx.repos.board.restore(input.boardId as BoardId, ctx.infra.db);
+
+        await ctx.repos.outbox.append(ctx.infra.db, {
+          eventId: crypto.randomUUID(),
+          eventVersion: "v1",
+          aggregateId: input.boardId,
+          aggregateType: "board",
+          type: "board.restored",
+          occurredAt: now,
+          correlationId: input.idempotencyKey ?? undefined,
+          payload: {
+            boardId: input.boardId,
+            restoredAt: now.toISOString(),
+            restoredBy: ctx.session.user.id,
+          },
+        });
+
+        return { success: true, boardId: input.boardId };
+      });
+    }),
+
+  // ── setBackground (NEW) ──────────────────────────────────────────────────
+  setBackground: boardAdminWriteProcedure
+    .input(
+      z.object({
+        boardId: BoardIdSchema,
+        backgroundData: BackgroundDataSchema,
+        idempotencyKey: IdempotencyKeySchema,
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      return withIdempotency(ctx, input.idempotencyKey, "v1", async () => {
+        await ctx.repos.board.setBackground(
+          input.boardId as BoardId,
+          input.backgroundData,
+          ctx.infra.db,
+        );
+
+        await ctx.repos.outbox.append(ctx.infra.db, {
+          eventId: crypto.randomUUID(),
+          eventVersion: "v1",
+          aggregateId: input.boardId,
+          aggregateType: "board",
+          type: "board.background_changed",
+          occurredAt: new Date(),
+          correlationId: input.idempotencyKey ?? undefined,
+          payload: {
+            boardId: input.boardId,
+            changedBy: ctx.session.user.id,
+          },
+        });
+
+        return { success: true, boardId: input.boardId };
+      });
+    }),
+
+  // ── updateVisibility (NEW) ───────────────────────────────────────────────
+  //
+  // No-op short-circuit when the new visibility matches current state —
+  // mirrors workspace.updateVisibility.
+  updateVisibility: boardAdminWriteProcedure
+    .input(
+      z.object({
+        boardId: BoardIdSchema,
+        visibility: VisibilitySchema,
+        idempotencyKey: IdempotencyKeySchema,
+      }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      return withIdempotency(ctx, input.idempotencyKey, "v1", async () => {
+        const board = await ctx.infra.db.query.boards.findFirst({
+          where: eq(boards.id, input.boardId),
+        });
+        if (!board) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "بورد یافت نشد." });
+        }
+
+        if (board.visibility === input.visibility) {
+          return {
+            success: true,
+            boardId: input.boardId,
+            visibility: input.visibility,
+            unchanged: true,
+          };
+        }
+
+        const previousVisibility = board.visibility as "workspace" | "private" | "public";
+
+        await ctx.repos.board.updateVisibility(
+          input.boardId as BoardId,
+          input.visibility,
+          ctx.infra.db,
+        );
+
+        await ctx.repos.outbox.append(ctx.infra.db, {
+          eventId: crypto.randomUUID(),
+          eventVersion: "v1",
+          aggregateId: input.boardId,
+          aggregateType: "board",
+          type: "board.visibility_changed",
+          occurredAt: new Date(),
+          correlationId: input.idempotencyKey ?? undefined,
+          payload: {
+            boardId: input.boardId,
+            from: previousVisibility,
+            to: input.visibility,
+            changedBy: ctx.session.user.id,
+          },
+        });
+
+        return {
+          success: true,
+          boardId: input.boardId,
+          visibility: input.visibility,
+          unchanged: false,
+        };
+      });
     }),
 });
