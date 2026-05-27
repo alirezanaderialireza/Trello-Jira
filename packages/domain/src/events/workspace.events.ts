@@ -87,6 +87,51 @@ export interface WorkspaceVisibilityChangedPayload {
 export interface WorkspaceVisibilityChangedEvent
   extends DomainEvent<"workspace.visibility_changed", WorkspaceVisibilityChangedPayload> {}
 
+// ── Workspace.Member.* events (F3a.2) ───────────────────────────────────────
+//
+// Membership events live under the workspace aggregate (the membership row
+// IS a fact OF that workspace), so `aggregateType: "workspace"` and
+// `aggregateId: workspaceId` for all four. The `userId` of the affected
+// member lives in the payload.
+
+import type { WorkspaceRole } from "../workspaces";
+
+export interface WorkspaceMemberRoleUpdatedPayload {
+  readonly workspaceId: string;
+  readonly userId: string;
+  readonly fromRole: WorkspaceRole;
+  readonly toRole: WorkspaceRole;
+  readonly changedBy: string;
+}
+export interface WorkspaceMemberRoleUpdatedEvent
+  extends DomainEvent<"workspace.member.role_updated", WorkspaceMemberRoleUpdatedPayload> {}
+
+export interface WorkspaceMemberRemovedPayload {
+  readonly workspaceId: string;
+  readonly userId: string;
+  readonly removedBy: string;
+}
+export interface WorkspaceMemberRemovedEvent
+  extends DomainEvent<"workspace.member.removed", WorkspaceMemberRemovedPayload> {}
+
+export interface WorkspaceMemberLeftPayload {
+  readonly workspaceId: string;
+  readonly userId: string;
+}
+export interface WorkspaceMemberLeftEvent
+  extends DomainEvent<"workspace.member.left", WorkspaceMemberLeftPayload> {}
+
+export interface WorkspaceMemberOwnershipTransferredPayload {
+  readonly workspaceId: string;
+  readonly fromUserId: string;
+  readonly toUserId: string;
+}
+export interface WorkspaceMemberOwnershipTransferredEvent
+  extends DomainEvent<
+    "workspace.member.ownership_transferred",
+    WorkspaceMemberOwnershipTransferredPayload
+  > {}
+
 // ── Discriminated Union ─────────────────────────────────────────────────────
 
 export type WorkspaceEvent =
@@ -95,4 +140,8 @@ export type WorkspaceEvent =
   | WorkspaceSoftDeletedEvent
   | WorkspaceRestoredEvent
   | WorkspaceBackgroundChangedEvent
-  | WorkspaceVisibilityChangedEvent;
+  | WorkspaceVisibilityChangedEvent
+  | WorkspaceMemberRoleUpdatedEvent
+  | WorkspaceMemberRemovedEvent
+  | WorkspaceMemberLeftEvent
+  | WorkspaceMemberOwnershipTransferredEvent;
