@@ -189,3 +189,5 @@ export class WorkspaceRestoreWindowExpiredError extends Error {
 export * from "./use-cases/softDeleteWorkspace";
 export * from "./use-cases/restoreWorkspace";
 export * from "./use-cases/transferOwnership";
+export * from "./use-cases/acceptInvitation";
+export * from "./use-cases/revokeInvitation";

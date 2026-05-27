@@ -70,7 +70,12 @@ export type DomainEventType =
   | "workspace.member.role_updated"
   | "workspace.member.removed"
   | "workspace.member.left"
-  | "workspace.member.ownership_transferred";
+  | "workspace.member.ownership_transferred"
+  | "workspace.member.added"
+  // ── Workspace.Invitation (F3a.3) ─────────────────────────────────────────
+  | "workspace.invitation.created"
+  | "workspace.invitation.revoked"
+  | "workspace.invitation.accepted";
 
 export type AggregateType =
   | "board"

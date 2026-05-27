@@ -132,6 +132,56 @@ export interface WorkspaceMemberOwnershipTransferredEvent
     WorkspaceMemberOwnershipTransferredPayload
   > {}
 
+// ── Workspace.Member.Added (F3a.3) ──────────────────────────────────────────
+//
+// Emitted when a user becomes a member of a workspace, regardless of the
+// join path (invitation accept, admin direct-add in the future, SCIM sync,
+// etc.). Consumers that care about HOW the join happened should subscribe to
+// the more specific `workspace.invitation.accepted` event.
+
+export interface WorkspaceMemberAddedPayload {
+  readonly workspaceId: string;
+  readonly userId: string;
+  readonly role: WorkspaceRole;
+  readonly addedBy: string; // actorId that triggered the addition
+}
+export interface WorkspaceMemberAddedEvent
+  extends DomainEvent<"workspace.member.added", WorkspaceMemberAddedPayload> {}
+
+// ── Workspace.Invitation.* events (F3a.3) ──────────────────────────────────
+//
+// Token-based invitation lifecycle events. `aggregateType: "workspace"`,
+// `aggregateId: workspaceId` — the invitation is a sub-resource of the
+// workspace aggregate.
+
+export interface WorkspaceInvitationCreatedPayload {
+  readonly workspaceId: string;
+  readonly invitationId: string;
+  readonly invitedEmail: string; // normalized, lowercase
+  readonly role: WorkspaceRole;
+  readonly invitedBy: string;
+  readonly expiresAt: string; // ISO-8601 UTC
+}
+export interface WorkspaceInvitationCreatedEvent
+  extends DomainEvent<"workspace.invitation.created", WorkspaceInvitationCreatedPayload> {}
+
+export interface WorkspaceInvitationRevokedPayload {
+  readonly workspaceId: string;
+  readonly invitationId: string;
+  readonly revokedBy: string;
+}
+export interface WorkspaceInvitationRevokedEvent
+  extends DomainEvent<"workspace.invitation.revoked", WorkspaceInvitationRevokedPayload> {}
+
+export interface WorkspaceInvitationAcceptedPayload {
+  readonly workspaceId: string;
+  readonly invitationId: string;
+  readonly acceptedByUserId: string;
+  readonly role: WorkspaceRole;
+}
+export interface WorkspaceInvitationAcceptedEvent
+  extends DomainEvent<"workspace.invitation.accepted", WorkspaceInvitationAcceptedPayload> {}
+
 // ── Discriminated Union ─────────────────────────────────────────────────────
 
 export type WorkspaceEvent =
@@ -144,4 +194,8 @@ export type WorkspaceEvent =
   | WorkspaceMemberRoleUpdatedEvent
   | WorkspaceMemberRemovedEvent
   | WorkspaceMemberLeftEvent
-  | WorkspaceMemberOwnershipTransferredEvent;
+  | WorkspaceMemberOwnershipTransferredEvent
+  | WorkspaceMemberAddedEvent
+  | WorkspaceInvitationCreatedEvent
+  | WorkspaceInvitationRevokedEvent
+  | WorkspaceInvitationAcceptedEvent;

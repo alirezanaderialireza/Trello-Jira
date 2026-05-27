@@ -63,6 +63,7 @@ import {
 } from "@repo/domain/workspaces";
 
 import { workspaceMembersRouter } from "./members.router";
+import { workspaceInvitationsRouter } from "./invitations.router";
 
 // ─── Shared schemas ─────────────────────────────────────────────────────────
 
@@ -139,6 +140,14 @@ export const workspacesRouter = router({
   // transferOwnership) and the row-lock-based fixes for the PR #50
   // bugs in the legacy implementation.
   members: workspaceMembersRouter,
+
+  // ── F3a.3: workspace invitations sub-router ─────────────────────────────
+  //
+  // Mounted as `v1.public.workspace.invitations.*`. See ./invitations.router.ts
+  // for the six procedures (list / create / revoke / getByToken / accept /
+  // getMyPending). Token-based invitation flow with BYPASSRLS for accept
+  // and getByToken (user not yet a workspace member at call time).
+  invitations: workspaceInvitationsRouter,
 
   // ── F3a.1: list workspaces the caller belongs to ──────────────────────────
   //
@@ -648,7 +657,10 @@ export const workspacesRouter = router({
       }));
     }),
 
-  // ── invite an existing user as a member (F3a.3 will deprecate) ────────────
+  // ── invite an existing user as a member (DEPRECATED by F3a.3) ──────────────
+  // TODO(F4): Remove once the UI is wired to workspace.invitations.create.
+  // This legacy procedure bypasses the token-based flow and directly adds a
+  // user by userId. The new flow uses email + token for security.
   inviteMember: protectedProcedure
     .input(
       z.object({
