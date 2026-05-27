@@ -1,6 +1,6 @@
 // packages/db/src/repositories/workspaces.repository.ts
-import { eq, and, inArray, count as drizzleCount } from "drizzle-orm";
-import { workspaces, workspaceMembers, boards } from "../schema";
+import { eq, and, inArray, count as drizzleCount, asc } from "drizzle-orm";
+import { workspaces, workspaceMembers, boards, users } from "../schema";
 import type {
   WorkspaceRepository,
   WorkspaceEntity,
@@ -33,6 +33,29 @@ export type WorkspaceDetail = {
   workspace: WorkspaceRow;
   memberCount: number;
   boardCount: number;
+};
+
+// ─── F3a.2 read-side projection ─────────────────────────────────────────────
+//
+// `WorkspaceMemberWithUser` is the shape returned by `listMembersWithUserInfo`
+// — one row per member with the public user fields the members tab needs
+// (display name, avatar, last-active). The join is a LEFT JOIN so a member
+// row whose `users` row is missing (shouldn't happen in normal flow because
+// of the FK, but defence in depth) still surfaces as `user: null`.
+
+export type WorkspaceMemberWithUser = {
+  workspaceId: string;
+  userId: string;
+  role: WorkspaceRole;
+  joinedAt: Date;
+  invitedBy: string | null;
+  user: {
+    id: string;
+    email: string;
+    displayName: string;
+    avatarUrl: string | null;
+    lastSeenAt: Date | null;
+  } | null;
 };
 
 export class DrizzleWorkspaceRepository implements WorkspaceRepository {
@@ -83,6 +106,64 @@ export class DrizzleWorkspaceRepository implements WorkspaceRepository {
   async getMembers(workspaceId: string): Promise<WorkspaceMemberEntity[]> {
     const rows = await this.db.select().from(workspaceMembers).where(eq(workspaceMembers.workspaceId, workspaceId));
     return rows.map(this.mapMember);
+  }
+
+  // ────────────────────────────────────────────────────────────────────────
+  // F3a.2 members-tab helper (with user JOIN)
+  // ────────────────────────────────────────────────────────────────────────
+
+  /**
+   * List every member of a workspace with the public user fields the
+   * members tab needs: displayName, avatarUrl, email (admin-visible),
+   * lastSeenAt (presence proxy — see steering A4 in F3a Plan).
+   *
+   * `lastSeenAt` is the source of truth for "X روز پیش" displays. It is
+   * updated on every presence heartbeat by the realtime presence router
+   * (packages/api/src/routers/realtime/presence.router.ts) and indexed
+   * for sort-by-recency.
+   *
+   * Ordering: ascending by `joinedAt` so the workspace creator (joined
+   * earliest) sits at the top — matches the Trello/Notion convention.
+   */
+  async listMembersWithUserInfo(
+    workspaceId: string,
+  ): Promise<WorkspaceMemberWithUser[]> {
+    const rows = await this.db
+      .select({
+        workspaceId: workspaceMembers.workspaceId,
+        userId: workspaceMembers.userId,
+        role: workspaceMembers.role,
+        joinedAt: workspaceMembers.joinedAt,
+        invitedBy: workspaceMembers.invitedBy,
+        userIdJoined: users.id,
+        userEmail: users.email,
+        userDisplayName: users.displayName,
+        userAvatarUrl: users.avatarUrl,
+        userLastSeenAt: users.lastSeenAt,
+      })
+      .from(workspaceMembers)
+      .leftJoin(users, eq(users.id, workspaceMembers.userId))
+      .where(eq(workspaceMembers.workspaceId, workspaceId))
+      .orderBy(asc(workspaceMembers.joinedAt));
+
+    return rows.map(
+      (r: any): WorkspaceMemberWithUser => ({
+        workspaceId: r.workspaceId,
+        userId: r.userId,
+        role: r.role as WorkspaceRole,
+        joinedAt: r.joinedAt,
+        invitedBy: r.invitedBy,
+        user: r.userIdJoined
+          ? {
+              id: r.userIdJoined,
+              email: r.userEmail,
+              displayName: r.userDisplayName,
+              avatarUrl: r.userAvatarUrl,
+              lastSeenAt: r.userLastSeenAt,
+            }
+          : null,
+      }),
+    );
   }
 
   // ────────────────────────────────────────────────────────────────────────

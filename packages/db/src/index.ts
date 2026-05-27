@@ -82,7 +82,7 @@ export {
 };
 
 // F3a.1 read-side projection types
-export type { WorkspaceListItem, WorkspaceDetail } from "./repositories/workspaces.repository";
+export type { WorkspaceListItem, WorkspaceDetail, WorkspaceMemberWithUser } from "./repositories/workspaces.repository";
 
 // ============================================================================
 // 🌟 5. Re-Exports Schemas (برای دسترسی سایر لایه‌ها به تایپ‌ها و جدول‌ها)
