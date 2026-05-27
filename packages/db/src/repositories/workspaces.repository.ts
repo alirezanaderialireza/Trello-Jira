@@ -1,6 +1,6 @@
 // packages/db/src/repositories/workspaces.repository.ts
-import { eq, and } from "drizzle-orm";
-import { workspaces, workspaceMembers } from "../schema";
+import { eq, and, inArray, count as drizzleCount } from "drizzle-orm";
+import { workspaces, workspaceMembers, boards } from "../schema";
 import type {
   WorkspaceRepository,
   WorkspaceEntity,
@@ -8,8 +8,32 @@ import type {
   WorkspaceSlug,
   WorkspaceRole,
 } from "@repo/domain/workspaces";
-import type { WorkspaceVisibility } from "../schema/workspaces";
+import type { Workspace as WorkspaceRow, WorkspaceVisibility } from "../schema/workspaces";
 import { notDeleted } from "../lib/softDeleteFilter";
+
+// ─── F3a.1 read-side projections ──────────────────────────────────────────
+//
+// `WorkspaceListItem` is the shape returned by `listForUser` — one row per
+// membership, with the role and count metadata the sidebar needs. Counts are
+// derived via SQL aggregates (no N+1).
+//
+// `WorkspaceDetail` is the shape returned by `getBySlugWithCounts` — a
+// single workspace plus its counts, but WITHOUT the caller's role (the
+// router enforces membership separately and stamps the role into the
+// response).
+
+export type WorkspaceListItem = {
+  workspace: WorkspaceRow;
+  role: WorkspaceRole;
+  memberCount: number;
+  boardCount: number;
+};
+
+export type WorkspaceDetail = {
+  workspace: WorkspaceRow;
+  memberCount: number;
+  boardCount: number;
+};
 
 export class DrizzleWorkspaceRepository implements WorkspaceRepository {
   constructor(private readonly db: any) {}
@@ -59,6 +83,154 @@ export class DrizzleWorkspaceRepository implements WorkspaceRepository {
   async getMembers(workspaceId: string): Promise<WorkspaceMemberEntity[]> {
     const rows = await this.db.select().from(workspaceMembers).where(eq(workspaceMembers.workspaceId, workspaceId));
     return rows.map(this.mapMember);
+  }
+
+  // ────────────────────────────────────────────────────────────────────────
+  // F3a.1 list/detail helpers (with member + board counts)
+  // ────────────────────────────────────────────────────────────────────────
+  //
+  // Why these live in the repository (not in a service or in the router):
+  //   • They are pure DB shape — no business logic. The router stays thin.
+  //   • The counts are computed via SQL aggregates (count(*) / GROUP BY)
+  //     in a single round-trip per call instead of N+1 queries from JS.
+  //   • Keeping the join here means RLS gates apply uniformly: the router
+  //     calls these inside ctx.runInTenantTx, so workspace_members /
+  //     boards filters by current_tenant_id in production, while tests
+  //     can use a non-RLS db handle.
+
+  /**
+   * List every workspace the given user is a member of, with the member's
+   * role inside each one and a fresh count of total members + non-deleted
+   * boards. Soft-deleted workspaces are excluded.
+   *
+   * Used by `workspaces.list` (sidebar/landing).
+   *
+   * Note: the count subqueries do NOT filter by RLS — they aggregate over
+   * workspace_members and boards tables that the same RLS context already
+   * scopes to the caller's tenant. Since this query is invoked by F3a.1's
+   * `protectedProcedure`, it runs inside the tenantContextMiddleware tx
+   * with `app.current_tenant_id` set.
+   */
+  async listForUser(userId: string): Promise<WorkspaceListItem[]> {
+    // Two-step instead of one heavy SQL string: keeps Drizzle query-builder
+    // typing intact and is easier to maintain than a hand-written sql\`...\`.
+    const memberships = await this.db
+      .select({
+        workspaceId: workspaceMembers.workspaceId,
+        role: workspaceMembers.role,
+      })
+      .from(workspaceMembers)
+      .where(eq(workspaceMembers.userId, userId));
+
+    if (memberships.length === 0) return [];
+
+    const wsIds = memberships.map((m: { workspaceId: string }) => m.workspaceId);
+    const wsRows = await this.db
+      .select()
+      .from(workspaces)
+      .where(and(inArray(workspaces.id, wsIds), notDeleted(workspaces)));
+
+    // Counts: single query each, grouped.
+    const memberCounts = await this.db
+      .select({
+        workspaceId: workspaceMembers.workspaceId,
+        count: drizzleCount(workspaceMembers.userId),
+      })
+      .from(workspaceMembers)
+      .where(inArray(workspaceMembers.workspaceId, wsIds))
+      .groupBy(workspaceMembers.workspaceId);
+
+    const boardCounts = await this.db
+      .select({
+        tenantId: boards.tenantId,
+        count: drizzleCount(boards.id),
+      })
+      .from(boards)
+      .where(and(inArray(boards.tenantId, wsIds), notDeleted(boards)))
+      .groupBy(boards.tenantId);
+
+    const memberCountMap = new Map<string, number>(
+      memberCounts.map((r: { workspaceId: string; count: number }) => [
+        r.workspaceId,
+        Number(r.count),
+      ]),
+    );
+    const boardCountMap = new Map<string, number>(
+      boardCounts.map((r: { tenantId: string; count: number }) => [
+        r.tenantId,
+        Number(r.count),
+      ]),
+    );
+    const roleByWs = new Map<string, WorkspaceRole>(
+      memberships.map((m: { workspaceId: string; role: string }) => [
+        m.workspaceId,
+        m.role as WorkspaceRole,
+      ]),
+    );
+
+    return wsRows.map((row: WorkspaceRow) => ({
+      workspace: row,
+      role: roleByWs.get(row.id) ?? "VIEWER",
+      memberCount: memberCountMap.get(row.id) ?? 0,
+      boardCount: boardCountMap.get(row.id) ?? 0,
+    }));
+  }
+
+  /**
+   * Fetch a single workspace by slug along with member + non-deleted-board
+   * counts. Returns `null` if the slug doesn't resolve to a live workspace.
+   *
+   * Used by `workspaces.getBySlug` (workspace home page header).
+   */
+  async getBySlugWithCounts(slug: string): Promise<WorkspaceDetail | null> {
+    const wsRow = await this.db
+      .select()
+      .from(workspaces)
+      .where(and(eq(workspaces.slug, slug), notDeleted(workspaces)))
+      .limit(1);
+
+    if (!wsRow[0]) return null;
+    const workspace = wsRow[0] as WorkspaceRow;
+
+    const [memberCountRow, boardCountRow] = await Promise.all([
+      this.db
+        .select({ count: drizzleCount(workspaceMembers.userId) })
+        .from(workspaceMembers)
+        .where(eq(workspaceMembers.workspaceId, workspace.id)),
+      this.db
+        .select({ count: drizzleCount(boards.id) })
+        .from(boards)
+        .where(and(eq(boards.tenantId, workspace.id), notDeleted(boards))),
+    ]);
+
+    return {
+      workspace,
+      memberCount: Number((memberCountRow[0] as { count: number })?.count ?? 0),
+      boardCount: Number((boardCountRow[0] as { count: number })?.count ?? 0),
+    };
+  }
+
+  /**
+   * Update workspace metadata fields (name / description / slug). Only the
+   * supplied keys are written — undefined keys are ignored. Always bumps
+   * `updatedAt`. Caller is responsible for slug-uniqueness checks (the
+   * partial unique index on `slug WHERE deleted_at IS NULL` will surface a
+   * conflict as a Postgres unique-violation otherwise).
+   */
+  async updateMetadata(
+    id: string,
+    fields: Partial<{ name: string; description: string | null; slug: string }>,
+    tx?: any,
+  ): Promise<void> {
+    const db = tx ?? this.db;
+    const set: Record<string, unknown> = { updatedAt: new Date() };
+    if (fields.name !== undefined) set.name = fields.name;
+    if (fields.description !== undefined) set.description = fields.description;
+    if (fields.slug !== undefined) set.slug = fields.slug;
+    await db
+      .update(workspaces)
+      .set(set)
+      .where(and(eq(workspaces.id, id), notDeleted(workspaces)));
   }
 
   async addMember(member: WorkspaceMemberEntity, tx?: any): Promise<void> {

@@ -18,6 +18,7 @@ import { DrizzleOutboxRepository } from "./repositories/outbox.repository";
 import { DrizzleAuditRepository } from "./repositories/audit.repository";
 import { DrizzleIdempotencyRepository } from "./repositories/idempotency.repository";
 import { DrizzleSequenceRepository } from "./repositories/sequence.repository";
+import { DrizzleWorkspaceRepository } from "./repositories/workspaces.repository";
 
 import { BoardReadModels } from "./projections/board.read-models";
 
@@ -63,6 +64,7 @@ export const outboxRepo = new DrizzleOutboxRepository(db);
 export const auditRepo = new DrizzleAuditRepository(db);
 export const idempotencyRepo = new DrizzleIdempotencyRepository(db);
 export const sequenceRepo = new DrizzleSequenceRepository(db);
+export const workspaceRepo = new DrizzleWorkspaceRepository(db);
 
 // ============================================================================
 // 🌟 4. Export Repository Classes (Type Usage)
@@ -75,8 +77,12 @@ export {
   DrizzleAuditRepository,
   DrizzleIdempotencyRepository,
   DrizzleSequenceRepository,
+  DrizzleWorkspaceRepository,
   BoardReadModels,
 };
+
+// F3a.1 read-side projection types
+export type { WorkspaceListItem, WorkspaceDetail } from "./repositories/workspaces.repository";
 
 // ============================================================================
 // 🌟 5. Re-Exports Schemas (برای دسترسی سایر لایه‌ها به تایپ‌ها و جدول‌ها)
