@@ -18,6 +18,7 @@ import {
   DrizzleSequenceRepository,
   BoardReadModels,
   boardMembers,
+  boards,
 } from "@repo/db";
 
 // 📦 ORM operators (for board membership guard)
@@ -613,6 +614,43 @@ const tenantContextMiddleware = t.middleware(
     }
 
     return ctx.runInTenantTx(async (tx) => {
+      // ──────────────────────────────────────────────────────────────────
+      // Per-request board → workspace cache (F2 D4).
+      //
+      // `boardId → tenantId/workspaceId` is a topology fact that cannot
+      // change at runtime — a board never moves tenants. A single request
+      // that needs the mapping more than once (e.g. a router which calls
+      // an admin assertion twice, or a F2 builder that loads board info
+      // before delegating to a service) should pay one DB round-trip,
+      // not N. Redis is overkill for an immutable value with sub-request
+      // lifetime; a Map dies with the request and never goes stale.
+      //
+      // The map and the helper close over the active transaction `tx`,
+      // so the lookup runs inside the same RLS-enforced tx as the rest
+      // of the procedure. A missing board surfaces as NOT_FOUND
+      // (Persian message for the user; English code for the dev tools).
+      // ──────────────────────────────────────────────────────────────────
+      const boardWorkspaceCache = new Map<string, string>();
+
+      const resolveBoardWorkspaceId = async (
+        boardId: string,
+      ): Promise<string> => {
+        const cached = boardWorkspaceCache.get(boardId);
+        if (cached !== undefined) return cached;
+
+        const row = await tx.query.boards.findFirst({
+          where: eq(boards.id, boardId),
+        });
+        if (!row) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "بورد یافت نشد.",
+          });
+        }
+        boardWorkspaceCache.set(boardId, row.tenantId);
+        return row.tenantId;
+      };
+
       return next({
         ctx: {
           ...ctx,
@@ -624,6 +662,11 @@ const tenantContextMiddleware = t.middleware(
           // Also expose `tx` directly for procedures that explicitly want
           // to be RLS-aware in their type signature.
           tx,
+          // Per-request board → workspace mapping. Procedures (especially
+          // F2 builders that need to assert workspace membership of a
+          // board's tenant) should call this helper instead of running a
+          // fresh boards lookup each time.
+          resolveBoardWorkspaceId,
         },
       });
     });
