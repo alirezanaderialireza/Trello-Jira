@@ -39,7 +39,7 @@ import { router, protectedProcedure, publicProcedure } from "../../trpc";
 import { workspaceAdminProcedure } from "../../middleware/workspaceRoleProcedures";
 import { withIdempotency } from "../../utils/idempotency";
 import { withServiceRoleConnection } from "../../services/serviceRoleConnection";
-import { maskEmail, maskToken } from "../../services/invitationTokenService";
+import { maskEmail } from "../../services/invitationTokenService";
 import {
   DrizzleWorkspaceInvitationsRepository,
   DuplicateActiveInvitationError,
