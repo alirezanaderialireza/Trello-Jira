@@ -30,3 +30,6 @@ export * from "./services";
 // 8️⃣ List Use Cases
 export * from "./list/create-list";
 export * from "./list/move-list";
+
+// 9️⃣ Board Use Cases (F3b)
+export * from "./board/use-cases/addBoardMember";
