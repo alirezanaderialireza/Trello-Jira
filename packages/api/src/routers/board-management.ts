@@ -48,6 +48,7 @@ import {
 import { boardAdminProcedure } from "../middleware/boardRoleProcedures";
 import { withIdempotency } from "../utils/idempotency";
 import { boards, boardMembers } from "@repo/db";
+import type { BoardId } from "@repo/domain";
 
 // ─── Shared schemas ─────────────────────────────────────────────────────────
 
@@ -248,7 +249,7 @@ export const boardManagementRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       return withIdempotency(ctx, input.idempotencyKey, "v1", async () => {
-        await ctx.repos.board.archive(input.boardId, ctx.infra.db);
+        await ctx.repos.board.archive(input.boardId as BoardId, ctx.infra.db);
 
         await ctx.repos.outbox.append(ctx.infra.db, {
           eventId: crypto.randomUUID(),
@@ -281,7 +282,7 @@ export const boardManagementRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       return withIdempotency(ctx, input.idempotencyKey, "v1", async () => {
-        await ctx.repos.board.unarchive(input.boardId, ctx.infra.db);
+        await ctx.repos.board.unarchive(input.boardId as BoardId, ctx.infra.db);
 
         await ctx.repos.outbox.append(ctx.infra.db, {
           eventId: crypto.randomUUID(),
@@ -325,7 +326,7 @@ export const boardManagementRouter = router({
         }
 
         const now = new Date();
-        await ctx.repos.board.softDelete(input.boardId, ctx.infra.db);
+        await ctx.repos.board.softDelete(input.boardId as BoardId, ctx.infra.db);
 
         await ctx.repos.outbox.append(ctx.infra.db, {
           eventId: crypto.randomUUID(),
@@ -392,7 +393,7 @@ export const boardManagementRouter = router({
         }
 
         const now = new Date();
-        await ctx.repos.board.restore(input.boardId, ctx.infra.db);
+        await ctx.repos.board.restore(input.boardId as BoardId, ctx.infra.db);
 
         await ctx.repos.outbox.append(ctx.infra.db, {
           eventId: crypto.randomUUID(),
@@ -425,7 +426,7 @@ export const boardManagementRouter = router({
     .mutation(async ({ input, ctx }) => {
       return withIdempotency(ctx, input.idempotencyKey, "v1", async () => {
         await ctx.repos.board.setBackground(
-          input.boardId,
+          input.boardId as BoardId,
           input.backgroundData,
           ctx.infra.db,
         );
@@ -481,7 +482,7 @@ export const boardManagementRouter = router({
         const previousVisibility = board.visibility as "workspace" | "private" | "public";
 
         await ctx.repos.board.updateVisibility(
-          input.boardId,
+          input.boardId as BoardId,
           input.visibility,
           ctx.infra.db,
         );
