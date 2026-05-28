@@ -249,3 +249,185 @@ feature that needs them rather than imported from
 `features/shell/lib/roleLabels.ts`. When moving a label set into
 shared territory, hoist it to `apps/web/src/lib/` (which the
 boundaries linter classifies as `shared`).
+
+
+
+# Board Settings Drawer Conventions (F5b)
+
+Architecture and UX rules established by F5b for the board-level
+settings drawer. Apply to every change inside:
+
+- `apps/web/src/app/board/[boardId]/_components/`
+- `apps/web/src/app/board/[boardId]/_actions/`
+- `apps/web/src/features/board-settings/**`
+- `packages/api/src/routers/board-management.ts` (where the
+  `getBoardSettings` procedure lives)
+
+## 11. Drawer URL state
+
+The board settings drawer's open/close + active tab live in a
+single URL query param: `?settings=<tab>`. Five valid values:
+`about`, `members`, `background`, `permissions`, `danger`. Anything
+else is treated as "drawer closed".
+
+Why URL state (not React state):
+- Share-able links to a specific tab.
+- Back / forward navigation cleanly returns to the previous tab.
+- Refresh preserves the open drawer.
+- The trigger button is a one-line URL update — no global drawer
+  context.
+
+The wrapper (`BoardSettings.tsx`) owns the param and uses
+`router.replace` (not `push`) for tab switches so each switch
+isn't a separate history entry — only open / close transitions
+count.
+
+When adding a new param to the board page that might collide with
+`settings`, namespace it (e.g. `?card=...`). Both params can
+coexist because the wrapper preserves all other params via
+`URLSearchParams.toString()`.
+
+## 12. Server Action prop bag pattern
+
+The board page imports all 10 board-settings Server Actions and
+groups them into a single `BOARD_SETTINGS_ACTIONS` const at module
+scope:
+
+```ts
+const BOARD_SETTINGS_ACTIONS = {
+  onRename: renameBoardAction,
+  onArchive: archiveBoardAction,
+  // ...
+} as const;
+```
+
+The bag is passed as a single `actions` prop to `<BoardSettings>`,
+which forwards it to the drawer, which destructures into per-tab
+props. This keeps the drawer's surface narrow (one prop) and the
+page's wiring obvious (one literal).
+
+The bag MUST be defined at module scope (not inside the page
+component) so the action references are stable across renders.
+React's prop-comparison would otherwise flag a "new function
+identity per render" and re-mount tab components.
+
+## 13. CSS variable preview pattern
+
+Live-preview UX (hover a swatch -> board background updates in
+real time) is implemented via a single `--board-bg` CSS custom
+property on `document.body`:
+
+| Step | Actor | Effect |
+|---|---|---|
+| First paint | `<main style={{ background: 'var(--board-bg, <persistedCss>)' }}>` | SSR uses the persisted CSS as the var() fallback — no flash. |
+| Hydration | `<BoardBackgroundController initialCss={...}>` | Sets `--board-bg` on body to the persisted CSS. |
+| Hover swatch | `BackgroundTab` `onMouseEnter` | Writes `--board-bg` = preview CSS. |
+| Hover leave | `BackgroundTab` `onMouseLeave` | Restores `--board-bg` = persistedRef.current. |
+| Click commit | `BackgroundTab` `onClick` | Calls setBackgroundAction, updates persistedRef. |
+| Tab unmount / drawer close | `BackgroundTab` cleanup | Restores `--board-bg` = persistedRef.current. |
+| Page navigation | `BoardBackgroundController` cleanup | Removes `--board-bg` from body. |
+
+The variable name is single-sourced from
+`features/board-settings/lib/applyBackground.ts` as
+`BOARD_BG_CSS_VAR`. NEVER hardcode `--board-bg` elsewhere — import
+the constant.
+
+Why this beats Context lifting: the preview path crosses three
+component layers (BackgroundTab -> drawer -> page main).
+Threading state through props or context would require every
+intermediate to forward it. The CSS variable is observable
+globally without instrumenting the path.
+
+## 14. Background data persistence (token-based)
+
+Backgrounds are stored as a tiny JSON object in `boards.background_data`:
+
+```json
+{ "type": "color", "id": "blue" }
+{ "type": "gradient", "id": "sunset" }
+```
+
+The DB column has only a "must be a JSON object" CHECK — no Zod
+schema, no shape enforcement at the persistence layer. The token
+resolver `renderBackgroundCss` lives in
+`features/board-settings/lib/applyBackground.ts` and is the SINGLE
+place that turns a token into a CSS value.
+
+Resilience to legacy / corrupted rows: `renderBackgroundCss`
+defensively type-guards via `isBackgroundData` before lookup;
+unknown shapes fall back to `DEFAULT_BACKGROUND_CSS` (matching the
+pre-F5b hardcoded `bg-blue-600`). This is why the live preview's
+revert path can safely use `persistedRef.current` even if the
+persisted JSONB is malformed — the resolver always returns a
+valid CSS string.
+
+Adding a new preset: edit `backgroundPresets.ts` (add to
+`COLOR_PRESETS` or `GRADIENT_PRESETS`). Existing boards keep
+working because they reference stable ids — no migration needed.
+
+## 15. Boards have a workspace-member-first invariant
+
+Inviting a user to a board only works when they are already a
+member of the parent workspace (enforced by the
+`addBoardMember` domain use case via
+`assertTargetIsWorkspaceMember`). The MembersTab invite picker
+therefore:
+
+1. Reads `workspaceId` from `getBoardSettings`.
+2. Fetches `workspace.members.list({ workspaceId })`.
+3. Subtracts the existing board members.
+4. Renders the addable pool in a select.
+
+When the addable pool is empty, the modal shows an explainer
+pointing the admin at the workspace settings invite flow ("ابتدا
+عضو جدیدی به فضای کاری دعوت کنید"). This is a UX-level mirror of
+the server invariant — preventing the user from triggering a
+guaranteed-failure flow.
+
+## 16. boardManagement.getBoardSettings authorization
+
+The `getBoardSettings` procedure is `boardMemberProcedure` (read
+access for any active member) — NOT admin-gated. The drawer's
+role gate lives on the client; a MEMBER who URL-hacks the
+`?settings=...` param sees a read-only view of the data without an
+unauthorized error. Per-tab capability gates inside the drawer
+hide the action affordances.
+
+This is intentional defence-in-depth: writes are still
+admin-gated server-side via `boardAdminWriteProcedure` etc., so a
+URL-hack can't escalate privilege. Showing a read-only view is
+better UX than a 403.
+
+## TODOs (parked for follow-up)
+
+- **Description editor (About tab)** — currently read-only.
+  Either extend `boardManagement.renameBoard` to accept an
+  optional `description` input, or add a new
+  `boardManagement.updateBoardMetadata` procedure. F1.2 candidate.
+
+- **Naming cleanup** — `boardManagement.deleteBoard` performs a
+  SOFT delete but the procedure name doesn't say so. Rename to
+  `softDeleteBoard` for parity with workspace delete /
+  restore pair. Requires updating consumers (Server Action +
+  any UI test files). Schedule alongside the description editor
+  PR so we touch board-management.ts once.
+
+- **Sidebar archived board filter** — `userBoardMetadata.listStarred`
+  + `listRecent` only filter `notDeleted(boards)`. Archived boards
+  still appear in the sidebar starred / recent sections. Add an
+  `eq(boards.archivedAt, null)` clause (or accept it as
+  intentional — archived boards may stay visible if starred).
+  Polish followup.
+
+- **Focus trap library on the drawer** — the F5b drawer uses
+  basic Tab cycling. A Radix or `focus-trap-react` library would
+  give proper focus containment with shift+tab + sentinel
+  elements. Polish followup.
+
+- **Replace `window.confirm` in MembersTab** — same as F5a's
+  members table. A custom confirm dialog (with Persian copy)
+  ships in the polish phase.
+
+- **Description edit + rich text** — once the editor lands, the
+  About tab also needs a simple Markdown / mentions surface.
+  Scope-defining PR before implementation.
