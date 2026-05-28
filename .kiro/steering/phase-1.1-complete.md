@@ -215,6 +215,7 @@ Recorded so the next planner doesn't re-discover them.
 | Lighthouse CI integration (block PR on a11y regression) | F5c | Phase 1.4 polish | Tooling investment; manual checklist covers Phase 1.1. |
 | E2E job: drop `continue-on-error: true` after 5 successful baselines | F5c | After 5 green runs on `main` | First-week stabilisation. |
 | Star toggle UI (and E2E step 10) | observed during F5c | Phase 1.2 card features | Step 10 of the smoke spec is best-effort; the star toggle isn't yet exposed in BoardView. |
+| Regenerate `pnpm-lock.yaml` and re-enable `--frozen-lockfile` in CI | F5c hotfix | Right after F5c merges | Sandbox could not run `pnpm install` (proxy 403 to registry.npmjs.org), so two new devDeps (`@playwright/test`, `postgres`) shipped without lockfile entries. Both `build-and-test` and `e2e` jobs in `.github/workflows/ci.yml` were temporarily switched to `--no-frozen-lockfile`. On a clean main checkout: `pnpm install` regenerates the lockfile; commit it; restore `--frozen-lockfile` in both jobs. |
 
 ---
 
