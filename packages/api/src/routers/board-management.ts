@@ -45,7 +45,10 @@ import {
   boardAdminWriteProcedure,
   makeBoardAdminWriteProcedure,
 } from "../middleware/writeProcedures";
-import { boardAdminProcedure } from "../middleware/boardRoleProcedures";
+import {
+  boardAdminProcedure,
+  boardMemberProcedure,
+} from "../middleware/boardRoleProcedures";
 import { withIdempotency } from "../utils/idempotency";
 import { boards, boardMembers } from "@repo/db";
 import type { BoardId } from "@repo/domain";
@@ -158,6 +161,67 @@ export const boardManagementRouter = router({
           updatedAt: b.updatedAt.toISOString(),
         })),
         nextCursor,
+      };
+    }),
+
+  // ── getBoardSettings (any active member) ─────────────────────────────────
+  //
+  // F5b — single-board metadata read for the board settings drawer.
+  //
+  // Returns the fields the drawer needs to render initial state for its
+  // tabs:
+  //   • title          (About tab pre-fill)
+  //   • description    (About tab — currently read-only; the editor lands
+  //                     in F1.2 once renameBoard grows a description input
+  //                     or a dedicated procedure replaces it)
+  //   • visibility     (Permissions tab radio pre-selection)
+  //   • backgroundData (Background tab swatch highlight)
+  //   • archivedAt     (Danger tab — reveals the soft-delete section only
+  //                     when archived)
+  //   • role           (per-tab capability gates inside the drawer)
+  //
+  // Authorization is `boardMemberProcedure` (read access for any active
+  // member). Settings is OWNER+ADMIN only at the UI level, but a MEMBER
+  // hitting this endpoint directly still gets the data — that's
+  // intentional: the drawer's role gate lives on the client and a MEMBER
+  // who URL-hacks just sees a read-only view.
+  //
+  // Lifecycle:
+  //   • Soft-deleted boards are NOT returned (NOT_FOUND). The drawer is
+  //     unreachable for a soft-deleted board because the page itself
+  //     bails earlier; this is defence-in-depth.
+  //   • Archived boards ARE returned — the drawer needs to show the
+  //     "بازگردانی" CTA on archived boards.
+  getBoardSettings: boardMemberProcedure
+    .input(z.object({ boardId: BoardIdSchema }))
+    .query(async ({ input, ctx }) => {
+      const board = await ctx.infra.db.query.boards.findFirst({
+        where: and(eq(boards.id, input.boardId), isNull(boards.deletedAt)),
+      });
+      if (!board) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "بورد یافت نشد.",
+        });
+      }
+
+      // The boardMemberGuard middleware loaded ctx.boardMembership;
+      // we just surface the role to the client so the drawer can gate
+      // its tabs.
+      const role = (ctx as any).boardMembership?.role as
+        | "OWNER"
+        | "ADMIN"
+        | "MEMBER"
+        | undefined;
+
+      return {
+        id: board.id,
+        title: board.title,
+        description: board.description ?? null,
+        visibility: board.visibility as "workspace" | "private" | "public",
+        backgroundData: board.backgroundData,
+        archivedAt: board.archivedAt?.toISOString() ?? null,
+        role: role ?? "MEMBER",
       };
     }),
 
