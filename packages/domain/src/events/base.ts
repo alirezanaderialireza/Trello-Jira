@@ -46,6 +46,7 @@ export type DomainEventType =
   | "label.deleted"
   // ── Checklist ───────────────────────────────────────────────────────────
   | "checklist.created"
+  | "checklist.updated"
   | "checklist.item_added"
   | "checklist.item_updated"
   | "checklist.item_removed"

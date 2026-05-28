@@ -61,13 +61,14 @@ export class ChecklistItemNotFoundError extends Error {
   }
 }
 
-export class CardNotFoundError extends Error {
-  readonly code = "CARD_NOT_FOUND" as const;
-  constructor() {
-    super("CARD_NOT_FOUND");
-    this.name = "CardNotFoundError";
-  }
-}
+// Note: `CardNotFoundError` is intentionally re-used from the labels
+// errors module (packages/domain/src/labels/errors.ts) — both slices
+// surface the same wire shape (TRPCError NOT_FOUND with the Persian
+// message "کارت یافت نشد."), and re-exporting a duplicate from
+// `./checklists/errors` would clash at the package root barrel
+// (TS2308 "already exported" against `./labels`). The checklists
+// router imports `CardNotFoundError` from `@repo/domain` and the
+// resolver picks up the labels-side definition transparently.
 
 export class ChecklistCardMismatchError extends Error {
   readonly code = "CHECKLIST_CARD_MISMATCH" as const;
@@ -85,5 +86,4 @@ export type ChecklistDomainError =
   | ChecklistItemTextTooLongError
   | ChecklistNotFoundError
   | ChecklistItemNotFoundError
-  | CardNotFoundError
   | ChecklistCardMismatchError;
