@@ -65,34 +65,18 @@ const BOARD_TITLE = "تابلوی برنامه‌ریزی";
 // Suite
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ─── Skipped pending tRPC App Router migration (PR #N+1, Phase 1.1.5) ─────
-// While debugging this spec end-to-end (F5c-Recovery loop), the dev server
-// surfaced a production bug in the (app) layout tree:
+// ─── Re-enabled after tRPC App Router migration (PR #60, Phase 1.1.5) ────
+// Phase 1.1.5 replaced createTRPCNext with createTRPCReact and added a
+// TRPCProvider to the root layout, which fixed the
+// "Unable to find tRPC Context" crash that previously forced this suite
+// to be skipped. Now re-running to empirically verify Phase 1.1
+// functional completeness — see commit message for the decision tree
+// on outcomes.
 //
-//   "Unable to find tRPC Context. Did you forget to wrap your App inside
-//    `withTRPC` HoC?" — at Sidebar.tsx:81 calling
-//    trpc.v1.public.sidebar.bootstrap.useQuery(...)
-//
-// Root cause: apps/web/src/utils/trpc.ts uses `createTRPCNext` (the Pages
-// Router API) which expects a `withTRPC()(MyApp)` HOC in `pages/_app.tsx`.
-// This project is App Router (no _app.tsx), so the HOC is never applied
-// and tRPC's React context is undefined for every Client Component that
-// calls `trpc.X.Y.useQuery/useMutation`.
-//
-// The fix is a substantive production change (replace createTRPCNext with
-// createTRPCReact + add a TRPCProvider to the root layout) that belongs in
-// its own PR — Master Contract Rule 4 (Scope Discipline). PR #58 (this
-// branch, F5c) keeps its original scope (sidebar archived filter + DoD
-// steering doc + CI hotfixes); the tRPC migration ships as Phase 1.1.5
-// in the next PR.
-//
-// Re-enable this suite once the tRPC migration merges and any follow-up
-// runtime issues surface (target: Phase 1.4 polish window per
-// .kiro/steering/phase-1.1-complete.md "Polish followups" table).
-//
-// TODO Phase 1.4: re-enable after tRPC migration (PR #N+1) and any
-// subsequent runtime issues are resolved.
-test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
+// TODO (only if a step fails and we choose to defer it): file a Phase 1.4
+// follow-up ticket with the failing step number + error log, then either
+// fix here or revert this commit to test.describe.skip.
+test.describe("Phase 1.1 — workspace lifecycle smoke flow", () => {
   let userAContext: BrowserContext;
   let userBContext: BrowserContext;
   let userAPage: Page;
