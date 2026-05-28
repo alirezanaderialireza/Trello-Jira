@@ -412,12 +412,11 @@ better UX than a 403.
   any UI test files). Schedule alongside the description editor
   PR so we touch board-management.ts once.
 
-- **Sidebar archived board filter** — `userBoardMetadata.listStarred`
-  + `listRecent` only filter `notDeleted(boards)`. Archived boards
-  still appear in the sidebar starred / recent sections. Add an
-  `eq(boards.archivedAt, null)` clause (or accept it as
-  intentional — archived boards may stay visible if starred).
-  Polish followup.
+- **Sidebar archived board filter** — ✅ **CLOSED in F5c**.
+  Added `isNull(boards.archivedAt)` to the WHERE clauses of both
+  `userBoardMetadata.listStarred` and `listRecent` so archived
+  boards no longer appear in the sidebar starred / recent sections.
+  See packages/db/src/repositories/userBoardMetadata.repository.ts.
 
 - **Focus trap library on the drawer** — the F5b drawer uses
   basic Tab cycling. A Radix or `focus-trap-react` library would
