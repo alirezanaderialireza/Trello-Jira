@@ -160,32 +160,46 @@ export const boardApi = {
   createLabel: async (payload: {
     boardId: string;
     name: string;
-    color: string;
-    mutationId: string;
+    colorToken: string;
+    idempotencyKey: string;
+    correlationId?: string;
   }) => (trpc as any).v1.public.label.create.mutateAsync(payload),
 
   updateLabel: async (payload: {
     labelId: string;
     name?: string;
-    color?: string;
-    mutationId: string;
+    colorToken?: string;
+    position?: string;
+    idempotencyKey: string;
+    correlationId?: string;
   }) => (trpc as any).v1.public.label.update.mutateAsync(payload),
 
   deleteLabel: async (payload: {
     labelId: string;
-    mutationId: string;
+    idempotencyKey: string;
+    correlationId?: string;
   }) => (trpc as any).v1.public.label.delete.mutateAsync(payload),
 
+  /**
+   * Procedure renamed in F1.2.1 from `addToCard` to `applyToCard`. The
+   * boardApi facade keeps its own method name (`addCardLabel`) so the
+   * existing optimistic-mutation hooks don't need to rename their
+   * imports — only the wire-level call has changed.
+   */
   addCardLabel: async (payload: {
+    boardId: string;
     cardId: string;
     labelId: string;
-    mutationId: string;
-  }) => (trpc as any).v1.public.label.addToCard.mutateAsync(payload),
+    idempotencyKey: string;
+    correlationId?: string;
+  }) => (trpc as any).v1.public.label.applyToCard.mutateAsync(payload),
 
   removeCardLabel: async (payload: {
+    boardId: string;
     cardId: string;
     labelId: string;
-    mutationId: string;
+    idempotencyKey: string;
+    correlationId?: string;
   }) => (trpc as any).v1.public.label.removeFromCard.mutateAsync(payload),
 
   // ============================================================================

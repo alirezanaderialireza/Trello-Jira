@@ -57,7 +57,20 @@ export type LabelDto = {
   id: string;
   boardId: string;
   name: string;
-  color: string;
+  /**
+   * Phase 1.2 (F1.2.1) — replaced the v1 `color` (hex string) with a
+   * named token from the canonical 12-token palette
+   * (`@repo/domain` → COLOR_TOKENS). UI components map the token to a
+   * CSS colour via a centralised lookup so a future palette swap
+   * touches one file, not every consumer.
+   */
+  colorToken: string;
+  /**
+   * LexoRank ordering token. Used by the manager (drag-and-drop
+   * reorder) and the picker (display order). Generated server-side on
+   * create, client-side via `@repo/domain/ordering` on reorder.
+   */
+  position: string;
   revision: number;
   isOptimistic?: boolean;
 };

@@ -33,3 +33,6 @@ export * from "./list/move-list";
 
 // 9️⃣ Board Use Cases (F3b)
 export * from "./board/use-cases/addBoardMember";
+
+// 🔟 Labels (Phase 1.2 — F1.2.1)
+export * from "./labels";

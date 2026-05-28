@@ -17,6 +17,7 @@ import {
   DrizzleIdempotencyRepository,
   DrizzleSequenceRepository,
   DrizzleWorkspaceRepository,
+  DrizzleLabelsRepository,
   BoardReadModels,
   boardMembers,
   boards,
@@ -197,6 +198,11 @@ const repositories = Object.freeze({
 
   workspace:
     new DrizzleWorkspaceRepository(
+      dbInstance
+    ),
+
+  labels:
+    new DrizzleLabelsRepository(
       dbInstance
     ),
 });
@@ -943,3 +949,35 @@ export const boardProtectedProcedure =
     .use(tenantGuard)
     .use(tenantContextMiddleware)
     .use(boardMemberGuard);
+
+// ============================================================================
+// 🛡️ Board Admin Role Guard  (Phase 1.2 D12 — minimal F2 builder)
+// ============================================================================
+// Composes onto `boardProtectedProcedure` and asserts the membership role
+// is admin-grade (`OWNER` or `ADMIN`). Mutations that should only be
+// performed by admins (e.g. label.delete) use `boardAdminProcedure`
+// instead of the inline-check pattern (`if role !== "ADMIN" throw`)
+// established in board-management.ts — that pattern is fine for one-off
+// checks, but for a feature surface with multiple admin-only mutations
+// the dedicated builder keeps the router shorter and the role policy
+// in one place.
+//
+// Order: this MUST come AFTER boardMemberGuard so `ctx.boardMembership`
+// is populated. The two role taxonomies in this codebase
+// (workspace_members.role from F3a vs board_members.role from F2) are
+// intentionally NOT unified here — workspace-level admin checks use the
+// existing inline pattern in workspaces/members.router.ts.
+// ============================================================================
+
+const boardAdminGuard = t.middleware(async ({ ctx, next }) => {
+  const role = (ctx as { boardMembership?: { role: string } }).boardMembership?.role;
+  if (role !== "ADMIN" && role !== "OWNER") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "این عملیات نیاز به دسترسی مدیر برد دارد.",
+    });
+  }
+  return next();
+});
+
+export const boardAdminProcedure = boardProtectedProcedure.use(boardAdminGuard);
