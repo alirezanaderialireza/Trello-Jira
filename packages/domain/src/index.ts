@@ -1,7 +1,7 @@
 // packages/domain/src/index.ts
 
 // 1️⃣ Core Entities
-export * from "./card/types";
+export * from "./card";
 export * from "./list/types";
 export * from "./board/types";
 export * from "./events";
@@ -9,6 +9,7 @@ export * from "./events";
 // 2️⃣ Shared Branded Types & Command Metadata
 export * from "./shared/ids";
 export * from "./shared/command-metadata";
+export * from "./shared/date-types";
 
 // 3️⃣ Ordering / LexoRank
 export * from "./ordering";
