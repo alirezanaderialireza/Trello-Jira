@@ -26,9 +26,19 @@
 //     a `_e2e` suffix, the module throws at import time. Devs who
 //     accidentally run the spec with their dev URL in the env get
 //     a loud refusal instead of a destroyed DB.
+//
+// Module-system note (F5c hotfix):
+//   This file deliberately does NOT use `import.meta.url`. Playwright
+//   auto-detects the host project's module system from its
+//   package.json — `apps/web` has no `"type": "module"`, so
+//   Playwright's TS loader compiles to CommonJS. `import.meta.url`
+//   in a CJS-compiled file blows up in CI with
+//   "ReferenceError: exports is not defined in ES module scope".
+//   We resolve the migrations folder from `process.cwd()` instead;
+//   Playwright sets cwd to `apps/web/` for both `pnpm --filter web
+//   e2e` and the playwright-config `webServer.cwd: "."` setting.
 
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -55,14 +65,19 @@ if (DATABASE_URL.includes("trello_os") && !DATABASE_URL.includes("trello_os_e2e"
 const client = postgres(DATABASE_URL, { max: 1, prepare: false });
 const db = drizzle(client);
 
-// Migrations folder is a relative path from this file to the
-// monorepo's @repo/db package. Resolved with import.meta.url so
-// the lookup works regardless of where Playwright is invoked from.
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Migrations folder, resolved from process.cwd(). Playwright invokes
+// the test runner with cwd = apps/web/ (the package directory, set
+// by `pnpm --filter web ...` and confirmed by the
+// `webServer.cwd: "."` directive in playwright.config.ts). From
+// there, `../../packages/db/migrations` reaches the monorepo's
+// @repo/db migrations directory.
 const MIGRATIONS_FOLDER = path.resolve(
-  __dirname,
-  "../../../../packages/db/migrations",
+  process.cwd(),
+  "..",
+  "..",
+  "packages",
+  "db",
+  "migrations",
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
