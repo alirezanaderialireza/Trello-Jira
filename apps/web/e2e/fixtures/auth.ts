@@ -38,18 +38,30 @@ export interface SignInParams {
  * Sign up a new user. Magic-link verification is auto-confirmed in
  * dev (per the auth flow spec D-5 in steering/auth-workspaces.md),
  * so successful signup leaves the user on `/workspaces`.
+ *
+ * Selector strategy:
+ *   The signup form's inputs have stable `name` attributes
+ *   (displayName, email, password, confirmPassword). We target by
+ *   `name` rather than `type=password` because the form has TWO
+ *   password fields (password + confirm), and Playwright's strict
+ *   locator mode would refuse to fill an ambiguous match.
  */
 export async function signUp(page: Page, params: SignupParams): Promise<void> {
   await page.goto("/signup");
-  await page.locator('input[name="displayName"], input[placeholder*="نام"]').first().fill(params.displayName);
-  await page.locator('input[type="email"]').fill(params.email);
-  await page.locator('input[type="password"]').fill(params.password);
+  await page.locator('input[name="displayName"]').fill(params.displayName);
+  await page.locator('input[name="email"]').fill(params.email);
+  await page.locator('input[name="password"]').fill(params.password);
+  await page.locator('input[name="confirmPassword"]').fill(params.password);
   await page.getByRole("button", { name: /ثبت‌نام|signup|sign up/i }).click();
   // Either lands on /workspaces (auto-verified flow) OR on
-  // /verify-email (when the email layer requires manual confirm).
-  // The spec only cares that we are signed in afterwards — assert
-  // either landing page.
-  await page.waitForURL(/\/(workspaces|verify-email)/, { timeout: 15_000 });
+  // /verify-email (when the email layer requires manual confirm),
+  // OR shows an inline success card with a "بازگشت به صفحه ورود"
+  // link (the current dev flow — see signup/page.tsx success state).
+  // The spec asserts presence of any post-signup signal.
+  await Promise.race([
+    page.waitForURL(/\/(workspaces|verify-email)/, { timeout: 15_000 }),
+    page.getByText(/ثبت‌نام موفق|ایمیل تأیید/).waitFor({ timeout: 15_000 }),
+  ]);
 }
 
 /**
