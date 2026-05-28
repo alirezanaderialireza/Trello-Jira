@@ -32,6 +32,15 @@ import {
   type BackgroundType,
 } from "./backgroundPresets";
 
+// Re-export the default so consumers can pull every background-
+// related symbol from this single resolver module without having
+// to know whether a constant is co-located with the palette
+// (backgroundPresets) or with the resolver (applyBackground).
+// `renderBackgroundCss` already returns this value internally for
+// unknown / null shapes; consumers seeding the var() fallback on
+// the canvas (e.g. board page.tsx) need the same constant.
+export { DEFAULT_BACKGROUND_CSS } from "./backgroundPresets";
+
 /**
  * Convert persisted background data into a CSS background value.
  *
