@@ -17,6 +17,7 @@ import {
   DrizzleIdempotencyRepository,
   DrizzleSequenceRepository,
   DrizzleWorkspaceRepository,
+  DrizzleLabelsRepository,
   BoardReadModels,
   boardMembers,
   boards,
@@ -197,6 +198,11 @@ const repositories = Object.freeze({
 
   workspace:
     new DrizzleWorkspaceRepository(
+      dbInstance
+    ),
+
+  labels:
+    new DrizzleLabelsRepository(
       dbInstance
     ),
 });

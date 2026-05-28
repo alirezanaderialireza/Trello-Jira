@@ -45,6 +45,10 @@ describe("applyLabelToCard — happy path", () => {
     const out = applyLabelToCard(baseInput);
 
     expect(out.noOp).toBe(false);
+    if (out.noOp) {
+      // Type-narrowing assertion — never executes given the assertion above.
+      throw new Error("expected noOp=false");
+    }
     expect(out.link).toEqual({
       cardId:    CARD_ID,
       labelId:   LABEL_ID,
@@ -53,11 +57,11 @@ describe("applyLabelToCard — happy path", () => {
       appliedAt: NOW,
     });
 
-    expect(out.event?.type).toBe("card.label_added");
-    expect(out.event?.schemaVersion).toBe(2);
-    expect(out.event?.aggregateId).toBe(CARD_ID);
-    expect(out.event?.aggregateType).toBe("card");
-    expect(out.event?.payload).toEqual({
+    expect(out.event.type).toBe("card.label_added");
+    expect(out.event.schemaVersion).toBe(2);
+    expect(out.event.aggregateId).toBe(CARD_ID);
+    expect(out.event.aggregateType).toBe("card");
+    expect(out.event.payload).toEqual({
       cardId:    CARD_ID,
       boardId:   BOARD_ID,
       labelId:   LABEL_ID,
@@ -67,7 +71,8 @@ describe("applyLabelToCard — happy path", () => {
 
   it("propagates correlationId", () => {
     const out = applyLabelToCard({ ...baseInput, correlationId: "corr-1" });
-    expect(out.event?.correlationId).toBe("corr-1");
+    if (out.noOp) throw new Error("expected noOp=false");
+    expect(out.event.correlationId).toBe("corr-1");
   });
 });
 
@@ -77,10 +82,12 @@ describe("applyLabelToCard — idempotency (EC2)", () => {
     expect(out).toEqual({ noOp: true });
   });
 
-  it("noOp output omits link and event so caller skips DB write + outbox emit", () => {
+  it("noOp output is the discriminator-only shape so callers can't access link/event", () => {
     const out = applyLabelToCard({ ...baseInput, alreadyApplied: true });
-    expect(out.link).toBeUndefined();
-    expect(out.event).toBeUndefined();
+    expect(out.noOp).toBe(true);
+    // Access to link/event is a type error in the noOp=true branch —
+    // we don't even attempt it here. The runtime shape is asserted via
+    // the toEqual({ noOp: true }) above.
   });
 });
 

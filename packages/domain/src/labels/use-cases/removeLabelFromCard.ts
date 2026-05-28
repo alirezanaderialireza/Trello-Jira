@@ -22,10 +22,9 @@ export interface RemoveLabelFromCardInput {
   readonly notPresent: boolean;
 }
 
-export interface RemoveLabelFromCardOutput {
-  readonly noOp: boolean;
-  readonly event?: CardLabelRemovedEvent;
-}
+export type RemoveLabelFromCardOutput =
+  | { readonly noOp: true }
+  | { readonly noOp: false; readonly event: CardLabelRemovedEvent };
 
 export function removeLabelFromCard(
   input: RemoveLabelFromCardInput,

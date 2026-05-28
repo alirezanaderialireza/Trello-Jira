@@ -31,11 +31,13 @@ export interface ApplyLabelToCardInput {
   readonly alreadyApplied: boolean;
 }
 
-export interface ApplyLabelToCardOutput {
-  readonly noOp: boolean;
-  readonly link?: CardLabelLink;
-  readonly event?: CardLabelAddedEvent;
-}
+export type ApplyLabelToCardOutput =
+  | { readonly noOp: true }
+  | {
+      readonly noOp:  false;
+      readonly link:  CardLabelLink;
+      readonly event: CardLabelAddedEvent;
+    };
 
 export function applyLabelToCard(
   input: ApplyLabelToCardInput,
