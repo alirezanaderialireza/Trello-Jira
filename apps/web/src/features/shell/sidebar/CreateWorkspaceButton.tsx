@@ -5,26 +5,29 @@
 // "+ فضای کاری جدید" CTA at the bottom of the Workspaces section.
 //
 // Opens an inline dialog (no Radix dep — see F4 D4) with a single
-// name input and a submit button. The form's `action` attribute
-// targets a Server Action; Commit 6 ships the real
-// `createWorkspace` action under app/(app)/_actions/. In this
-// commit we pass a placeholder `pendingAction` that toasts the
-// user that the feature is still wiring up — keeps the UI present
-// and discoverable without lying about functionality.
+// name input and a submit button. The form's submit handler invokes
+// the `createWorkspaceAction` Server Action under
+// app/(app)/_actions/. Server Action results carry a discriminated
+// `{ ok, error?, slug? }` object so we can surface validation errors
+// as Persian toasts without throwing.
 //
 // Closing strategies covered:
 //   • Click backdrop
 //   • Press Escape
 //   • Click X button
-//   • Submit succeeds
-// Focus is trapped inside the dialog while open (default browser
-// behaviour with autoFocus on the input + tab cycle).
+//   • Submit succeeds → navigate to /workspaces/{slug}
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { createWorkspaceAction } from "@/app/(app)/_actions/createWorkspace";
+import { trpc } from "../../../utils/trpc";
+
 export function CreateWorkspaceButton() {
+  const router = useRouter();
+  const utils = trpc.useUtils();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -33,7 +36,6 @@ export function CreateWorkspaceButton() {
   // Autofocus the input when the dialog opens.
   useEffect(() => {
     if (open) {
-      // Defer to next tick so the element is in the DOM.
       const t = setTimeout(() => inputRef.current?.focus(), 0);
       return () => clearTimeout(t);
     }
@@ -49,7 +51,7 @@ export function CreateWorkspaceButton() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = name.trim();
     if (!trimmed) {
@@ -60,16 +62,31 @@ export function CreateWorkspaceButton() {
       toast.error("نام فضای کاری نباید از ۱۰۰ کاراکتر بیشتر باشد.");
       return;
     }
+
     setSubmitting(true);
-    // Placeholder until Commit 6 wires the real Server Action.
-    // Surfacing a clear "coming soon" message is more honest than
-    // silently doing nothing or pretending success.
-    setTimeout(() => {
-      setSubmitting(false);
-      toast.message("ساخت فضای کاری به‌زودی فعال می‌شود.");
+    try {
+      const formData = new FormData();
+      formData.append("name", trimmed);
+      const result = await createWorkspaceAction(formData);
+
+      if (!result.ok) {
+        toast.error(result.error ?? "خطا در ساخت فضای کاری.");
+        return;
+      }
+
+      toast.success("فضای کاری ساخته شد.");
       setOpen(false);
       setName("");
-    }, 200);
+
+      // Refresh the sidebar bootstrap so the new workspace appears
+      // without a full reload, then navigate the user into it.
+      utils.v1.public.sidebar.bootstrap.invalidate();
+      if (result.slug) {
+        router.push(`/workspaces/${result.slug}`);
+      }
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (

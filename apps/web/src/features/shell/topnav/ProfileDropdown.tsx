@@ -3,25 +3,29 @@
 // apps/web/src/features/shell/topnav/ProfileDropdown.tsx
 //
 // Profile menu in the topnav. Shows the user's avatar fallback
-// (Persian-grapheme initial), display name + email line on hover,
-// and a menu of:
+// (Persian-grapheme initial), display name + locale·timezone, and a
+// menu of:
 //
-//   • Locale (fa / en)
-//   • Timezone (Asia/Tehran by default; brief Persian description)
-//   • Theme (light / dark / system) — UI-only in F4; the theme
-//     application is a separate phase
-//   • Logout
+//   • Locale (fa ⇄ en) — wired to updatePreferencesAction in F4.
+//                        One click toggles to the other locale.
+//   • Timezone — placeholder; full picker lands in a future phase.
+//   • Theme — placeholder; theme application + persistence is its
+//             own dedicated phase.
+//   • Logout — next-auth/react signOut, callback to /login.
 //
-// All preference changes go through Server Actions wired in Commit 6.
-// Until then the menu items toast "به‌زودی" so the UX is honest.
-// Logout uses next-auth/react's signOut() which is already shipped
-// and works today.
+// The locale toggle uses the optimistic UX pattern: click → server
+// action → revalidate the layout → re-render with new locale text.
+// We don't change the cookie or local storage; the canonical state
+// is `users.locale` in the DB and we trust the round-trip to settle
+// quickly.
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { Globe, Clock, Sun, LogOut, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 
+import { updatePreferencesAction } from "@/app/(app)/_actions/updatePreferences";
 import { getFirstGrapheme } from "../../../lib/persianGrapheme";
 
 interface ProfileDropdownProps {
@@ -36,13 +40,20 @@ const LOCALE_LABELS: Record<string, string> = {
   en: "English",
 };
 
+/** Toggle target — fa ↔ en. F4 ships only these two locales. */
+function nextLocale(current: string): "fa" | "en" {
+  return current === "fa" ? "en" : "fa";
+}
+
 export function ProfileDropdown({
   displayName,
   avatarUrl,
   locale,
   timezone,
 }: ProfileDropdownProps) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -74,11 +85,28 @@ export function ProfileDropdown({
     };
   }, [open]);
 
-  function handlePreferencePlaceholder() {
-    // Commit 6 wires the real Server Actions. Until then we surface
-    // a toast so the user knows the click was registered and the
-    // feature is in flight.
-    toast.message("تغییر تنظیمات به‌زودی فعال می‌شود.");
+  async function handleLocaleToggle() {
+    if (busy) return;
+    setBusy(true);
+    setOpen(false);
+    try {
+      const target = nextLocale(locale);
+      const result = await updatePreferencesAction({ locale: target });
+      if (!result.ok) {
+        toast.error(result.error ?? "خطا در تغییر زبان.");
+        return;
+      }
+      toast.success("زبان به‌روز شد.");
+      // The action revalidated the layout cache; refresh re-fetches
+      // sidebar.bootstrap with the new currentUser.locale.
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleStillPlaceholder() {
+    toast.message("تغییر این تنظیم به‌زودی فعال می‌شود.");
     setOpen(false);
   }
 
@@ -89,6 +117,7 @@ export function ProfileDropdown({
 
   const initial = getFirstGrapheme(displayName);
   const localeDisplay = LOCALE_LABELS[locale] ?? locale;
+  const nextLocaleLabel = LOCALE_LABELS[nextLocale(locale)] ?? nextLocale(locale);
 
   return (
     <div className="relative">
@@ -105,7 +134,6 @@ export function ProfileDropdown({
           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500
         "
       >
-        {/* Avatar */}
         {avatarUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -147,21 +175,24 @@ export function ProfileDropdown({
             </div>
           </div>
 
-          {/* Preference items */}
           <ul className="py-1">
             <li>
               <button
                 type="button"
                 role="menuitem"
-                onClick={handlePreferencePlaceholder}
+                onClick={handleLocaleToggle}
+                disabled={busy}
                 className="
                   flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700
                   hover:bg-slate-50
+                  disabled:cursor-not-allowed disabled:opacity-50
                   focus-visible:bg-slate-50 focus-visible:outline-none
                 "
               >
                 <Globe className="h-4 w-4 text-slate-400" aria-hidden="true" />
-                <span className="flex-1 text-start">زبان</span>
+                <span className="flex-1 text-start">
+                  {busy ? "در حال تغییر زبان…" : `تغییر زبان به ${nextLocaleLabel}`}
+                </span>
                 <span className="text-xs text-slate-400">{localeDisplay}</span>
               </button>
             </li>
@@ -169,7 +200,7 @@ export function ProfileDropdown({
               <button
                 type="button"
                 role="menuitem"
-                onClick={handlePreferencePlaceholder}
+                onClick={handleStillPlaceholder}
                 className="
                   flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700
                   hover:bg-slate-50
@@ -185,7 +216,7 @@ export function ProfileDropdown({
               <button
                 type="button"
                 role="menuitem"
-                onClick={handlePreferencePlaceholder}
+                onClick={handleStillPlaceholder}
                 className="
                   flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700
                   hover:bg-slate-50
@@ -199,7 +230,6 @@ export function ProfileDropdown({
             </li>
           </ul>
 
-          {/* Sign out */}
           <div className="border-t border-slate-100">
             <button
               type="button"
