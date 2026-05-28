@@ -23,6 +23,7 @@ import { updateCardAction } from "../actions/board.actions";
 import { isActionFailure } from "../actions/responseTypes";
 
 import { getTokenStyle } from "@/lib/labels/tokenColorMap";
+import { CardDueDateBadge } from "@/components/cards/CardDueDateBadge";
 
 // ============================================================================
 // 🧠 Types
@@ -72,6 +73,13 @@ const selectAllLabels = (state: any) =>
   state.labels;
 
 const MAX_VISIBLE_LABELS = 3;
+
+// Selector for the card's due date (Phase 1.2 — F1.2.2). The DateOnly
+// string lives on the card row; the badge handles overdue / today /
+// future palette decisions internally.
+const makeSelectCardDueDate =
+  (id: string) => (state: any) =>
+    state.cards[id]?.dueDate ?? null;
 
 // ============================================================================
 // 🧠 SSR-safe Layout Effect
@@ -139,6 +147,13 @@ export const CardItem = memo(function CardItem({
 
   const top3 = visibleLabels.slice(0, MAX_VISIBLE_LABELS);
   const overflowCount = Math.max(0, visibleLabels.length - MAX_VISIBLE_LABELS);
+
+  // ── Due date (Phase 1.2 — F1.2.2) ───────────────────────────────────────
+  const selectCardDueDate = useMemo(
+    () => makeSelectCardDueDate(cardId),
+    [cardId],
+  );
+  const cardDueDate = useBoardStore(selectCardDueDate) as string | null;
 
   const updateCardStore = useBoardStore(
     (s) => s.updateCard
@@ -540,6 +555,16 @@ export const CardItem = memo(function CardItem({
           )}
         </div>
       )}
+
+      {/* ================================================================== */}
+      {/* Due Date Badge (Phase 1.2 — F1.2.2) */}
+      {/* ================================================================== */}
+
+      {cardDueDate ? (
+        <div className="mb-2">
+          <CardDueDateBadge dueDate={cardDueDate} size="sm" />
+        </div>
+      ) : null}
 
       {/* ================================================================== */}
       {/* Edit Mode */}
