@@ -222,6 +222,11 @@ export const boardManagementRouter = router({
         backgroundData: board.backgroundData,
         archivedAt: board.archivedAt?.toISOString() ?? null,
         role: role ?? "MEMBER",
+        // F5b — surfaced for the MembersTab so it can drive a
+        // workspace.members.list lookup (board-invite picker only
+        // shows users who are already workspace members per the
+        // board invariant).
+        workspaceId: board.tenantId,
       };
     }),
 

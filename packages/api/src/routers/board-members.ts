@@ -48,7 +48,7 @@ import { router } from "../trpc";
 import { boardMemberProcedure, boardAdminProcedure } from "../middleware/boardRoleProcedures";
 import { throwAddBoardMemberError } from "../middleware/invariants/boardInvariants";
 import { withIdempotency } from "../utils/idempotency";
-import { boardMembers, boards, workspaceMembers } from "@repo/db";
+import { boardMembers, boards, workspaceMembers, users } from "@repo/db";
 import { addBoardMember, type BoardMemberRole } from "@repo/domain";
 
 // ─── Schemas ────────────────────────────────────────────────────────────────
@@ -74,19 +74,50 @@ export const boardMembersRouter = router({
   getMembers: boardMemberProcedure
     .input(z.object({ boardId: BoardIdSchema }))
     .query(async ({ input, ctx }) => {
-      const members = await ctx.infra.db.query.boardMembers.findMany({
-        where: and(
-          eq(boardMembers.boardId, input.boardId),
-          isNull(boardMembers.removedAt),
-        ),
-      });
+      // F5b refactor — JOIN users so the settings drawer can render
+      // avatars + display names without a second round-trip. The
+      // pre-F5b shape (id, userId, role, joinedAt) is preserved and
+      // EXTENDED with an optional `user` projection. The existing
+      // BoardMembersPanel consumer (which only reads id/userId/role)
+      // is structurally compatible with the widened shape.
+      //
+      // LEFT JOIN — defence-in-depth for the (rare) case where a
+      // board_members row points at a deleted user. Surfaces as
+      // `user: null` on the client, which the UI renders as
+      // "کاربر حذف‌شده".
+      const rows = await ctx.infra.db
+        .select({
+          id: boardMembers.id,
+          userId: boardMembers.userId,
+          role: boardMembers.role,
+          createdAt: boardMembers.createdAt,
+          userIdJoined: users.id,
+          userEmail: users.email,
+          userDisplayName: users.displayName,
+          userAvatarUrl: users.avatarUrl,
+        })
+        .from(boardMembers)
+        .leftJoin(users, eq(users.id, boardMembers.userId))
+        .where(
+          and(
+            eq(boardMembers.boardId, input.boardId),
+            isNull(boardMembers.removedAt),
+          ),
+        );
 
       return {
-        members: members.map((m: any) => ({
-          id: m.id,
-          userId: m.userId,
-          role: m.role,
-          joinedAt: m.createdAt.toISOString(),
+        members: rows.map((r: any) => ({
+          id: r.id,
+          userId: r.userId,
+          role: r.role,
+          joinedAt: r.createdAt.toISOString(),
+          user: r.userIdJoined
+            ? {
+                email: r.userEmail as string,
+                displayName: r.userDisplayName as string,
+                avatarUrl: (r.userAvatarUrl as string | null) ?? null,
+              }
+            : null,
         })),
         currentUserRole: (ctx as any).boardMembership.role,
       };

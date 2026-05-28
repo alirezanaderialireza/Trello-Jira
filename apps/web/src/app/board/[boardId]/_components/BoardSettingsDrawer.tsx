@@ -240,6 +240,7 @@ interface BoardSettingsData {
   backgroundData: unknown;
   archivedAt: string | null;
   role: "OWNER" | "ADMIN" | "MEMBER";
+  workspaceId: string;
 }
 
 function ActiveTabContent({
@@ -270,6 +271,7 @@ function ActiveTabContent({
       return (
         <MembersTab
           boardId={boardId}
+          workspaceId={settings.workspaceId}
           role={settings.role}
           onInviteMember={actions.onInviteMember}
           onChangeRole={actions.onChangeRole}
