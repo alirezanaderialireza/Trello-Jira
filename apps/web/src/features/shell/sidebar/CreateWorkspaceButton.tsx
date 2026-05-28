@@ -6,10 +6,13 @@
 //
 // Opens an inline dialog (no Radix dep — see F4 D4) with a single
 // name input and a submit button. The form's submit handler invokes
-// the `createWorkspaceAction` Server Action under
-// app/(app)/_actions/. Server Action results carry a discriminated
-// `{ ok, error?, slug? }` object so we can surface validation errors
-// as Persian toasts without throwing.
+// a Server Action (createWorkspaceAction under app/(app)/_actions/)
+// that is injected as a prop by the parent app layout. This keeps
+// the boundaries linter happy: features must never import from
+// app/* (one-way rule: app → features OK, features → app NOT OK).
+// Server Action results carry a discriminated `{ ok, error?, slug? }`
+// object so we can surface validation errors as Persian toasts
+// without throwing.
 //
 // Closing strategies covered:
 //   • Click backdrop
@@ -22,10 +25,26 @@ import { useRouter } from "next/navigation";
 import { Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
-import { createWorkspaceAction } from "@/app/(app)/_actions/createWorkspace";
 import { trpc } from "../../../utils/trpc";
 
-export function CreateWorkspaceButton() {
+/**
+ * Shape of the Server Action result. Defined structurally here so the
+ * feature never imports from app/* (forbidden by boundaries linter).
+ * The action under app/(app)/_actions/createWorkspace.ts conforms to
+ * this shape; TypeScript verifies assignability at the parent (app)
+ * layer where the action is wired in.
+ */
+export type CreateWorkspaceAction = (
+  formData: FormData,
+) => Promise<{ ok: boolean; slug?: string; error?: string }>;
+
+interface CreateWorkspaceButtonProps {
+  onCreateWorkspace: CreateWorkspaceAction;
+}
+
+export function CreateWorkspaceButton({
+  onCreateWorkspace,
+}: CreateWorkspaceButtonProps) {
   const router = useRouter();
   const utils = trpc.useUtils();
   const [open, setOpen] = useState(false);
@@ -67,7 +86,7 @@ export function CreateWorkspaceButton() {
     try {
       const formData = new FormData();
       formData.append("name", trimmed);
-      const result = await createWorkspaceAction(formData);
+      const result = await onCreateWorkspace(formData);
 
       if (!result.ok) {
         toast.error(result.error ?? "خطا در ساخت فضای کاری.");

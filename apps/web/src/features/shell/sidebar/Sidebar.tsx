@@ -30,7 +30,10 @@ import { trpc } from "../../../utils/trpc";
 import type { AppRouter } from "@repo/api";
 import type { inferRouterOutputs } from "@trpc/server";
 
-import { CreateWorkspaceButton } from "./CreateWorkspaceButton";
+import {
+  CreateWorkspaceButton,
+  type CreateWorkspaceAction,
+} from "./CreateWorkspaceButton";
 import { MobileDrawer } from "./MobileDrawer";
 import { PendingInvitationsBadge } from "./PendingInvitationsBadge";
 import { RecentSection } from "./RecentSection";
@@ -42,6 +45,13 @@ type SidebarBootstrap = inferRouterOutputs<AppRouter>["v1"]["public"]["sidebar"]
 interface SidebarProps {
   /** Server-rendered initial data from (app)/layout.tsx. */
   initialData: SidebarBootstrap | null;
+  /**
+   * Server Action injected by (app)/_components/AppShell.tsx for the
+   * "+ فضای کاری جدید" dialog. Features cannot import from app/*
+   * directly (boundaries linter), so the action is hoisted and
+   * passed as a prop.
+   */
+  onCreateWorkspace: CreateWorkspaceAction;
   /**
    * Mobile drawer open/close state, owned by the parent layout.
    * Desktop renders the sidebar as a sibling of `<main>` and ignores
@@ -55,6 +65,7 @@ const SIDEBAR_QUERY_STALE_MS = 60_000;
 
 export function Sidebar({
   initialData,
+  onCreateWorkspace,
   mobileDrawerOpen = false,
   onMobileClose = () => {},
 }: SidebarProps) {
@@ -82,7 +93,12 @@ export function Sidebar({
   // Body content is identical between mobile drawer and desktop
   // pane. Render once and pass through both shells.
   const body = (
-    <SidebarBody data={data ?? null} isLoading={isLoading} pathname={pathname} />
+    <SidebarBody
+      data={data ?? null}
+      isLoading={isLoading}
+      pathname={pathname}
+      onCreateWorkspace={onCreateWorkspace}
+    />
   );
 
   return (
@@ -116,10 +132,12 @@ function SidebarBody({
   data,
   isLoading,
   pathname,
+  onCreateWorkspace,
 }: {
   data: SidebarBootstrap | null;
   isLoading: boolean;
   pathname: string;
+  onCreateWorkspace: CreateWorkspaceAction;
 }) {
   if (!data && isLoading) {
     return (
@@ -176,7 +194,7 @@ function SidebarBody({
           </ul>
         )}
 
-        <CreateWorkspaceButton />
+        <CreateWorkspaceButton onCreateWorkspace={onCreateWorkspace} />
       </section>
 
       <StarredSection boards={data.starredBoards} />

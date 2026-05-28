@@ -20,7 +20,7 @@ import { Menu } from "lucide-react";
 import type { AppRouter } from "@repo/api";
 import type { inferRouterOutputs } from "@trpc/server";
 
-import { ProfileDropdown } from "./ProfileDropdown";
+import { ProfileDropdown, type UpdatePreferencesAction } from "./ProfileDropdown";
 import { NotificationsBell } from "./NotificationsBell";
 import { SearchBar } from "./SearchBar";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
@@ -30,9 +30,19 @@ type SidebarBootstrap = inferRouterOutputs<AppRouter>["v1"]["public"]["sidebar"]
 interface TopNavProps {
   initialData: SidebarBootstrap | null;
   onOpenMobileMenu: () => void;
+  /**
+   * Server Action injected by AppShell. The locale toggle in the
+   * ProfileDropdown invokes it; defined as a prop because features
+   * cannot import from app/* (boundaries linter).
+   */
+  onUpdatePreferences: UpdatePreferencesAction;
 }
 
-export function TopNav({ initialData, onOpenMobileMenu }: TopNavProps) {
+export function TopNav({
+  initialData,
+  onOpenMobileMenu,
+  onUpdatePreferences,
+}: TopNavProps) {
   // Defensive defaults — if the bootstrap fetch failed, we still want
   // a navigable topnav rather than a crash. Real data is the common
   // case; null is the rare degraded-mode case.
@@ -96,6 +106,7 @@ export function TopNav({ initialData, onOpenMobileMenu }: TopNavProps) {
             avatarUrl={user.avatarUrl}
             locale={user.locale}
             timezone={user.timezone}
+            onUpdatePreferences={onUpdatePreferences}
           />
         ) : (
           // No-user fallback — bootstrap fetch failed. A signOut/login

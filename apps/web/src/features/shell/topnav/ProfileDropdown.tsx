@@ -6,7 +6,11 @@
 // (Persian-grapheme initial), display name + locale·timezone, and a
 // menu of:
 //
-//   • Locale (fa ⇄ en) — wired to updatePreferencesAction in F4.
+//   • Locale (fa ⇄ en) — wired via the injected
+//                        `onUpdatePreferences` Server Action prop
+//                        (see Lesson F4: features cannot import
+//                        from app/*; the action is hoisted into
+//                        AppShell and passed as a prop).
 //                        One click toggles to the other locale.
 //   • Timezone — placeholder; full picker lands in a future phase.
 //   • Theme — placeholder; theme application + persistence is its
@@ -25,14 +29,27 @@ import { signOut } from "next-auth/react";
 import { Globe, Clock, Sun, LogOut, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 
-import { updatePreferencesAction } from "@/app/(app)/_actions/updatePreferences";
 import { getFirstGrapheme } from "../../../lib/persianGrapheme";
+
+/**
+ * Shape of the Server Action result for updating user preferences.
+ * Defined structurally so this feature never imports from app/*.
+ * The action under app/(app)/_actions/updatePreferences.ts conforms
+ * to a wider input type (locale | timezone | preferences); we only
+ * model the slice F4 wires (locale toggle). TypeScript variance
+ * (parameters contravariant) makes the wider action assignable to
+ * this narrower prop type at the parent (app) layer.
+ */
+export type UpdatePreferencesAction = (input: {
+  locale?: "fa" | "en";
+}) => Promise<{ ok: boolean; error?: string }>;
 
 interface ProfileDropdownProps {
   displayName: string;
   avatarUrl: string | null;
   locale: string;
   timezone: string;
+  onUpdatePreferences: UpdatePreferencesAction;
 }
 
 const LOCALE_LABELS: Record<string, string> = {
@@ -50,6 +67,7 @@ export function ProfileDropdown({
   avatarUrl,
   locale,
   timezone,
+  onUpdatePreferences,
 }: ProfileDropdownProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -91,7 +109,7 @@ export function ProfileDropdown({
     setOpen(false);
     try {
       const target = nextLocale(locale);
-      const result = await updatePreferencesAction({ locale: target });
+      const result = await onUpdatePreferences({ locale: target });
       if (!result.ok) {
         toast.error(result.error ?? "خطا در تغییر زبان.");
         return;

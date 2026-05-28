@@ -14,6 +14,12 @@
 //
 // The grid template lives here so the visual structure stays
 // co-located with the components that fill its cells.
+//
+// Server Action wiring (Lesson F4 — boundaries linter):
+//   features/* must NEVER import from app/*. So the actions live
+//   here in app/(app)/_actions/ (correct layer) and we inject them
+//   into the feature components as props from this AppShell. The
+//   one-way flow `app → features` is allowed; the reverse is not.
 
 import { useState } from "react";
 
@@ -21,6 +27,9 @@ import { Sidebar } from "@/features/shell/sidebar/Sidebar";
 import { TopNav } from "@/features/shell/topnav/TopNav";
 import type { AppRouter } from "@repo/api";
 import type { inferRouterOutputs } from "@trpc/server";
+
+import { createWorkspaceAction } from "../_actions/createWorkspace";
+import { updatePreferencesAction } from "../_actions/updatePreferences";
 
 type SidebarBootstrap = inferRouterOutputs<AppRouter>["v1"]["public"]["sidebar"]["bootstrap"];
 
@@ -43,10 +52,12 @@ export function AppShell({ initialData, children }: AppShellProps) {
       <TopNav
         initialData={initialData}
         onOpenMobileMenu={() => setMobileDrawerOpen(true)}
+        onUpdatePreferences={updatePreferencesAction}
       />
 
       <Sidebar
         initialData={initialData}
+        onCreateWorkspace={createWorkspaceAction}
         mobileDrawerOpen={mobileDrawerOpen}
         onMobileClose={() => setMobileDrawerOpen(false)}
       />
