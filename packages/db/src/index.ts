@@ -22,6 +22,7 @@ import { DrizzleWorkspaceRepository } from "./repositories/workspaces.repository
 import { DrizzleWorkspaceInvitationsRepository } from "./repositories/workspaceInvitations.repository";
 import { DrizzleUserBoardMetadataRepository } from "./repositories/userBoardMetadata.repository";
 import { DrizzleLabelsRepository } from "./repositories/labels.repository";
+import { DrizzleChecklistsRepository } from "./repositories/checklists.repository";
 import { BoardReadModels } from "./projections/board.read-models";
 
 // ============================================================================
@@ -68,6 +69,7 @@ export const idempotencyRepo = new DrizzleIdempotencyRepository(db);
 export const sequenceRepo = new DrizzleSequenceRepository(db);
 export const workspaceRepo = new DrizzleWorkspaceRepository(db);
 export const labelsRepo = new DrizzleLabelsRepository(db);
+export const checklistsRepo = new DrizzleChecklistsRepository(db);
 
 // ============================================================================
 // 🌟 4. Export Repository Classes (Type Usage)
@@ -84,6 +86,7 @@ export {
   DrizzleWorkspaceInvitationsRepository,
   DrizzleUserBoardMetadataRepository,
   DrizzleLabelsRepository,
+  DrizzleChecklistsRepository,
   BoardReadModels,
 };
 
