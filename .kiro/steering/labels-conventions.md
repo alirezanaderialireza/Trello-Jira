@@ -142,17 +142,204 @@ mutation: boardXProcedure.input(…).mutation(({ input, ctx }) =>
   "duplicate label to another board" feature ships as a separate
   procedure with its own outbox event.
 
-## F1.2.1.b checklist (UI follow-up)
+## F1.2.1.b checklist (UI — shipped)
 
-- LabelBadge — colored pill rendering `colorToken` via the canonical
-  CSS-token map.
-- LabelPicker — popover with case-insensitive (`fa-IR` lower) search +
-  keyboard nav; opens on `L` key in card modal.
-- LabelManager — Board Settings tab "برچسب‌ها"; `@dnd-kit/sortable`
-  for reorder, calls `label.update({ position })`.
-- CreateLabelForm — 12-swatch grid (RTL: first colour on the right).
-- DeleteLabelDialog — surfaces the response's `affectedCardCount`.
-- CardItem update — top 3 labels by position + "+N" badge for the
-  rest. Wrapped in `React.memo` (R3 mitigation).
-- Replace the `card-detail/CardLabels.tsx` stub with the new picker
-  surface.
+All items shipped in F1.2.1.b. Footnote tracks any deviation from the
+original phrasing.
+
+- ✓ **LabelBadge** — colored pill rendering `colorToken` via the
+  canonical CSS-token map.
+- ✓ **LabelPicker** — popover with case-insensitive (`fa-IR` lower)
+  search + keyboard nav; opens on `L` key in card modal.
+- ✓ **LabelManager** — Board Settings tab "برچسب‌ها";
+  `@dnd-kit/sortable` for reorder, calls `label.update({ position })`.
+- ✓ **CreateLabelForm** — 12-swatch grid (RTL: first colour on the
+  right).
+- ✓ **DeleteLabelDialog** — surfaces `affectedCardCount` (computed
+  client-side from the local board store, since the server's
+  separate count endpoint was out of scope).
+- ✓ **CardItem update** — top 3 labels by position + "+N" badge for
+  the rest. Wrapped in `React.memo` (R3 mitigation, pre-existing).
+  Top-3 renders inline (not via the LabelBadge component) — see
+  "Why CardItem doesn't import LabelBadge" below.
+- ✓ **Replace the `card-detail/CardLabels.tsx` stub** with the new
+  picker surface.
+
+# Labels — F1.2.1.b UI Conventions
+
+The boundaries linter (`apps/web/eslint.config.mjs`, severity `error`
+since PR #46) enforces strict layering between `app`, `features/*`,
+and `shared`. Two architectural choices below come straight from
+respecting that linter, **not** from spec authorial intent — they're
+the F1.2.1.b adjustment over the original featurelet plan.
+
+## Component placement (D21)
+
+The original spec placed every label component under
+`apps/web/src/features/labels/components/`. The cross-feature ban
+(`feature/A → feature/B`) blocked two import paths the spec implicitly
+required:
+
+  • CardItem (in `features/board`) needed the colour token map to
+    render top-3 bars on the card preview.
+  • CardLabels container (in `features/board/components/card-detail`)
+    needed LabelPicker to open the picker popover.
+
+Resolution: **hoist the cross-cutting pieces to `shared` territory.**
+
+| File                          | Final location                          | Layer    |
+|-------------------------------|-----------------------------------------|----------|
+| tokenColorMap.ts              | `apps/web/src/lib/labels/`              | shared   |
+| persianLabels.ts              | `apps/web/src/lib/labels/`              | shared   |
+| LabelBadge.tsx                | `apps/web/src/components/labels/`       | shared   |
+| CreateLabelForm.tsx           | `apps/web/src/components/labels/`       | shared   |
+| LabelPicker.tsx               | `apps/web/src/components/labels/`       | shared   |
+| LabelManager.tsx              | `apps/web/src/features/labels/components/` | feature |
+| EditLabelForm.tsx             | `apps/web/src/features/labels/components/` | feature |
+| DeleteLabelDialog.tsx         | `apps/web/src/features/labels/components/` | feature |
+| LabelsTab.tsx (drawer)        | `apps/web/src/app/board/[boardId]/_components/` | app |
+| CardLabels.tsx (card-detail)  | `apps/web/src/features/board/components/card-detail/` | feature (board) |
+
+The split reads like this:
+  • **shared** = pieces that any feature can render. The picker is
+    used from BOTH the card-detail surface (board feature) and the
+    manager (labels feature). LabelBadge is used by the picker. The
+    create form is reused inside the manager too.
+  • **features/labels** = manager-only components — the manager
+    itself, the inline edit form, the delete dialog. Only the
+    `LabelsTab` container in `app/` consumes them.
+  • **features/board** = card-tier integration — the card-detail
+    container that wraps the picker, and the CardItem update for
+    the preview bars.
+  • **app/** = drawer container (LabelsTab) — owns the labels.list
+    query, derives counts from the board store, and wires the
+    create/update/delete mutation hooks.
+
+The convention from `settings-and-invitations.md` Section 10 already
+sets this precedent: "When moving a label set into shared territory,
+hoist it to `apps/web/src/lib/`."
+
+## Why CardItem doesn't import LabelBadge
+
+CardItem renders the top-3 bars **inline** (using `getTokenStyle`
+from the shared `tokenColorMap`) instead of mounting `<LabelBadge
+size="bar" />` for each bar. The runtime output is identical to
+mounting the component, but the inline form has two structural wins:
+
+  1. CardItem is a render-hot path (every card on the board re-renders
+     on store updates). Skipping the per-bar function-component
+     boundary trims a few microseconds per card per render.
+  2. CardItem is in `features/board`. Importing LabelBadge from
+     `@/components/labels/LabelBadge` is allowed (feature → shared),
+     but inlining lets the file remain stylistically self-contained
+     for the section reviewer who's reading the card-preview chunk
+     end-to-end.
+
+If you ever want a styling change to the bar shape, update both
+`LabelBadge.tsx` (size="bar") AND the CardItem inline render. They
+share the same `getTokenStyle` lookup, so colour changes auto-sync.
+
+## Container vs presentational pattern
+
+Every component in `@/components/labels/` and
+`@/features/labels/components/` is **presentational** — no tRPC, no
+mutation hooks, no store reads. They take props and call callbacks.
+
+Containers (the wiring layer):
+
+  • `features/board/components/card-detail/CardLabels.tsx` — owns
+    the card-detail picker. Reads board labels via `trpc.label.list`,
+    reads applied labels from the local store, calls
+    `useAddCardLabel` / `useRemoveCardLabel` / `useCreateLabel`.
+  • `app/board/[boardId]/_components/LabelsTab.tsx` — owns the
+    drawer manager. Reads board labels via `trpc.label.list`,
+    derives `affectedCardCounts` from the local store, calls
+    `useCreateLabel` / `useUpdateLabel` / `useDeleteLabel`.
+
+The presentational components stay reusable + unit-test-friendly;
+the containers stay thin (~150 lines apiece).
+
+## Role gate mirror (D8)
+
+`LabelManager` accepts a `canManage: boolean` prop (`true` when
+`role === "ADMIN" || role === "OWNER"`, set by the container).
+When `false`:
+
+  • The "+ افزودن برچسب" button is hidden.
+  • Each row's edit / delete buttons are hidden.
+  • The drag handle is hidden and `useSortable` is `disabled` so
+    the row can't accidentally trigger a position update the
+    server would reject anyway.
+  • The header copy switches to a read-only explainer.
+  • The empty-state CTA flips to a Persian "you need admin access"
+    note (no create button).
+
+The server still enforces D8 — `boardAdminProcedure` blocks
+`label.delete` server-side even if the client sends the call. The
+client gate is purely UX (no error toast for an action you couldn't
+have triggered).
+
+## Persian-aware case folding
+
+Two surfaces fold to lowercase before comparing:
+
+  • Picker search → `query.toLocaleLowerCase("fa-IR")` against each
+    `label.name.toLocaleLowerCase("fa-IR")`. Mirrors the server's
+    use-case fold in `createLabel.ts` so the local filter and a
+    server duplicate-check return the same answer.
+  • CreateLabelForm + EditLabelForm duplicate detection → same fold
+    against `existingNames[]`.
+
+The DB-level uniqueness index uses Postgres `LOWER()`, which agrees
+with `toLocaleLowerCase("fa-IR")` for the dotted-i / Turkish-i quirks
+that sometimes bite English+Persian text. Don't substitute
+`String.prototype.toLowerCase()` — it diverges on Turkish locale and
+will eventually let a duplicate slip past the client check.
+
+## L keyboard shortcut
+
+`CardLabels` (the card-detail container) registers a window-level
+`keydown` listener for the `L` key. Two guards prevent surprises:
+
+  1. Skip when focus is inside `<input>`, `<textarea>`, `<select>`,
+     or any element with `[contenteditable]="true"`. Otherwise typing
+     "label" or "L" anywhere in the card title would open the picker.
+  2. Skip when any modifier is held (`Ctrl` / `Meta` / `Alt`) so the
+     shortcut doesn't collide with browser navigation.
+
+The trigger button has `aria-label="افزودن برچسب (کلید L)"` so the
+shortcut is discoverable from the screen reader without adding a
+visual hint.
+
+## CSS token map invariants
+
+`apps/web/src/lib/labels/tokenColorMap.ts` is the single source of
+truth for how a `ColorToken` renders. Each entry exposes
+`{ bg, text, persianName }`:
+
+  • `bg` matches Tailwind's 500-stop hex for nine of the twelve
+    tokens. `brown.500 → amber-800` and `black → slate-800` are
+    the two hand-picked exceptions documented inline in that file.
+  • `text` is `slate-900` for `yellow.500` (the only token bright
+    enough to fail WCAG AA against white) and `white` everywhere
+    else. Re-check this decision against
+    https://webaim.org/resources/contrastchecker/ if you ever
+    change a `bg` value.
+  • `persianName` is read from `persianLabels.ts` (a copy of the
+    canonical `COLOR_TOKEN_LABELS_FA` from `@repo/domain` —
+    runtime imports of `@repo/domain` are blocked from
+    `apps/web/src/{features,components}/**`, so the duplicate lives
+    in `lib/labels/` per architecture.md's type-only carveout).
+
+Adding a token is a five-step migration:
+  1. `packages/domain/src/labels/types.ts` → COLOR_TOKENS +
+     COLOR_TOKEN_LABELS_FA.
+  2. `packages/db/src/schema/labels.ts` → Drizzle `check()`.
+  3. New SQL migration extending `labels_color_token_check`.
+  4. `apps/web/src/lib/labels/persianLabels.ts` → mirror.
+  5. `apps/web/src/lib/labels/tokenColorMap.ts` → add the `bg`
+     hex + decide the `text` foreground (run contrast check).
+
+Skipping any of these surfaces a runtime CHECK violation on the
+next `label.create` with the new colour, or a fallback grey from
+`getTokenStyle`'s defensive lookup.
