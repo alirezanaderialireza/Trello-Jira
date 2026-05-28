@@ -2,7 +2,7 @@
 
 import "./globals.css";
 import { Toaster } from "sonner";
-import { QueryProvider } from "../providers/QueryProvider";
+import { TRPCProvider } from "../providers/TRPCProvider";
 import { SessionProvider } from "next-auth/react";
 import { RootErrorBoundary } from "../components/error/ErrorBoundary";
 import { GlobalErrorListener } from "../components/error/GlobalErrorListener";
@@ -35,16 +35,23 @@ export default function RootLayout({
   // `app/layout.tsx` is one by default), so the import lives in a
   // client component. In production the wrapper renders null and the
   // lazy chunk is tree-shaken away by the static NODE_ENV check.
+  //
+  // <TRPCProvider> replaces the legacy <QueryProvider> (Phase 1.1.5):
+  // the old provider only wired React Query and left every
+  // `trpc.X.Y.useQuery()` call without a tRPC context, crashing every
+  // (app) route. TRPCProvider wraps both `<trpc.Provider>` and
+  // `<QueryClientProvider>` together with the same React Query
+  // defaults the legacy file used.
   return (
     <html lang="fa" dir="rtl">
       <body className="bg-gray-50 text-gray-900 antialiased">
         <RootErrorBoundary>
           <GlobalErrorListener />
           <SessionProvider>
-            <QueryProvider>
+            <TRPCProvider>
               {children}
               <DevtoolsClient />
-            </QueryProvider>
+            </TRPCProvider>
           </SessionProvider>
         </RootErrorBoundary>
 
