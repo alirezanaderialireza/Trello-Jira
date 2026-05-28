@@ -36,7 +36,13 @@ export type CardDto = {
   checklists?: string[];   // checklistId[]
   assignees?: string[];    // userId[]
   attachments?: string[];  // attachmentId[]
-  dueDate?: string | null; // ISO-8601 UTC or null
+  /**
+   * Phase 1.2 (F1.2.2). Wire format: `YYYY-MM-DD` (DateOnly) or null
+   * when unset. Source of truth is the `cards.due_date` DATE column;
+   * the v2 `card.due_date_updated` event carries `newDueDate` for
+   * realtime updates.
+   */
+  dueDate?: string | null;
   locked?: boolean;
 };
 
