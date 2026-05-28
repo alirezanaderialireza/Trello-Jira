@@ -110,14 +110,24 @@ test.describe("Phase 1.1 — workspace lifecycle smoke flow", () => {
     let workspaceSlug = "";
     await test.step("2. User A creates a workspace", async () => {
       await userAPage.goto("/workspaces");
-      // The sidebar's "+ فضای کاری جدید" CTA opens an inline dialog
-      // (F4 — see CreateWorkspaceButton). Click any element with
-      // that exact Persian copy.
-      await userAPage.getByRole("button", { name: /فضای کاری جدید|\+\s*فضای کاری/i }).first().click();
-      await userAPage.getByRole("textbox").first().fill(WORKSPACE_NAME);
-      await userAPage.getByRole("button", { name: /ساخت|ایجاد|ذخیره/i }).click();
+      // (app)/workspaces/page.tsx renders the Create form INLINE — there
+      // is no dialog/CTA. The form has:
+      //   • <input placeholder="Workspace name..." />
+      //   • <button type="submit">Create</button>
+      // After submit there is no redirect; the page calls refetch() +
+      // toast.success() and the new workspace card appears in the grid.
+      // We click the card to navigate into /workspaces/[slug] and
+      // capture the slug from the URL.
+      await userAPage.locator('input[placeholder*="Workspace name"]').fill(WORKSPACE_NAME);
+      await userAPage.getByRole("button", { name: /^Create$/i }).click();
 
-      // The action revalidates the layout + navigates to /workspaces/[slug].
+      // Wait for the workspace card to appear in the list. Card is
+      // a <Link> so getByRole("link") with the Persian workspace name
+      // is the most semantic anchor.
+      const card = userAPage.getByRole("link", { name: new RegExp(WORKSPACE_NAME) });
+      await card.waitFor({ timeout: 10_000 });
+      await card.click();
+
       await userAPage.waitForURL(/\/workspaces\/[a-z0-9-]+(?!\/)/);
       const url = new URL(userAPage.url());
       const match = url.pathname.match(/\/workspaces\/([a-z0-9-]+)/);
