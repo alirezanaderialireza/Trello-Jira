@@ -15,7 +15,7 @@
 // behind a stale-feeling sidebar instead of a clear "I see nothing" signal).
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { boards, userBoardMetadata, workspaces } from "../schema";
 import type {
   UserBoardMetadata,
@@ -125,8 +125,15 @@ export class DrizzleUserBoardMetadataRepository {
 
   // ──────────────────────────────────────────────────────────────────────────
   // Sidebar "Starred" — every starred board for the user, scoped by RLS to
-  // the current tenant. JOINs to `boards` and `workspaces` and filters out
-  // deleted/archived boards plus deleted workspaces (D8).
+  // the current tenant. JOINs to `boards` and `workspaces` and filters out:
+  //   • soft-deleted boards          (notDeleted predicate on boards)
+  //   • soft-deleted workspaces      (notDeleted predicate on workspaces)
+  //   • archived boards              (boards.archivedAt IS NULL — F5c fix)
+  //
+  // Pre-F5c gap: archived boards (boards.archivedAt IS NOT NULL) leaked
+  // into the sidebar's starred + recent sections, so a board that the
+  // user had archived from the settings drawer kept showing up. Closed
+  // by F5c per the steering doc TODO.
   // ──────────────────────────────────────────────────────────────────────────
 
   async listStarred(userId: string): Promise<SidebarBoardLink[]> {
@@ -147,6 +154,7 @@ export class DrizzleUserBoardMetadataRepository {
           eq(userBoardMetadata.isStarred, true),
           notDeleted(boards),
           notDeleted(workspaces),
+          isNull(boards.archivedAt),
         ),
       );
     return rows;
@@ -155,6 +163,8 @@ export class DrizzleUserBoardMetadataRepository {
   // ──────────────────────────────────────────────────────────────────────────
   // Sidebar "Recent" — top-N most recently viewed boards.
   // Default N=5 (Trello-faithful).
+  //
+  // F5c: archived boards filtered the same as listStarred above.
   // ──────────────────────────────────────────────────────────────────────────
 
   async listRecent(userId: string, limit = 5): Promise<SidebarBoardLink[]> {
@@ -174,6 +184,7 @@ export class DrizzleUserBoardMetadataRepository {
           eq(userBoardMetadata.userId, userId),
           notDeleted(boards),
           notDeleted(workspaces),
+          isNull(boards.archivedAt),
         ),
       )
       .orderBy(desc(userBoardMetadata.lastViewedAt))
