@@ -32,6 +32,8 @@ import { redirect } from "next/navigation";
 import { getWebSession } from "@/auth/getServerSession";
 import { appRouter, createContext } from "@repo/api";
 
+import { AppShell } from "./_components/AppShell";
+
 // Force dynamic rendering for every (app) page.
 //
 // Every page underneath needs the per-request session + RLS-scoped
@@ -91,54 +93,5 @@ export default async function AppLayout({
   // The placeholders below get swapped in commits 3 (Sidebar) and 4
   // (TopNav). Their dimensions match the final components so commits
   // 3 and 4 are visual no-ops on the wireframe.
-  return (
-    <div
-      className="
-        grid h-screen
-        grid-cols-1 grid-rows-[56px_1fr]
-        md:grid-cols-[260px_1fr]
-      "
-    >
-      {/* TopNav placeholder (Commit 4 will replace) */}
-      <header
-        className="
-          md:col-span-2
-          flex h-14 items-center border-b border-slate-200 bg-white
-          px-4
-        "
-      >
-        <div className="text-sm text-slate-500">
-          {bootstrap?.currentUser
-            ? `سلام، ${bootstrap.currentUser.displayName}`
-            : "TopNav (placeholder)"}
-        </div>
-      </header>
-
-      {/* Sidebar placeholder (Commit 3 will replace) */}
-      <aside
-        className="
-          row-start-2
-          hidden border-e border-slate-200 bg-slate-50 md:block
-          overflow-y-auto
-        "
-        aria-label="فضاهای کاری"
-      >
-        <div className="p-4 text-sm text-slate-500">
-          Sidebar (placeholder)
-          {bootstrap && (
-            <ul className="mt-2 space-y-1 text-xs text-slate-400">
-              {bootstrap.workspaces.map((w) => (
-                <li key={w.id}>{w.name}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </aside>
-
-      {/* Main */}
-      <main className="row-start-2 overflow-y-auto bg-white">
-        {children}
-      </main>
-    </div>
-  );
+  return <AppShell initialData={bootstrap}>{children}</AppShell>;
 }
