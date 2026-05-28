@@ -1,0 +1,4 @@
+# Playwright local artifacts — ignored from version control.
+test-results/
+playwright-report/
+.last-run.json
