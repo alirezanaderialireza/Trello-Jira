@@ -58,3 +58,63 @@ jobs:
           JWT_SECRET: ci-secret
           NEXTAUTH_SECRET: ci-secret-for-build-only
           AUTH_TRUST_HOST: "true"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # E2E — Phase 1.1 smoke flow (added by F5c).
+  # ──────────────────────────────────────────────────────────────────────────
+  #
+  # Runs the Playwright spec at apps/web/e2e/specs/phase-1.1-smoke.spec.ts
+  # against a freshly-migrated `trello_e2e` Postgres database. The spec
+  # itself drops + recreates the public schema in `beforeAll`, so the
+  # Postgres service container only needs to be up — no SQL pre-seeding.
+  #
+  # Stabilisation policy (per .kiro/steering/phase-1.1-complete.md):
+  #   `continue-on-error: true` for the first 5 successful baseline runs
+  #   on `main`. After that, flip to strict (block PR merge on failure)
+  #   in a follow-up PR. This keeps a flaky first-run from gating
+  #   unrelated work while we tune timeouts + selectors.
+  e2e:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: trello, POSTGRES_PASSWORD: ci, POSTGRES_DB: trello_e2e }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U trello" --health-interval 5s --health-timeout 3s --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # Browser binaries — Chromium only (mobile-iphone-se uses the same
+      # binary with a viewport override; no separate WebKit install needed
+      # for the iPhone SE project per Playwright docs).
+      - name: Install Playwright browsers
+        run: pnpm --filter web exec playwright install --with-deps chromium
+      # Run the smoke spec. Playwright's webServer block boots the Next dev
+      # server with DATABASE_URL pointed at trello_e2e; the seed fixture's
+      # defensive guard refuses to start if the URL names the dev DB.
+      - name: E2E smoke
+        run: pnpm --filter web e2e
+        env:
+          DATABASE_URL_TEST: postgresql://trello:ci@localhost:5432/trello_e2e
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: ci-secret
+          NEXTAUTH_SECRET: ci-secret-for-e2e-only
+          AUTH_TRUST_HOST: "true"
+      # Persist the HTML report on failure so we can inspect traces +
+      # screenshots + videos without re-running the workflow.
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
