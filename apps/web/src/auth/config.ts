@@ -4,10 +4,11 @@
 // Auth.js v5 configuration
 //
 // Stack:
-//   • Drizzle adapter           — sessions/users persisted in Postgres.
+//   • Drizzle adapter           — users/accounts persisted in Postgres.
 //   • Credentials provider      — email + password, Argon2id verification.
-//   • Database session strategy — `auth_sessions` rows can be revoked
-//                                 instantly without waiting for JWT expiry.
+//   • JWT session strategy      — required by Auth.js when using Credentials
+//                                 provider. Session data lives in a signed
+//                                 cookie; revocation requires a deny-list.
 //
 // Hardening that lives here:
 //   1. IP-based rate limit on the Credentials `authorize()` callback. Auth.js
@@ -136,10 +137,17 @@ export const authConfig: NextAuthConfig = {
     }),
   ],
   pages: { signIn: "/login", error: "/login" },
-  session: { strategy: "database" },
+  session: { strategy: "jwt" },
   callbacks: {
-    session({ session, user }) {
-      if (user?.id) session.user.id = user.id;
+    async jwt({ token, user }) {
+      // On initial sign-in, `user` is the object returned from authorize().
+      // Persist user.id into the JWT so it survives across requests.
+      if (user?.id) token.sub = user.id;
+      return token;
+    },
+    session({ session, token }) {
+      // Populate session.user.id from the JWT subject claim.
+      if (token?.sub) session.user.id = token.sub;
       return session;
     },
   },
@@ -157,10 +165,9 @@ export const authConfig: NextAuthConfig = {
     },
     async signOut(message) {
       // Auth.js v5 passes either { session } (database strategy) or
-      // { token } (JWT strategy). We only use database sessions, so
-      // narrow accordingly.
-      const session = (message as { session?: { userId?: string } | null }).session;
-      const userId = session?.userId ?? null;
+      // { token } (JWT strategy). We use JWT strategy, so extract from token.
+      const token = (message as { token?: { sub?: string } | null }).token;
+      const userId = token?.sub ?? null;
       if (!userId) return;
       await recordAuthEvent({ userId, action: "auth.signOut" });
     },
