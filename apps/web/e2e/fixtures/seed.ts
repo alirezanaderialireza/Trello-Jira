@@ -87,6 +87,18 @@ const MIGRATIONS_FOLDER = path.resolve(
 export interface SeedFixture {
   resetDatabase: () => Promise<void>;
   getInvitationToken: (email: string) => Promise<string | null>;
+  /**
+   * Mark a user's email as verified in the DB. Bypasses the actual
+   * email-link click flow — the spec doesn't care about template
+   * rendering (covered by F5a unit tests), only that the user can
+   * proceed past the credentials provider's
+   * `if (!user.emailVerifiedAt) return null` gate in
+   * apps/web/src/auth/config.ts.
+   *
+   * Returns the number of rows updated; 0 means the user wasn't
+   * found.
+   */
+  markEmailVerified: (email: string) => Promise<number>;
   /** Closes the underlying postgres connection. Call from `test.afterAll`. */
   dispose: () => Promise<void>;
 }
@@ -129,6 +141,19 @@ export const seedFixture: SeedFixture = {
       LIMIT 1
     `;
     return rows[0]?.token ?? null;
+  },
+
+  markEmailVerified: async (email: string) => {
+    const normalized = email.trim().toLowerCase();
+    const result = await client`
+      UPDATE users
+      SET email_verified_at = NOW(),
+          updated_at        = NOW()
+      WHERE email_normalized = ${normalized}
+        AND email_verified_at IS NULL
+        AND deleted_at IS NULL
+    `;
+    return result.count;
   },
 
   dispose: async () => {

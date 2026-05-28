@@ -23,6 +23,8 @@
 import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 
+import { seedFixture } from "./seed";
+
 export interface SignupParams {
   displayName: string;
   email: string;
@@ -35,16 +37,30 @@ export interface SignInParams {
 }
 
 /**
- * Sign up a new user. Magic-link verification is auto-confirmed in
- * dev (per the auth flow spec D-5 in steering/auth-workspaces.md),
- * so successful signup leaves the user on `/workspaces`.
+ * Sign up a new user, then bypass email verification + sign in via
+ * the credentials form so the caller is left fully authenticated
+ * on /workspaces.
+ *
+ * Why the three-step dance:
+ *   The signup route at /api/auth/signup creates the user with
+ *   `email_verified_at = NULL` by design (production sends a real
+ *   verification email). The (auth) page then renders an inline
+ *   success card on /signup — there is NO redirect. Auth.js's
+ *   credentials provider in apps/web/src/auth/config.ts refuses to
+ *   sign in any user whose `emailVerifiedAt` is null. So the spec
+ *   would otherwise be stuck on the success card, never reaching
+ *   /workspaces.
+ *
+ *   The fixture sidesteps this by writing `email_verified_at = NOW()`
+ *   directly into the DB (the email rendering itself is covered by
+ *   F5a unit tests; the spec only cares about post-auth flow), then
+ *   driving the login UI like a real user.
  *
  * Selector strategy:
- *   The signup form's inputs have stable `name` attributes
- *   (displayName, email, password, confirmPassword). We target by
- *   `name` rather than `type=password` because the form has TWO
- *   password fields (password + confirm), and Playwright's strict
- *   locator mode would refuse to fill an ambiguous match.
+ *   The signup form's inputs have stable `name` attributes. We
+ *   target by `name` rather than `type=password` because the form
+ *   has TWO password fields (password + confirm), and Playwright's
+ *   strict locator mode would refuse to fill an ambiguous match.
  */
 export async function signUp(page: Page, params: SignupParams): Promise<void> {
   await page.goto("/signup");
@@ -53,21 +69,29 @@ export async function signUp(page: Page, params: SignupParams): Promise<void> {
   await page.locator('input[name="password"]').fill(params.password);
   await page.locator('input[name="confirmPassword"]').fill(params.password);
   await page.getByRole("button", { name: /ثبت‌نام|signup|sign up/i }).click();
-  // Either lands on /workspaces (auto-verified flow) OR on
-  // /verify-email (when the email layer requires manual confirm),
-  // OR shows an inline success card with a "بازگشت به صفحه ورود"
-  // link (the current dev flow — see signup/page.tsx success state).
-  // The spec asserts presence of any post-signup signal.
-  //
-  // Strict-mode note: the success card has BOTH an `<h1>✓ ثبت‌نام
-  // موفق</h1>` and a `<p>ایمیل تأیید برای ...</p>` — a regex with
-  // an OR alternation matches both, which Playwright's strict
-  // locator mode rejects. We anchor on the heading role for an
-  // unambiguous match.
-  await Promise.race([
-    page.waitForURL(/\/(workspaces|verify-email)/, { timeout: 15_000 }),
-    page.getByRole("heading", { name: /ثبت‌نام موفق/ }).waitFor({ timeout: 15_000 }),
-  ]);
+
+  // Wait for the inline success card. The page has BOTH an h1 and a
+  // descriptive paragraph that contain Persian text matching the
+  // success state — we anchor on the heading role for an unambiguous
+  // strict-mode match.
+  await page.getByRole("heading", { name: /ثبت‌نام موفق/ }).waitFor({ timeout: 15_000 });
+
+  // Bypass email verification. The seed fixture writes
+  // `email_verified_at = NOW()` directly so the credentials
+  // provider stops rejecting the user. Email rendering itself is
+  // covered by F5a unit tests; the spec only cares about the
+  // post-auth flow.
+  const updated = await seedFixture.markEmailVerified(params.email);
+  if (updated === 0) {
+    throw new Error(
+      `[e2e/auth] signUp: markEmailVerified found no row for ${params.email}. ` +
+        `Either the signup POST silently failed or the email_normalized lookup ` +
+        `did not match. Check the dev server stderr for [signup] error logs.`,
+    );
+  }
+
+  // Sign in via the credentials form.
+  await signIn(page, { email: params.email, password: params.password });
 }
 
 /**
