@@ -57,6 +57,13 @@
       "when": 1779375000000,
       "tag": "0007_phase1.2_labels",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1779376000000,
+      "tag": "0008_phase1.2_due_date",
+      "breakpoints": true
     }
   ]
 }
