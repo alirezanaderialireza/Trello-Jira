@@ -22,6 +22,8 @@ import { useBoardStore } from "../store/useBoardStore";
 import { updateCardAction } from "../actions/board.actions";
 import { isActionFailure } from "../actions/responseTypes";
 
+import { getTokenStyle } from "@/lib/labels/tokenColorMap";
+
 // ============================================================================
 // 🧠 Types
 // ============================================================================
@@ -52,6 +54,24 @@ const makeSelectCardTitle =
 const makeSelectCardUpdatedAt =
   (id: string) => (state: any) =>
     state.cards[id]?.updatedAt;
+
+// Label DTOs needed to render the top-3 colour bars on the card
+// preview (D5 + D11 hybrid: small bars on the card, full pill in
+// the card detail). The selector reads two slices:
+//   • the card's labelId[]
+//   • the global label DTO map
+// Re-renders are gated by Object.is on the slices themselves —
+// adding/removing a label on this card or editing any label on the
+// board flips one of the two references, which is exactly when the
+// preview needs to re-derive.
+const makeSelectCardLabelIds =
+  (id: string) => (state: any) =>
+    state.cards[id]?.labels;
+
+const selectAllLabels = (state: any) =>
+  state.labels;
+
+const MAX_VISIBLE_LABELS = 3;
 
 // ============================================================================
 // 🧠 SSR-safe Layout Effect
@@ -89,6 +109,36 @@ export const CardItem = memo(function CardItem({
 
   // intentionally kept for future sync logic
   useBoardStore(selectUpdatedAt);
+
+  // ── Labels (top-3 + overflow) ───────────────────────────────────────────
+  // The selectors are memoised by cardId so a hot-reload of this
+  // component doesn't tear down the Zustand subscription path.
+  const selectCardLabelIds = useMemo(
+    () => makeSelectCardLabelIds(cardId),
+    [cardId],
+  );
+  const cardLabelIds = useBoardStore(selectCardLabelIds);
+  const allLabels = useBoardStore(selectAllLabels);
+
+  const visibleLabels = useMemo(() => {
+    if (!cardLabelIds || cardLabelIds.length === 0) return [];
+    const list = (cardLabelIds as string[])
+      .map((id) => allLabels[id])
+      .filter(Boolean)
+      .sort(
+        (a: { position: string }, b: { position: string }) =>
+          a.position.localeCompare(b.position),
+      );
+    return list as Array<{
+      id:         string;
+      name:       string;
+      colorToken: string;
+      position:   string;
+    }>;
+  }, [cardLabelIds, allLabels]);
+
+  const top3 = visibleLabels.slice(0, MAX_VISIBLE_LABELS);
+  const overflowCount = Math.max(0, visibleLabels.length - MAX_VISIBLE_LABELS);
 
   const updateCardStore = useBoardStore(
     (s) => s.updateCard
@@ -452,6 +502,45 @@ export const CardItem = memo(function CardItem({
         }
       `}
     >
+      {/* ================================================================== */}
+      {/* Labels (top-3 visible + +N overflow per D5) */}
+      {/* ================================================================== */}
+
+      {visibleLabels.length > 0 && (
+        <div
+          className="mb-2 flex flex-wrap items-center gap-1"
+          aria-label="برچسب‌های کارت"
+        >
+          {top3.map((label) => {
+            const tokenStyle = getTokenStyle(label.colorToken);
+            return (
+              <span
+                key={label.id}
+                role="img"
+                aria-label={`${tokenStyle.persianName}: ${label.name}`}
+                title={label.name}
+                dir="auto"
+                style={{
+                  backgroundColor: tokenStyle.bg,
+                  color:           tokenStyle.text,
+                }}
+                className="inline-block h-2 w-10 rounded-full"
+              >
+                <span className="sr-only">{label.name}</span>
+              </span>
+            );
+          })}
+          {overflowCount > 0 && (
+            <span
+              aria-label={`${overflowCount.toLocaleString("fa-IR")} برچسب دیگر`}
+              className="inline-flex items-center rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-medium leading-none text-slate-600"
+            >
+              {`+${overflowCount.toLocaleString("fa-IR")}`}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* ================================================================== */}
       {/* Edit Mode */}
       {/* ================================================================== */}
