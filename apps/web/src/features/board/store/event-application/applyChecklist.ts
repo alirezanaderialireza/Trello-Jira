@@ -1,12 +1,47 @@
 // apps/web/src/features/board/store/event-application/applyChecklist.ts
+//
+// Phase 1.2 (F1.2.3.a) — adapted to event payload v2.
+//
+//   v1 (Phase 4 stub):
+//     ChecklistCreatedPayload    → name, items[]
+//     ChecklistItemAddedPayload  → item.{ title, completed }
+//     ChecklistItemUpdatedPayload → changes.{ title, completed }
+//     ChecklistDeletedPayload    → no count
+//
+//   v2 (this version, schemaVersion 2):
+//     ChecklistCreatedPayload    → title, position, createdBy
+//                                  (items array dropped — initial
+//                                  items always empty in F1.2.3.a;
+//                                  items added via separate event so
+//                                  the activity timeline has one event
+//                                  per addition)
+//     ChecklistItemAddedPayload  → flattened: { checklistItemId, text,
+//                                  isDone, position, addedBy }
+//     ChecklistItemUpdatedPayload → changes.{ text, isDone, position }
+//                                  (D10 toggle / D11 reorder /
+//                                  rename in one payload)
+//     ChecklistDeletedPayload    → +affectedItemCount (informational
+//                                  — not consumed by the reducer)
+//
+// New: ChecklistUpdatedEvent (D12 reorder/rename of the parent).
+//
+// The reducer reads only the fields that change board store state;
+// audit fields (createdBy / addedBy / actorId on the event envelope)
+// are for the activity timeline (F1.2.6) but not for state derivation.
+
 import type {
   ChecklistCreatedEvent,
+  ChecklistUpdatedEvent,
+  ChecklistDeletedEvent,
   ChecklistItemAddedEvent,
   ChecklistItemUpdatedEvent,
   ChecklistItemRemovedEvent,
-  ChecklistDeletedEvent,
 } from "@repo/domain";
-import type { BoardStoreState, ChecklistDto, ChecklistItemDto } from "../useBoardStore";
+import type {
+  BoardStoreState,
+  ChecklistDto,
+  ChecklistItemDto,
+} from "../useBoardStore";
 import type { ClientEventEnvelope } from "./types";
 import type { ReducerContext } from "./context";
 
@@ -17,18 +52,20 @@ export function applyChecklistCreated(
   envelope: ClientEventEnvelope<ChecklistCreatedEvent>,
   _context: ReducerContext,
 ): Partial<BoardStoreState> {
-  const { checklistId, cardId, boardId, name, items } = envelope.event.payload;
+  const { checklistId, cardId, boardId, title, position } =
+    envelope.event.payload;
 
   const existing = state.checklists[checklistId];
   if (existing && existing.revision >= envelope.event.version) return {};
 
   const checklist: ChecklistDto = {
-    id:          checklistId,
+    id:           checklistId,
     cardId,
     boardId,
-    name,
-    items:       items.map((i) => ({ id: i.id, title: i.title, completed: i.completed })),
-    revision:    envelope.event.version,
+    title,
+    position,
+    items:        [], // v2: initial items always empty.
+    revision:     envelope.event.version,
     isOptimistic: envelope.optimistic ?? false,
   };
 
@@ -55,6 +92,33 @@ export function applyChecklistCreated(
   };
 }
 
+// ─── Updated ─────────────────────────────────────────────────────────────────
+// NEW in F1.2.3.a — D12 reorder + rename of the parent checklist.
+
+export function applyChecklistUpdated(
+  state: BoardStoreState,
+  envelope: ClientEventEnvelope<ChecklistUpdatedEvent>,
+  _context: ReducerContext,
+): Partial<BoardStoreState> {
+  const { checklistId, changes } = envelope.event.payload;
+  const existing = state.checklists[checklistId];
+  if (!existing) return {};
+  if (existing.revision >= envelope.event.version) return {};
+
+  return {
+    checklists: {
+      ...state.checklists,
+      [checklistId]: {
+        ...existing,
+        ...(changes.title    !== undefined && { title:    changes.title }),
+        ...(changes.position !== undefined && { position: changes.position }),
+        revision:     envelope.event.version,
+        isOptimistic: envelope.optimistic ?? false,
+      },
+    },
+  };
+}
+
 // ─── Item Added ──────────────────────────────────────────────────────────────
 
 export function applyChecklistItemAdded(
@@ -62,18 +126,20 @@ export function applyChecklistItemAdded(
   envelope: ClientEventEnvelope<ChecklistItemAddedEvent>,
   _context: ReducerContext,
 ): Partial<BoardStoreState> {
-  const { checklistId, item } = envelope.event.payload;
+  const { checklistId, checklistItemId, text, isDone, position } =
+    envelope.event.payload;
   const existing = state.checklists[checklistId];
   if (!existing) return {};
   if (existing.revision >= envelope.event.version) return {};
 
   // Idempotent: skip if item already present.
-  if (existing.items.some((i) => i.id === item.id)) return {};
+  if (existing.items.some((i) => i.id === checklistItemId)) return {};
 
   const newItem: ChecklistItemDto = {
-    id:        item.id,
-    title:     item.title,
-    completed: item.completed,
+    id:       checklistItemId,
+    text,
+    isDone,
+    position,
   };
 
   return {
@@ -96,16 +162,23 @@ export function applyChecklistItemUpdated(
   envelope: ClientEventEnvelope<ChecklistItemUpdatedEvent>,
   _context: ReducerContext,
 ): Partial<BoardStoreState> {
-  const { checklistId, itemId, changes } = envelope.event.payload;
+  const { checklistId, checklistItemId, changes } = envelope.event.payload;
   const existing = state.checklists[checklistId];
   if (!existing) return {};
   if (existing.revision >= envelope.event.version) return {};
 
-  const itemIdx = existing.items.findIndex((i) => i.id === itemId);
+  const itemIdx = existing.items.findIndex((i) => i.id === checklistItemId);
   if (itemIdx === -1) return {};
 
   const nextItems = existing.items.map((item) =>
-    item.id === itemId ? { ...item, ...changes } : item,
+    item.id === checklistItemId
+      ? {
+          ...item,
+          ...(changes.text     !== undefined && { text:     changes.text }),
+          ...(changes.isDone   !== undefined && { isDone:   changes.isDone }),
+          ...(changes.position !== undefined && { position: changes.position }),
+        }
+      : item,
   );
 
   return {
@@ -128,12 +201,12 @@ export function applyChecklistItemRemoved(
   envelope: ClientEventEnvelope<ChecklistItemRemovedEvent>,
   _context: ReducerContext,
 ): Partial<BoardStoreState> {
-  const { checklistId, itemId } = envelope.event.payload;
+  const { checklistId, checklistItemId } = envelope.event.payload;
   const existing = state.checklists[checklistId];
   if (!existing) return {};
   if (existing.revision >= envelope.event.version) return {};
 
-  const nextItems = existing.items.filter((i) => i.id !== itemId);
+  const nextItems = existing.items.filter((i) => i.id !== checklistItemId);
   if (nextItems.length === existing.items.length) return {}; // idempotent
 
   return {

@@ -83,15 +83,22 @@ export type LabelDto = {
 
 export type ChecklistItemDto = {
   id: string;
-  title: string;
-  completed: boolean;
+  /** Phase 1.2 (F1.2.3.a): renamed from `title` for spec clarity. */
+  text: string;
+  /** Phase 1.2 (F1.2.3.a): renamed from `completed` for spec clarity. */
+  isDone: boolean;
+  /** Phase 1.2 (F1.2.3.a): LexoRank string for ordering. */
+  position: string;
 };
 
 export type ChecklistDto = {
   id: string;
   cardId: string;
   boardId: string;
-  name: string;
+  /** Phase 1.2 (F1.2.3.a): renamed from `name` for spec clarity. */
+  title: string;
+  /** Phase 1.2 (F1.2.3.a): LexoRank string for card-scoped ordering. */
+  position: string;
   items: ChecklistItemDto[];
   revision: number;
   isOptimistic?: boolean;

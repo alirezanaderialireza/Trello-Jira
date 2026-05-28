@@ -25,6 +25,7 @@ import type {
   LabelDeletedEvent,
   // ── Phase 4 checklist ────────────────────────────────────────────────────
   ChecklistCreatedEvent,
+  ChecklistUpdatedEvent,
   ChecklistItemAddedEvent,
   ChecklistItemUpdatedEvent,
   ChecklistItemRemovedEvent,
@@ -71,6 +72,7 @@ import { applyLabelCreated, applyLabelUpdated, applyLabelDeleted } from "./apply
 // ── Phase 4 checklist reducers ───────────────────────────────────────────────
 import {
   applyChecklistCreated,
+  applyChecklistUpdated,
   applyChecklistItemAdded,
   applyChecklistItemUpdated,
   applyChecklistItemRemoved,
@@ -136,6 +138,7 @@ type EventMap = {
   "label.deleted": LabelDeletedEvent;
   // ── Checklist ─────────────────────────────────────────────────────────────
   "checklist.created":      ChecklistCreatedEvent;
+  "checklist.updated":      ChecklistUpdatedEvent;
   "checklist.item_added":   ChecklistItemAddedEvent;
   "checklist.item_updated": ChecklistItemUpdatedEvent;
   "checklist.item_removed": ChecklistItemRemovedEvent;
@@ -192,6 +195,7 @@ const HANDLERS: HandlerRegistry = {
   "label.deleted": applyLabelDeleted,
   // ── Checklist ─────────────────────────────────────────────────────────────
   "checklist.created":      applyChecklistCreated,
+  "checklist.updated":      applyChecklistUpdated,
   "checklist.item_added":   applyChecklistItemAdded,
   "checklist.item_updated": applyChecklistItemUpdated,
   "checklist.item_removed": applyChecklistItemRemoved,
