@@ -1,5 +1,5 @@
 "use client";
-import { trpc } from "../../utils/trpc";
+import { trpc } from "../../../utils/trpc";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
