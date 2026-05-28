@@ -1,20 +1,31 @@
 // apps/web/src/features/board/store/mutations/checklists/useRemoveChecklistItem.ts
+//
+// Phase 1.2 (F1.2.3.a) — adapted to v2 procedure / event:
+//   • Variable `itemId` renamed to `checklistItemId` to match the
+//     server payload's flattened shape.
+//   • boardApi.removeChecklistItem now requires boardId.
+
 import { useOptimisticMutation } from "../core/useOptimisticMutation";
 import { createOptimisticEnvelope } from "../utils/createOptimisticEnvelope";
 import { boardApi } from "../../../api/services/boardApi";
 
 interface RemoveChecklistItemVariables {
   checklistId: string;
+  checklistItemId: string;
   cardId: string;
   boardId: string;
-  itemId: string;
   correlationId: string;
 }
 
 export function useRemoveChecklistItem() {
   return useOptimisticMutation<RemoveChecklistItemVariables, any>({
     mutationFn: (vars) =>
-      boardApi.removeChecklistItem({ checklistId: vars.checklistId, itemId: vars.itemId, mutationId: vars.correlationId }),
+      boardApi.removeChecklistItem({
+        checklistItemId: vars.checklistItemId,
+        boardId:         vars.boardId,
+        idempotencyKey:  vars.correlationId,
+        correlationId:   vars.correlationId,
+      }),
 
     targetSnapshot: (vars) => ({ cards: [vars.cardId] }),
 
@@ -23,10 +34,18 @@ export function useRemoveChecklistItem() {
       if (!checklist) return null;
       return createOptimisticEnvelope(
         "checklist.item_removed",
-        { checklistId: vars.checklistId, cardId: vars.cardId, boardId: vars.boardId, itemId: vars.itemId },
-        vars.checklistId, "checklist", checklist.revision, vars.correlationId,
+        {
+          checklistItemId: vars.checklistItemId,
+          checklistId:     vars.checklistId,
+          cardId:          vars.cardId,
+          boardId:         vars.boardId,
+        },
+        vars.cardId,
+        "card",
+        checklist.revision,
+        vars.correlationId,
       );
     },
-    errorMessage: "حذف آیتم چک‌لیست با خطا مواجه شد.",
+    errorMessage: "حذف مورد چک‌لیست با خطا مواجه شد.",
   });
 }

@@ -230,36 +230,70 @@ export const boardApi = {
   // 4.  Checklists
   // ============================================================================
 
+  // ============================================================================
+  // 4.  Checklists
+  // ============================================================================
+  // Phase 1.2 (F1.2.3.a). Procedure path stays at `v1.public.checklist.*`
+  // (singular — root mount in packages/api/src/index.ts). Wire field
+  // names and idempotencyKey (was mutationId) updated to the v2
+  // contract. boardId is now required on every mutation because the
+  // boardProtectedProcedure middleware reads it from rawInput.
+
   createChecklist: async (payload: {
     cardId: string;
-    name: string;
-    mutationId: string;
+    boardId: string;
+    title: string;
+    idempotencyKey: string;
+    correlationId?: string;
   }) => (trpc as any).v1.public.checklist.create.mutateAsync(payload),
+
+  /**
+   * D12 — rename / reorder a checklist via field mask.
+   */
+  updateChecklist: async (payload: {
+    checklistId: string;
+    boardId: string;
+    title?: string;
+    position?: string;
+    idempotencyKey: string;
+    correlationId?: string;
+  }) => (trpc as any).v1.public.checklist.updateChecklist.mutateAsync(payload),
 
   addChecklistItem: async (payload: {
     checklistId: string;
-    title: string;
-    mutationId: string;
+    boardId: string;
+    text: string;
+    idempotencyKey: string;
+    correlationId?: string;
   }) => (trpc as any).v1.public.checklist.addItem.mutateAsync(payload),
 
+  /**
+   * D10 toggle / D11 reorder / rename — single procedure with field
+   * mask. All three fields optional; pass only what changes.
+   */
   updateChecklistItem: async (payload: {
-    checklistId: string;
-    itemId: string;
-    title?: string;
-    completed?: boolean;
-    mutationId: string;
+    checklistItemId: string;
+    boardId: string;
+    text?: string;
+    isDone?: boolean;
+    position?: string;
+    idempotencyKey: string;
+    correlationId?: string;
   }) => (trpc as any).v1.public.checklist.updateItem.mutateAsync(payload),
 
   removeChecklistItem: async (payload: {
-    checklistId: string;
-    itemId: string;
-    mutationId: string;
+    checklistItemId: string;
+    boardId: string;
+    idempotencyKey: string;
+    correlationId?: string;
   }) => (trpc as any).v1.public.checklist.removeItem.mutateAsync(payload),
 
   deleteChecklist: async (payload: {
     checklistId: string;
-    mutationId: string;
-  }) => (trpc as any).v1.public.checklist.delete.mutateAsync(payload),
+    boardId: string;
+    idempotencyKey: string;
+    correlationId?: string;
+  }) => (trpc as any).v1.public.checklist.deleteChecklist.mutateAsync(payload),
 
   // ============================================================================
   // 5.  Comments

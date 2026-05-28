@@ -37,3 +37,6 @@ export * from "./board/use-cases/addBoardMember";
 
 // 🔟 Labels (Phase 1.2 — F1.2.1)
 export * from "./labels";
+
+// 1️⃣1️⃣ Checklists (Phase 1.2 — F1.2.3)
+export * from "./checklists";
