@@ -13,13 +13,12 @@
 // Component (which would block server-side bootstrap fetching).
 //
 // The grid template lives here so the visual structure stays
-// co-located with the components that fill its cells. The topnav
-// placeholder gets replaced in Commit 4 with the real TopNav.
+// co-located with the components that fill its cells.
 
 import { useState } from "react";
-import { Menu } from "lucide-react";
 
 import { Sidebar } from "@/features/shell/sidebar/Sidebar";
+import { TopNav } from "@/features/shell/topnav/TopNav";
 import type { AppRouter } from "@repo/api";
 import type { inferRouterOutputs } from "@trpc/server";
 
@@ -41,34 +40,10 @@ export function AppShell({ initialData, children }: AppShellProps) {
         md:grid-cols-[260px_1fr]
       "
     >
-      {/* TopNav placeholder — Commit 4 will replace with real <TopNav />. */}
-      <header
-        className="
-          md:col-span-2
-          flex h-14 items-center justify-between border-b border-slate-200
-          bg-white px-4
-        "
-      >
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setMobileDrawerOpen(true)}
-            aria-label="باز کردن منو"
-            className="
-              rounded-md p-2 text-slate-600 hover:bg-slate-100
-              focus-visible:outline-none focus-visible:ring-2
-              focus-visible:ring-blue-500 md:hidden
-            "
-          >
-            <Menu className="h-5 w-5" aria-hidden="true" />
-          </button>
-          <span className="text-sm font-semibold text-slate-700">
-            {initialData?.currentUser.displayName
-              ? `سلام، ${initialData.currentUser.displayName}`
-              : "Trello OS"}
-          </span>
-        </div>
-      </header>
+      <TopNav
+        initialData={initialData}
+        onOpenMobileMenu={() => setMobileDrawerOpen(true)}
+      />
 
       <Sidebar
         initialData={initialData}
