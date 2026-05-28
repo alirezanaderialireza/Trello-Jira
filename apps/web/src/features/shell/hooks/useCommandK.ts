@@ -51,7 +51,6 @@ export function useCommandK(onOpen: () => void): void {
       e.preventDefault();
       // Surface a tiny telemetry breadcrumb. Any production
       // instrumentation can intercept window.console.debug.
-      // eslint-disable-next-line no-console
       console.debug("[useCommandK] shortcut fired");
       callbackRef.current();
     }
