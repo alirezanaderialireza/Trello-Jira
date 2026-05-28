@@ -44,6 +44,18 @@ const AUTH_PAGES = new Set<string>([
   "/verify-email",
 ]);
 
+// Public path PREFIXES — pages reachable without a session AND
+// reachable while logged in (no auto-redirect either way). Distinct
+// from AUTH_PAGES because auth pages bounce signed-in users away,
+// whereas these pages must remain accessible to all audiences.
+//
+//   /invitations/[token] — F5a invitation accept flow. A logged-out
+//   user clicks the link in their email; if no session, they see
+//   the invitation summary + a CTA pointing at /login. If they are
+//   already signed in (with any account), the page renders an
+//   accept button — possibly with a "wrong email" recovery path.
+const PUBLIC_PAGE_PREFIXES = ["/invitations/"];
+
 function hasSessionCookie(req: NextRequest): boolean {
   return SESSION_COOKIE_NAMES.some(
     (name) => Boolean(req.cookies.get(name)?.value),
@@ -54,6 +66,10 @@ function isAuthPage(pathname: string): boolean {
   // Exact-match against AUTH_PAGES is enough — none of them have nested
   // sub-routes that should also be public.
   return AUTH_PAGES.has(pathname);
+}
+
+function isPublicPage(pathname: string): boolean {
+  return PUBLIC_PAGE_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
 export function middleware(req: NextRequest): NextResponse {
@@ -76,7 +92,10 @@ export function middleware(req: NextRequest): NextResponse {
   }
 
   // ── Rule 2: anonymous user requesting a protected route → /login ──────────
-  if (!hasSession && !isAuthPage(pathname)) {
+  //
+  // Pages under PUBLIC_PAGE_PREFIXES (e.g. /invitations/[token]) are
+  // skipped — they render their own auth-aware UI.
+  if (!hasSession && !isAuthPage(pathname) && !isPublicPage(pathname)) {
     const loginUrl = new URL("/login", req.url);
     loginUrl.searchParams.set("callbackUrl", pathname + search);
     return NextResponse.redirect(loginUrl);
