@@ -18,7 +18,7 @@
 // follow-up to make tenantId an explicit input is easy to spot.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { trpc } from "../../../utils/trpc";
+import { trpc } from "../../../../utils/trpc";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useState } from "react";

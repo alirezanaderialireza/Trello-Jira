@@ -10,15 +10,13 @@
 // bails the build out with "Module not found: @node-rs/argon2-wasm32-wasi"
 // + "node:crypto is not supported in the Edge Runtime".
 //
-// Instead this middleware does a lightweight cookie check: if no Auth.js
-// session cookie is present we redirect to /login with the requested URL
-// preserved as `callbackUrl`. The actual session validation (and ACL
-// enforcement) happens server-side on the protected page / API route via
-// `getServerSession()`, which runs in Node and can talk to the database.
+// Instead this middleware does lightweight cookie + header checks. The
+// actual session validation (with DB lookup of the user, the workspace,
+// the role) happens in Server Components via `getWebSession()`, which
+// runs in Node and can talk to the database.
 //
-// This is the documented pattern for Auth.js v5 + database session
-// strategy: middleware can only reach as far as the cookie because the
-// Edge runtime cannot open a Postgres connection.
+// F4 extends the pre-existing logged-out → /login redirect with three
+// new redirect rules. None of them touches the database.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { NextResponse } from "next/server";
@@ -33,21 +31,83 @@ const SESSION_COOKIE_NAMES = [
   "__Secure-next-auth.session-token",
 ];
 
-export function middleware(req: NextRequest): NextResponse {
-  const hasSession = SESSION_COOKIE_NAMES.some(
+// Auth pages that an unauthenticated user is allowed to reach.
+//
+// Keep this list in sync with the matcher regex below. Anything in
+// (app)/* is protected; everything in (auth)/* is public-but-redirected
+// when a session cookie is present.
+const AUTH_PAGES = new Set<string>([
+  "/login",
+  "/signup",
+  "/forgot-password",
+  "/reset-password",
+  "/verify-email",
+]);
+
+function hasSessionCookie(req: NextRequest): boolean {
+  return SESSION_COOKIE_NAMES.some(
     (name) => Boolean(req.cookies.get(name)?.value),
   );
+}
 
-  if (hasSession) {
-    return NextResponse.next();
+function isAuthPage(pathname: string): boolean {
+  // Exact-match against AUTH_PAGES is enough — none of them have nested
+  // sub-routes that should also be public.
+  return AUTH_PAGES.has(pathname);
+}
+
+export function middleware(req: NextRequest): NextResponse {
+  const { pathname, search } = req.nextUrl;
+  const hasSession = hasSessionCookie(req);
+
+  // ── Rule 1: logged-in user requesting an auth page → bounce to /workspaces ─
+  //
+  // Without this, a signed-in user clicking "Login" from a stray bookmark
+  // would land on the login form and be confused. The destination after
+  // a successful login (per the existing flow) is /workspaces, so we
+  // reuse the same target here.
+  //
+  // We do NOT redirect /verify-email because a user with a valid session
+  // but no `email_verified_at` may legitimately need to revisit that
+  // page to resend the verification email. The downstream verify-email
+  // page will redirect them onward when verification is complete.
+  if (hasSession && isAuthPage(pathname) && pathname !== "/verify-email") {
+    return NextResponse.redirect(new URL("/workspaces", req.url));
   }
 
-  // No session cookie → redirect to login, preserving the destination.
-  const loginUrl = new URL("/login", req.url);
-  loginUrl.searchParams.set("callbackUrl", req.nextUrl.pathname + req.nextUrl.search);
-  return NextResponse.redirect(loginUrl);
+  // ── Rule 2: anonymous user requesting a protected route → /login ──────────
+  if (!hasSession && !isAuthPage(pathname)) {
+    const loginUrl = new URL("/login", req.url);
+    loginUrl.searchParams.set("callbackUrl", pathname + search);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  // ── Default: pass through ─────────────────────────────────────────────────
+  //
+  // For everything else (logged-in user on a protected page, anonymous
+  // user on an auth page) the middleware does nothing. The `getWebSession`
+  // call inside Server Components handles fine-grained authorization
+  // (membership, role, deleted-workspace 404) since those checks need
+  // the database.
+  //
+  // Note: rule 3 from the F4 plan (email-not-verified guard) is also
+  // deferred to Server Component land. Adding it here would require
+  // either reading a "is_verified" cookie (we don't set one) or hitting
+  // the database (forbidden in Edge runtime). The auth flow already
+  // gates protected resources via `getWebSession` which throws on
+  // unverified users; this middleware just ensures the user has *some*
+  // session cookie before we even attempt that DB check.
+  return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/auth|api/health|api/trpc|login|signup|forgot-password|reset-password|verify-email).*)"],
+  matcher: [
+    // Match everything except:
+    //   • Next.js internals (_next/static, _next/image, favicon)
+    //   • API routes (auth callbacks, health, tRPC, errors)
+    //
+    // Auth pages (login/signup/…) ARE in scope so rule 1 above can
+    // redirect signed-in users away from them.
+    "/((?!_next/static|_next/image|favicon.ico|api/auth|api/health|api/trpc|api/errors).*)",
+  ],
 };
