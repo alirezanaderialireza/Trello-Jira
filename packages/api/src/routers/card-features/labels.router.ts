@@ -14,8 +14,19 @@
 //     replays, and the realtime patch loop.
 //   • Emits its outbox event in the SAME transaction as the DB write
 //     (atomic-outbox pattern). The `tenantContextMiddleware` already
-//     opened the tx and exposed it as `ctx.tx`; both repository writes
-//     and `ctx.repos.outbox.append(ctx.tx, …)` share that handle.
+//     opened the tx and swapped `ctx.infra.db` to point at it; both
+//     repository writes and `ctx.repos.outbox.append(ctx.infra.db, …)`
+//     therefore share the same handle.
+//
+// Note on ctx typing: tenantContextMiddleware opens the tx via
+// `ctx.runInTenantTx(cb)`, whose generic return type erases the
+// ctx-extension at the type level. Runtime-only fields (`ctx.infra.db`,
+// `ctx.boardMembership`, `ctx.resolveBoardWorkspaceId`) survive in the
+// procedure handler but tsc doesn't see them. The codebase convention
+// — followed e.g. by board-management.ts and board-members.ts — is to
+// reach for `ctx.infra.db` (which the same middleware swaps to the tx)
+// for DB access and to cast `(ctx as any).boardMembership` for the
+// role check. We keep that convention here.
 //   • Translates `LabelDomainError`s into `TRPCError` with English code
 //     + Persian message — the `code` is what programs branch on, the
 //     `message` is what the toast surfaces (D8/D11/D14 contract).
@@ -169,17 +180,25 @@ const IDEMPOTENCY_SCHEMA_VERSION = "labels.v2";
  * table has no tenant_id (it's globally unique by mutationId), so the
  * lookup is unaffected by RLS — this is intentional and matches the
  * existing pattern from BoardService.
+ *
+ * Takes the tx and the idempotency repo as explicit arguments instead
+ * of pulling them off `ctx`, because tenantContextMiddleware's
+ * `runInTenantTx` wrapper opaque-ifies the ctx extension at the type
+ * level (ctx.infra.db exists at runtime but isn't visible to tsc). Callers
+ * pass `ctx.infra.db` and `ctx.repos.idempotency` — both surface
+ * through the standard middleware chain.
  */
 async function withIdempotency<T>(
-  ctx: {
-    tx: any;
-    repos: { idempotency: { findByMutationId: (tx: any, id: any) => Promise<any>; save: (tx: any, rec: any) => Promise<void> } };
+  tx: any,
+  idempotencyRepo: {
+    findByMutationId: (tx: any, id: any) => Promise<any>;
+    save:             (tx: any, rec: any) => Promise<void>;
   },
   mutationId: string,
   work: () => Promise<T>,
 ): Promise<T> {
-  const existing = await ctx.repos.idempotency.findByMutationId(
-    ctx.tx,
+  const existing = await idempotencyRepo.findByMutationId(
+    tx,
     mutationId as MutationId,
   );
   if (existing) {
@@ -188,7 +207,7 @@ async function withIdempotency<T>(
 
   const response = await work();
 
-  await ctx.repos.idempotency.save(ctx.tx, {
+  await idempotencyRepo.save(tx, {
     mutationId:    mutationId as MutationId,
     response:      response as unknown,
     schemaVersion: IDEMPOTENCY_SCHEMA_VERSION,
@@ -210,9 +229,9 @@ export const labelsRouter = router({
   list: boardProtectedProcedure
     .input(z.object({ boardId: IdSchema }).strict())
     .query(async ({ input, ctx }) => {
-      const repo   = new DrizzleLabelsRepository(ctx.tx);
+      const repo   = new DrizzleLabelsRepository(ctx.infra.db);
       const labels = await repo.findByBoardId(input.boardId as BoardId, {
-        tx:       ctx.tx,
+        tx:       ctx.infra.db,
         tenantId: ctx.session.tenantId,
       });
 
@@ -241,9 +260,9 @@ export const labelsRouter = router({
   listByCard: boardProtectedProcedure
     .input(z.object({ boardId: IdSchema, cardId: IdSchema }).strict())
     .query(async ({ input, ctx }) => {
-      const repo   = new DrizzleLabelsRepository(ctx.tx);
+      const repo   = new DrizzleLabelsRepository(ctx.infra.db);
       const labels = await repo.findCardLabelsByCardId(input.cardId as CardId, {
-        tx:       ctx.tx,
+        tx:       ctx.infra.db,
         tenantId: ctx.session.tenantId,
       });
       return labels.map((l) => ({
@@ -271,14 +290,14 @@ export const labelsRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        return await withIdempotency(ctx, input.idempotencyKey, async () => {
-          const repo = new DrizzleLabelsRepository(ctx.tx);
+        return await withIdempotency(ctx.infra.db, ctx.repos.idempotency, input.idempotencyKey, async () => {
+          const repo = new DrizzleLabelsRepository(ctx.infra.db);
 
           // Resolve existing labels — needed for case-insensitive
           // duplicate detection AND for choosing the next LexoRank
           // position (append at the end).
           const existing = await repo.findByBoardId(input.boardId as BoardId, {
-            tx:       ctx.tx,
+            tx:       ctx.infra.db,
             tenantId: ctx.session.tenantId,
           });
 
@@ -309,8 +328,8 @@ export const labelsRouter = router({
           });
 
           // Atomic write + outbox emit ───────────────────────────────────
-          await repo.create(ctx.tx, entity);
-          await ctx.repos.outbox.append(ctx.tx, toOutboxEvent(event));
+          await repo.create(ctx.infra.db, entity);
+          await ctx.repos.outbox.append(ctx.infra.db, toOutboxEvent(event));
 
           return {
             id:         entity.id,
@@ -349,17 +368,17 @@ export const labelsRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        return await withIdempotency(ctx, input.idempotencyKey, async () => {
-          const repo = new DrizzleLabelsRepository(ctx.tx);
+        return await withIdempotency(ctx.infra.db, ctx.repos.idempotency, input.idempotencyKey, async () => {
+          const repo = new DrizzleLabelsRepository(ctx.infra.db);
 
           const current = await repo.findById(input.labelId as LabelId, {
-            tx:       ctx.tx,
+            tx:       ctx.infra.db,
             tenantId: ctx.session.tenantId,
           });
           if (!current) throw new LabelNotFoundError();
 
           // Authorization — creator OR board admin/owner
-          const role     = ctx.boardMembership?.role;
+          const role     = (ctx as any).boardMembership?.role as string | undefined;
           const isCreator = current.createdBy === ctx.session.user.id;
           const isAdmin   = role === "ADMIN" || role === "OWNER";
           if (!isCreator && !isAdmin) {
@@ -372,7 +391,7 @@ export const labelsRouter = router({
           // Resolve other labels for duplicate check (excluding self)
           const others = (
             await repo.findByBoardId(current.boardId, {
-              tx:       ctx.tx,
+              tx:       ctx.infra.db,
               tenantId: ctx.session.tenantId,
             })
           ).filter((l) => l.id !== current.id);
@@ -402,8 +421,8 @@ export const labelsRouter = router({
             return { success: true, noOp: true as const };
           }
 
-          await repo.update(ctx.tx, current.id, patch);
-          await ctx.repos.outbox.append(ctx.tx, toOutboxEvent(event));
+          await repo.update(ctx.infra.db, current.id, patch);
+          await ctx.repos.outbox.append(ctx.infra.db, toOutboxEvent(event));
 
           return { success: true, noOp: false as const };
         });
@@ -433,11 +452,11 @@ export const labelsRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        return await withIdempotency(ctx, input.idempotencyKey, async () => {
-          const repo = new DrizzleLabelsRepository(ctx.tx);
+        return await withIdempotency(ctx.infra.db, ctx.repos.idempotency, input.idempotencyKey, async () => {
+          const repo = new DrizzleLabelsRepository(ctx.infra.db);
 
           const current = await repo.findById(input.labelId as LabelId, {
-            tx:       ctx.tx,
+            tx:       ctx.infra.db,
             tenantId: ctx.session.tenantId,
           });
           if (!current) throw new LabelNotFoundError();
@@ -446,7 +465,7 @@ export const labelsRouter = router({
           // and the response carry the impacted-card count for the
           // confirmation UI.
           const affectedCardCount = await repo.countCardsWithLabel(current.id, {
-            tx:       ctx.tx,
+            tx:       ctx.infra.db,
             tenantId: ctx.session.tenantId,
           });
 
@@ -466,9 +485,9 @@ export const labelsRouter = router({
           // SELECT inside the tx never sees an orphaned junction
           // pointing at a soft-deleted label), then the soft-delete
           // on the label itself, then the outbox emit.
-          await repo.hardDeleteJunctionByLabelId(ctx.tx, current.id);
-          await repo.softDelete(ctx.tx, current.id);
-          await ctx.repos.outbox.append(ctx.tx, toOutboxEvent(event));
+          await repo.hardDeleteJunctionByLabelId(ctx.infra.db, current.id);
+          await repo.softDelete(ctx.infra.db, current.id);
+          await ctx.repos.outbox.append(ctx.infra.db, toOutboxEvent(event));
 
           return { success: true as const, affectedCardCount };
         });
@@ -493,20 +512,20 @@ export const labelsRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        return await withIdempotency(ctx, input.idempotencyKey, async () => {
-          const repo = new DrizzleLabelsRepository(ctx.tx);
+        return await withIdempotency(ctx.infra.db, ctx.repos.idempotency, input.idempotencyKey, async () => {
+          const repo = new DrizzleLabelsRepository(ctx.infra.db);
 
           const label = await repo.findById(input.labelId as LabelId, {
-            tx:       ctx.tx,
+            tx:       ctx.infra.db,
             tenantId: ctx.session.tenantId,
           });
           if (!label) throw new LabelNotFoundError();
 
           // We don't carry a Card repository in this slice — the cards
-          // table is queried directly via ctx.tx for the existence +
+          // table is queried directly via ctx.infra.db for the existence +
           // boardId check. This avoids a circular dep between the
           // labels feature and the card slice.
-          const cardRow = await ctx.tx.query.cards.findFirst({
+          const cardRow = await ctx.infra.db.query.cards.findFirst({
             where: and(
               eq(cards.id, input.cardId),
               eq(cards.tenantId, ctx.session.tenantId),
@@ -521,7 +540,7 @@ export const labelsRouter = router({
           // and the repo's ON CONFLICT DO NOTHING.
           const existingLink = await repo.findCardLabelLink(
             { cardId: input.cardId as CardId, labelId: label.id },
-            { tx: ctx.tx, tenantId: ctx.session.tenantId },
+            { tx: ctx.infra.db, tenantId: ctx.session.tenantId },
           );
 
           const eventId = crypto.randomUUID();
@@ -551,7 +570,7 @@ export const labelsRouter = router({
           }
 
           const { inserted } = await repo.applyLabelToCard(
-            ctx.tx,
+            ctx.infra.db,
             result.link,
           );
           // We only emit the outbox event when an actual insert
@@ -559,7 +578,7 @@ export const labelsRouter = router({
           // (inserted=false), the other transaction emits its own
           // event — we'd duplicate the activity timeline otherwise.
           if (inserted) {
-            await ctx.repos.outbox.append(ctx.tx, toOutboxEvent(result.event));
+            await ctx.repos.outbox.append(ctx.infra.db, toOutboxEvent(result.event));
           }
 
           return { success: true as const, applied: inserted };
@@ -585,15 +604,15 @@ export const labelsRouter = router({
     )
     .mutation(async ({ input, ctx }) => {
       try {
-        return await withIdempotency(ctx, input.idempotencyKey, async () => {
-          const repo = new DrizzleLabelsRepository(ctx.tx);
+        return await withIdempotency(ctx.infra.db, ctx.repos.idempotency, input.idempotencyKey, async () => {
+          const repo = new DrizzleLabelsRepository(ctx.infra.db);
 
           const link = await repo.findCardLabelLink(
             {
               cardId:  input.cardId as CardId,
               labelId: input.labelId as LabelId,
             },
-            { tx: ctx.tx, tenantId: ctx.session.tenantId },
+            { tx: ctx.infra.db, tenantId: ctx.session.tenantId },
           );
 
           const eventId = crypto.randomUUID();
@@ -615,12 +634,12 @@ export const labelsRouter = router({
             return { success: true as const, removed: false };
           }
 
-          const { removed } = await repo.removeLabelFromCard(ctx.tx, {
+          const { removed } = await repo.removeLabelFromCard(ctx.infra.db, {
             cardId:  input.cardId as CardId,
             labelId: input.labelId as LabelId,
           });
           if (removed) {
-            await ctx.repos.outbox.append(ctx.tx, toOutboxEvent(result.event));
+            await ctx.repos.outbox.append(ctx.infra.db, toOutboxEvent(result.event));
           }
 
           return { success: true as const, removed };
