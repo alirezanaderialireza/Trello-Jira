@@ -1,4 +1,9 @@
 // apps/web/src/features/board/store/mutations/labels/useUpdateLabel.ts
+//
+// Optimistic update-label. Variables now carry the v2 shape:
+// colorToken (was: color) and the new optional `position` for
+// drag-and-drop reorder.
+
 import { useOptimisticMutation } from "../core/useOptimisticMutation";
 import { createOptimisticEnvelope } from "../utils/createOptimisticEnvelope";
 import { boardApi } from "../../../api/services/boardApi";
@@ -7,14 +12,22 @@ interface UpdateLabelVariables {
   labelId: string;
   boardId: string;
   name?: string;
-  color?: string;
+  colorToken?: string;
+  position?: string;
   correlationId: string;
 }
 
 export function useUpdateLabel() {
   return useOptimisticMutation<UpdateLabelVariables, any>({
     mutationFn: (vars) =>
-      boardApi.updateLabel({ labelId: vars.labelId, name: vars.name, color: vars.color, mutationId: vars.correlationId }),
+      boardApi.updateLabel({
+        labelId:        vars.labelId,
+        name:           vars.name,
+        colorToken:     vars.colorToken,
+        position:       vars.position,
+        idempotencyKey: vars.correlationId,
+        correlationId:  vars.correlationId,
+      }),
 
     targetSnapshot: (_vars) => ({}),
 
@@ -27,13 +40,17 @@ export function useUpdateLabel() {
           labelId: vars.labelId,
           boardId: vars.boardId,
           changes: {
-            ...(vars.name  !== undefined && { name:  vars.name }),
-            ...(vars.color !== undefined && { color: vars.color }),
+            ...(vars.name       !== undefined && { name:       vars.name }),
+            ...(vars.colorToken !== undefined && { colorToken: vars.colorToken }),
+            ...(vars.position   !== undefined && { position:   vars.position }),
           },
         },
-        vars.labelId, "label", label.revision, vars.correlationId,
+        vars.labelId,
+        "board",
+        label.revision,
+        vars.correlationId,
       );
     },
-    errorMessage: "ویرایش لیبل با خطا مواجه شد.",
+    errorMessage: "ویرایش برچسب با خطا مواجه شد.",
   });
 }
