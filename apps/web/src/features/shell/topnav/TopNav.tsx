@@ -21,6 +21,7 @@ import type { AppRouter } from "@repo/api";
 import type { inferRouterOutputs } from "@trpc/server";
 
 import { ProfileDropdown } from "./ProfileDropdown";
+import { NotificationsBell } from "./NotificationsBell";
 import { SearchBar } from "./SearchBar";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
@@ -82,13 +83,12 @@ export function TopNav({ initialData, onOpenMobileMenu }: TopNavProps) {
 
       {/* End cluster: notifications + profile */}
       <div className="flex items-center gap-1">
-        {/* NotificationsBell placeholder — Commit 5 swaps in real component. */}
-        <div
-          aria-label="اعلان‌ها (placeholder — F4 commit 5)"
-          className="hidden h-9 w-9 items-center justify-center rounded-md text-slate-400 sm:flex"
-        >
-          {/* Empty placeholder — sized to match the eventual bell button */}
-        </div>
+        {user && (
+          <NotificationsBell
+            initialCount={initialData?.pendingInvitationsCount ?? 0}
+            userTimezone={user.timezone}
+          />
+        )}
 
         {user ? (
           <ProfileDropdown
