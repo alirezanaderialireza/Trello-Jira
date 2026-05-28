@@ -98,3 +98,26 @@ export function emailVerificationHtml(url: string, displayName: string): string 
     </div>
   `;
 }
+
+// ── Workspace templates (F5a) ────────────────────────────────────────────────
+//
+// Larger Persian RTL templates with table-based layouts live under
+// `./templates/`. The auth flow templates above are kept inline as
+// short snippets because they predate the templates/ directory and
+// they each fit in one screen. New templates use the templates/
+// directory so each one has its own params type + html + text +
+// subject helpers in a dedicated file.
+
+export {
+  type WorkspaceInvitationEmailParams,
+  workspaceInvitationSubject,
+  workspaceInvitationHtml,
+  workspaceInvitationText,
+} from "./templates/workspace-invitation";
+
+export {
+  type WorkspaceSoftDeletedEmailParams,
+  workspaceSoftDeletedSubject,
+  workspaceSoftDeletedHtml,
+  workspaceSoftDeletedText,
+} from "./templates/workspace-soft-deleted";
