@@ -58,9 +58,15 @@ export async function signUp(page: Page, params: SignupParams): Promise<void> {
   // OR shows an inline success card with a "بازگشت به صفحه ورود"
   // link (the current dev flow — see signup/page.tsx success state).
   // The spec asserts presence of any post-signup signal.
+  //
+  // Strict-mode note: the success card has BOTH an `<h1>✓ ثبت‌نام
+  // موفق</h1>` and a `<p>ایمیل تأیید برای ...</p>` — a regex with
+  // an OR alternation matches both, which Playwright's strict
+  // locator mode rejects. We anchor on the heading role for an
+  // unambiguous match.
   await Promise.race([
     page.waitForURL(/\/(workspaces|verify-email)/, { timeout: 15_000 }),
-    page.getByText(/ثبت‌نام موفق|ایمیل تأیید/).waitFor({ timeout: 15_000 }),
+    page.getByRole("heading", { name: /ثبت‌نام موفق/ }).waitFor({ timeout: 15_000 }),
   ]);
 }
 

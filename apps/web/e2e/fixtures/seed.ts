@@ -97,7 +97,17 @@ export const seedFixture: SeedFixture = {
     // policy, and function. Then we recreate the empty schema and
     // re-apply migrations so the Drizzle migration journal lines
     // up with the (now empty) DB.
+    //
+    // CRITICAL: also drop the `drizzle` schema. It hosts
+    // `__drizzle_migrations` (the migration journal). If we leave
+    // it intact, the next `migrate()` call sees the journal as
+    // already-applied and skips creating any tables — leaving
+    // `public` empty and the next signup query failing with
+    // "relation \"users\" does not exist". This bites whenever
+    // beforeAll runs more than once in a session (e.g. Playwright
+    // worker restart after a test failure).
     await db.execute(sql`DROP SCHEMA IF EXISTS public CASCADE`);
+    await db.execute(sql`DROP SCHEMA IF EXISTS drizzle CASCADE`);
     await db.execute(sql`CREATE SCHEMA public`);
     // Some migrations install extensions in the public schema
     // (e.g. pgcrypto for gen_random_uuid). Granting USAGE here so
