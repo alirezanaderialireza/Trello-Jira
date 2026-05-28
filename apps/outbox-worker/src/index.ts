@@ -37,6 +37,9 @@ import postgres from "postgres";
 import { sql } from "drizzle-orm";
 import { Redis } from "ioredis";
 
+import { getEventHandler } from "./handlers";
+import type { ClaimedEvent } from "./types";
+
 // ============================================================================
 // Config
 // ============================================================================
@@ -71,19 +74,10 @@ let pollTimer: ReturnType<typeof setTimeout> | null = null;
 // ============================================================================
 // Row shape returned by the claim query
 // ============================================================================
-
-interface ClaimedEvent {
-  event_id: string;
-  aggregate_id: string;
-  aggregate_type: string;
-  type: string;
-  sequence: number;
-  payload: Record<string, unknown>;
-  correlation_id: string | null;
-  occurred_at: string;
-  event_version: string;
-  retry_count: number;
-}
+//
+// `ClaimedEvent` lives in `./types` so the per-event-type handlers
+// under `./handlers/` can import it without creating a circular
+// dependency with this module.
 
 // ============================================================================
 // Process a single claimed row.
@@ -93,6 +87,17 @@ interface ClaimedEvent {
 // on failure commit `retry_count = retry_count + 1` (or send to DLQ when
 // the threshold is exceeded). Either way the transaction commits exactly
 // once, so the lock is released and the next poll sees the updated state.
+//
+// ─── Per-event-type handlers (F5a) ──────────────────────────────────────────
+// After the Redis publish succeeds, we look up an optional handler in
+// `./handlers/index.ts` (e.g. the `workspace.invitation.created` →
+// send-email handler). The handler runs INSIDE the same transaction as
+// the claim, so any DB queries it makes participate in the same
+// crash-consistent unit. A handler that throws is treated identically to
+// a publish failure — the row's retry_count bumps and a future poll will
+// re-publish + re-invoke the handler. This is at-least-once for the
+// handler too. Handlers must be idempotent (or accept duplicate
+// side-effects, e.g. occasional duplicate emails on retry).
 // ============================================================================
 
 async function processClaimed(
@@ -112,6 +117,15 @@ async function processClaimed(
 
   try {
     await redis.publish(channel, message);
+
+    // ── Per-event-type handler dispatch ────────────────────────────────────
+    // Most events have no registered handler (the historical
+    // realtime-only flow). When one exists, errors bubble up so the
+    // outer catch handles retry / DLQ identically to publish errors.
+    const handler = getEventHandler(row.type);
+    if (handler) {
+      await handler({ tx, event: row });
+    }
 
     // ── Success path: mark processed inside the same tx as the claim. ─────
     await tx.execute(sql`
