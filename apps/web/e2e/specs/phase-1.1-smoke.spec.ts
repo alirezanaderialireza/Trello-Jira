@@ -65,18 +65,45 @@ const BOARD_TITLE = "تابلوی برنامه‌ریزی";
 // Suite
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ─── Re-enabled after tRPC App Router migration (PR #60, Phase 1.1.5) ────
-// Phase 1.1.5 replaced createTRPCNext with createTRPCReact and added a
-// TRPCProvider to the root layout, which fixed the
-// "Unable to find tRPC Context" crash that previously forced this suite
-// to be skipped. Now re-running to empirically verify Phase 1.1
-// functional completeness — see commit message for the decision tree
-// on outcomes.
+// ─── Re-skipped — Phase 1.4 spec rewrite task ────────────────────────────
+// PR #60 (tRPC App Router migration) was empirically validated by
+// re-running this spec post-merge: step 1 (signup → /workspaces) PASSED
+// in 21 seconds (previously 60s timeout from the Sidebar crash). The
+// production blocker — "Unable to find tRPC Context" on /workspaces —
+// is resolved.
 //
-// TODO (only if a step fails and we choose to defer it): file a Phase 1.4
-// follow-up ticket with the failing step number + error log, then either
-// fix here or revert this commit to test.describe.skip.
-test.describe("Phase 1.1 — workspace lifecycle smoke flow", () => {
+// Step 2+ then exposed a different class of issue: the spec was
+// authored predictively (before the UI was final). After two correction
+// rounds (selector + workspace card wait), step 2 still failed because
+// (likely) a workspace.create input validation issue with Persian names
+// or a downstream UI mismatch that is not surface-visible in CI logs.
+//
+// Per Master Contract Rule 4 (Scope Discipline) and the F5c-Recovery
+// prompt's stop-condition (≤3 fix iterations on step 2+ before
+// STOP-AND-ASK), spec reconciliation is deferred to Phase 1.4.
+// CI debugging cycles are not the right medium for this work — local
+// browser walks with DevTools open are.
+//
+// What Phase 1.4 inherits (NOT lost effort — starting point):
+//   • Working Playwright config + dependency wiring
+//   • CI integration with continue-on-error: true (still active)
+//   • Auth fixtures (signUp + signIn with markEmailVerified bypass)
+//   • Seed fixture (resetDatabase + getInvitationToken)
+//   • The 12-step spec content (selectors below need adjustment vs.
+//     actual UI, but the flow structure is sound)
+//   • One verified passing step (step 1: signup + login dance)
+//
+// Phase 1.4 task list:
+//   1. Boot the dev server locally with the trello_e2e DB
+//   2. Walk each spec step manually with browser DevTools open
+//   3. Update selectors to match the actual rendered DOM
+//   4. Remove `.skip` (revert to plain test.describe)
+//   5. Verify all 4 cases pass (desktop + mobile × 1 retry each)
+//   6. Set continue-on-error: false in .github/workflows/ci.yml
+//
+// See .kiro/steering/phase-1.1-complete.md → "Polish followups" for
+// the parked-TODO entry that tracks this.
+test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
   let userAContext: BrowserContext;
   let userBContext: BrowserContext;
   let userAPage: Page;

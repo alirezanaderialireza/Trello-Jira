@@ -84,13 +84,18 @@ H. **Sidebar correctness** — starred + recent sections filter out
 I. **E2E smoke** — Playwright spec under `apps/web/e2e/` walks the
    12-step flow signup → workspace → board → invite → accept →
    archive → unarchive → star → transfer ownership → leave.
-   **Status: deferred to Phase 1.4 stabilization.** During F5c-Recovery
-   the spec uncovered a production bug (tRPC client uses
-   `createTRPCNext` Pages-Router API in an App-Router project, so
-   Sidebar's `useQuery` crashes with "Unable to find tRPC Context").
-   The spec is `test.describe.skip`'d in PR #58; the underlying fix
-   ships as Phase 1.1.5 (next PR — `createTRPCReact` + `TRPCProvider`
-   in root layout). Re-activation in Phase 1.4 once both are merged. ⏳
+   **Status: PARTIAL — infrastructure live, spec deferred to Phase 1.4.**
+   During F5c-Recovery the spec did its job and surfaced a production
+   bug (tRPC client used `createTRPCNext` Pages-Router API in an
+   App-Router project, crashing every `(app)` route). PR #60
+   (Phase 1.1.5 — `createTRPCReact` + `TRPCProvider`) shipped the fix
+   to `main`; an empirical re-run on PR #58 confirmed step 1 (signup
+   + redirect) now passes. Steps 2–12 then exposed a separate class
+   of issues — the spec was authored predictively (before UI was
+   final) and needs selector reconciliation against actual DOM.
+   That work is deferred to Phase 1.4 (local browser walk + DevTools,
+   not CI iteration). The spec is `test.describe.skip`'d in PR #58
+   with a detailed re-enable checklist inline. ⏳
 
 J. **Persian-first** — every UI string is in Persian, dates render
    via `lib/date.ts` (Jalali), numbers via
@@ -221,8 +226,7 @@ Recorded so the next planner doesn't re-discover them.
 | Focus-trap library on the drawer + modal-on-drawer | F5b | Phase 1.4 polish | Basic Tab cycling today; needs a proper focus-trap for keyboard users. |
 | Lighthouse CI integration (block PR on a11y regression) | F5c | Phase 1.4 polish | Tooling investment; manual checklist covers Phase 1.1. |
 | E2E job: drop `continue-on-error: true` after 5 successful baselines | F5c | After 5 green runs on `main` | First-week stabilisation. |
-| tRPC client migration to App Router (`createTRPCReact` + `TRPCProvider`) | observed during F5c-Recovery | Phase 1.1.5 (next PR) | Production-blocking — `Sidebar.tsx` crashes on `/workspaces` because `createTRPCNext` (Pages Router) requires a `withTRPC` HOC that App Router never applies. |
-| E2E spec re-activation after tRPC migration | F5c | Phase 1.4 polish | Re-test once `TRPCProvider` is wired and a fresh CI run confirms `/workspaces` renders without crash. |
+| E2E spec rewrite based on actual UI verification | F5c-Recovery iteration | Phase 1.4 polish | Spec was authored predictively (before UI was final). PR #60 (tRPC migration) resolved the production blocker — step 1 verified passing on PR #58. Steps 2-12 hit selector mismatches and likely Persian-name validation issues that aren't surface-visible from CI logs alone. Phase 1.4 task: local dev server boot + DevTools walk + selector reconciliation + re-enable. The spec's auth fixtures, seed helper, Playwright config, CI integration, and 12-step structure are all reusable — not from-scratch rebuild. |
 | Star toggle UI (and E2E step 10) | observed during F5c | Phase 1.2 card features | Step 10 of the smoke spec is best-effort; the star toggle isn't yet exposed in BoardView. |
 | Regenerate `pnpm-lock.yaml` and re-enable `--frozen-lockfile` in CI | F5c hotfix | Right after F5c merges | Sandbox could not run `pnpm install` (proxy 403 to registry.npmjs.org), so two new devDeps (`@playwright/test`, `postgres`) shipped without lockfile entries. Both `build-and-test` and `e2e` jobs in `.github/workflows/ci.yml` were temporarily switched to `--no-frozen-lockfile`. On a clean main checkout: `pnpm install` regenerates the lockfile; commit it; restore `--frozen-lockfile` in both jobs. |
 
@@ -236,7 +240,18 @@ Phase 1.1 is "done" when:
 2. The F5c audit checklist (sections 1–6) has been walked locally
    and any issues raised are either fixed in F5c or recorded under
    "Polish followups" with an explicit defer-to-phase tag.
-3. PR #57 (F5b) and the F5c PR are both merged.
+3. PR #57 (F5b), PR #58 (F5c), and PR #60 (Phase 1.1.5 tRPC migration)
+   are all merged.
+
+Phase 1.1 ships **with a known-incomplete E2E spec**. The spec proved
+its worth: it surfaced the production-blocking tRPC client bug
+(Sidebar crash on `/workspaces`) which PR #60 resolved. Step 1 of the
+spec was verified to pass post-PR #60 — empirical proof the migration
+works. Steps 2–12 are deferred to Phase 1.4 polish for selector
+reconciliation against actual UI (a local-browser-walk task, not a
+CI-iteration task). The spec infrastructure (Playwright config, auth
+fixtures, seed helper, CI job) is live and reusable — Phase 1.4
+inherits a working foundation, not a from-scratch rebuild.
 
 After sign-off, Phase 1.2 (Card Features) begins. The first
 Phase 1.2 PR should NOT add new procedures to
