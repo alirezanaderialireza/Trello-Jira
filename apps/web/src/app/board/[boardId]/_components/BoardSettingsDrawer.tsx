@@ -35,6 +35,7 @@ import type { ActionResult } from "../_actions/_helpers";
 import { AboutTab } from "./AboutTab";
 import { BackgroundTab } from "./BackgroundTab";
 import { DangerTab } from "./DangerTab";
+import { LabelsTab } from "./LabelsTab";
 import { MembersTab } from "./MembersTab";
 import { PermissionsTab } from "./PermissionsTab";
 
@@ -45,6 +46,7 @@ import { PermissionsTab } from "./PermissionsTab";
 export const VALID_BOARD_SETTINGS_TABS = [
   "about",
   "members",
+  "labels",
   "background",
   "permissions",
   "danger",
@@ -93,6 +95,7 @@ interface Props {
 const TAB_LABELS: Record<BoardSettingsTab, string> = {
   about: "درباره",
   members: "اعضا",
+  labels: "برچسب‌ها",
   background: "پس‌زمینه",
   permissions: "دسترسی‌ها",
   danger: "ناحیهٔ خطر",
@@ -278,6 +281,13 @@ function ActiveTabContent({
           onRemoveMember={actions.onRemoveMember}
         />
       );
+    case "labels":
+      // F1.2.1.b — labels tab. Owns its own data fetch + mutation
+      // wiring; takes only boardId + role from the drawer because
+      // labels mutations route through optimistic client hooks
+      // (useCreateLabel / useUpdateLabel / useDeleteLabel) instead of
+      // the BoardSettingsActions Server Action prop bag.
+      return <LabelsTab boardId={boardId} role={settings.role} />;
     case "background":
       return (
         <BackgroundTab
