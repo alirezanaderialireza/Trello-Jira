@@ -585,6 +585,10 @@ export class BoardService<TTx = unknown> {
           description: command.description ?? null,
           position,
           revision: 1,
+          // Phase 1.2 (F1.2.2). New cards start with no due date; the
+          // user sets it later via v1.public.dueDate.setDueDate. Card
+          // is a required field so we must initialize it explicitly.
+          dueDate: null,
           createdAt: now,
           updatedAt: now,
           deletedAt: null,
