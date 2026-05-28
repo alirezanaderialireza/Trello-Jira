@@ -11,7 +11,6 @@ import type { Position } from "../../ordering/position";
 import type {
   ColorToken,
   LabelEntity,
-  LabelId,
   LabelPatch,
 } from "../types";
 import type { LabelUpdatedEvent } from "../../events/label.events";
@@ -53,8 +52,12 @@ export interface UpdateLabelOutput {
 }
 
 export function updateLabel(input: UpdateLabelInput): UpdateLabelOutput {
-  const eventChanges: NonNullable<LabelUpdatedEvent["payload"]["changes"]> = {};
-  const dbPatch: LabelPatch = {};
+  // Local mutable accumulators. `LabelPatch` and the event-changes type
+  // both inherit `readonly` modifiers from their parent shapes
+  // (LabelEntity, LabelUpdatedEvent.payload.changes), so we accumulate
+  // into a writable structural type and cast at the return boundary.
+  const eventChanges: { name?: string; colorToken?: string; position?: string } = {};
+  const dbPatch:      { name?: string; colorToken?: ColorToken; position?: Position } = {};
 
   // ── name ─────────────────────────────────────────────────────────────────
   if (input.patch.name !== undefined) {
@@ -70,9 +73,8 @@ export function updateLabel(input: UpdateLabelInput): UpdateLabelOutput {
       if (input.otherExistingNamesLower.includes(candidateLower)) {
         throw new DuplicateLabelNameError(trimmedName);
       }
-      dbPatch.name = trimmedName;
-      // Plain-string for the wire — no branding leaks into the event payload.
-      (eventChanges as { name?: string }).name = trimmedName;
+      dbPatch.name      = trimmedName;
+      eventChanges.name = trimmedName;
     }
   }
 
@@ -83,15 +85,15 @@ export function updateLabel(input: UpdateLabelInput): UpdateLabelOutput {
     }
     const next = input.patch.colorToken as ColorToken;
     if (next !== input.current.colorToken) {
-      dbPatch.colorToken = next;
-      (eventChanges as { colorToken?: string }).colorToken = next;
+      dbPatch.colorToken      = next;
+      eventChanges.colorToken = next;
     }
   }
 
   // ── position ─────────────────────────────────────────────────────────────
   if (input.patch.position !== undefined && input.patch.position !== input.current.position) {
-    dbPatch.position = input.patch.position;
-    (eventChanges as { position?: string }).position = input.patch.position;
+    dbPatch.position      = input.patch.position;
+    eventChanges.position = input.patch.position;
   }
 
   const noOp = Object.keys(dbPatch).length === 0;
