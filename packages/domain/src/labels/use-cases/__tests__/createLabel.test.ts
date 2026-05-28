@@ -159,10 +159,22 @@ describe("createLabel — purity", () => {
     expect(a).toEqual(b);
   });
 
-  it("does not mutate its input", () => {
-    const input = { ...baseInput, existingNamesLower: ["bug"] };
+  it("does not mutate its input on the happy path", () => {
+    const input = { ...baseInput, name: "Feature", existingNamesLower: ["bug"] };
     const before = JSON.stringify(input);
     createLabel(input);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it("does not mutate its input even when validation throws", () => {
+    // name="Bug" + existingNamesLower=["bug"] triggers
+    // DuplicateLabelNameError after the toLocaleLowerCase fold.
+    // Purity must hold on the error path too — otherwise a partially-
+    // applied side effect could leak across tests in a test runner that
+    // shares object references.
+    const input = { ...baseInput, existingNamesLower: ["bug"] };
+    const before = JSON.stringify(input);
+    expect(() => createLabel(input)).toThrowError(DuplicateLabelNameError);
     expect(JSON.stringify(input)).toBe(before);
   });
 });
