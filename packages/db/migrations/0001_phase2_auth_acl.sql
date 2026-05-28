@@ -172,9 +172,20 @@ CREATE TABLE IF NOT EXISTS "sessions" (
 
 CREATE INDEX IF NOT EXISTS "idx_sessions_user" ON "sessions" ("user_id");
 CREATE INDEX IF NOT EXISTS "idx_sessions_tenant" ON "sessions" ("tenant_id");
+-- F5c hotfix: removed `AND "expires_at" > now()` from the WHERE
+-- predicate. Postgres requires partial-index predicates to be
+-- IMMUTABLE, but `now()` is STABLE. The original migration was
+-- silently rejected on fresh DBs (CREATE INDEX raised ERROR).
+-- Dev DBs that pre-date the rejection either already have the
+-- index (created before the strict-IMMUTABLE check kicked in for
+-- their PG version) or never had it. The simplified predicate
+-- keeps the row-set size down via `is_revoked = false` while
+-- complying with the IMMUTABLE rule. Query-time `expires_at` filters
+-- still use the index because Postgres can intersect at query plan
+-- time.
 CREATE INDEX IF NOT EXISTS "idx_sessions_active_user"
   ON "sessions" ("user_id", "tenant_id")
-  WHERE "is_revoked" = false AND "expires_at" > now();
+  WHERE "is_revoked" = false;
 CREATE UNIQUE INDEX IF NOT EXISTS "idx_sessions_refresh_hash"
   ON "sessions" ("refresh_token_hash");
 
@@ -191,8 +202,13 @@ CREATE TABLE IF NOT EXISTS "revoked_tokens" (
   "revoked_at" timestamp with time zone NOT NULL DEFAULT now()
 );
 
+-- F5c hotfix: removed `WHERE "expires_at" > now()` partial
+-- predicate (same IMMUTABLE-rule violation as idx_sessions_active_user
+-- above). The full index is slightly larger but query plans for
+-- "active token by jti / expires_at" still use it correctly. The
+-- jti PK already serves the hot lookup path; this one is mostly a
+-- janitor/cleanup helper.
 CREATE INDEX IF NOT EXISTS "idx_revoked_tokens_expires"
-  ON "revoked_tokens" ("expires_at")
-  WHERE "expires_at" > now();
+  ON "revoked_tokens" ("expires_at");
 CREATE INDEX IF NOT EXISTS "idx_revoked_tokens_user"
   ON "revoked_tokens" ("user_id");

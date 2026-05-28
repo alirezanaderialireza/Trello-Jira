@@ -87,8 +87,20 @@ export default defineConfig({
       // per the master contract Persian-first conventions. The smoke
       // flow runs against both projects so mobile-specific bottom-sheet
       // behaviours are covered.
+      //
+      // F5c hotfix: explicit `browserName: "chromium"` overrides the
+      // WebKit default that ships with `devices["iPhone SE"]`. The CI
+      // job only installs Chromium ("playwright install --with-deps
+      // chromium") because the steering doc says "no separate WebKit
+      // install needed". Without the override, the project tries to
+      // launch WebKit and fails with "Executable doesn't exist". The
+      // viewport + user-agent bits of the iPhone SE descriptor still
+      // apply — just running them on Chromium's rendering engine.
       name: "mobile-iphone-se",
-      use: { ...devices["iPhone SE"] },
+      use: {
+        ...devices["iPhone SE"],
+        browserName: "chromium",
+      },
     },
   ],
 
