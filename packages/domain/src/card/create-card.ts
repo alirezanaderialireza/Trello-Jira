@@ -48,6 +48,7 @@ export function createCard(input: CreateCardInput): Card {
     description,
     position,
     revision: INITIAL_REVISION,
+    dueDate: null,
     createdAt,
     updatedAt: createdAt,
     deletedAt: null,

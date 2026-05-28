@@ -97,13 +97,35 @@ export interface CardAssigneeRemovedEvent
   extends DomainEvent<"card.assignee_removed", CardAssigneeRemovedPayload> {}
 
 // ============================================================================
-// 9. Card Due Date Updated
+// 9. Card Due Date Updated  (Phase 1.2 — F1.2.2 — schemaVersion 2)
 // ============================================================================
+// v1 (pre-F1.2.2 stub) — never emitted to the outbox because the previous
+// router stored due dates in `cards.accounting_data` JSONB without going
+// through the outbox pipeline. The migration to v2 therefore has no
+// backward-compatible payload to support; consumers should hard-require
+// schemaVersion 2 fields.
+//
+// v2 payload
+//   • oldDueDate: the `DateOnly | null` value the card carried before
+//     the mutation. Useful for the activity timeline to render
+//     "changed from 1404/01/01 to 1404/01/15" without re-reading
+//     historical state.
+//   • newDueDate: the `DateOnly | null` value after the mutation. null
+//     means the user cleared the due date.
+//   • updatedBy: the actor's user id. Mirrors the `appliedBy` /
+//     `createdBy` convention from F1.2.1 events.
+//
+// Wire format: plain `string | null` (the brand erases over the wire).
+// `YYYY-MM-DD` for set, null for cleared.
 export interface CardDueDateUpdatedPayload {
   readonly cardId: string;
   readonly boardId: string;
-  /** null = due date cleared */
-  readonly dueDate: string | null; // ISO-8601 UTC or null
+  /** Previous due date in YYYY-MM-DD format, or null if the card had none. */
+  readonly oldDueDate: string | null;
+  /** New due date in YYYY-MM-DD format, or null if the user cleared it. */
+  readonly newDueDate: string | null;
+  /** UserId of the actor that performed the mutation. */
+  readonly updatedBy: string;
 }
 export interface CardDueDateUpdatedEvent
   extends DomainEvent<"card.due_date_updated", CardDueDateUpdatedPayload> {}

@@ -153,6 +153,10 @@ export class DrizzleCardRepository implements CardRepository<DbTx> {
       description: row.description,
       position: row.position,
       revision: row.revision,
+      // Phase 1.2 (F1.2.2). Drizzle's `date()` column reads back as a
+      // `string` (YYYY-MM-DD) | null, which is exactly the DateOnly
+      // wire shape the domain expects — cast at the boundary.
+      dueDate: (row.dueDate ?? null) as Card["dueDate"],
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       deletedAt: row.deletedAt,

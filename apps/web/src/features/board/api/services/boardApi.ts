@@ -117,11 +117,35 @@ export const boardApi = {
   }) => cardApi.removeAssignee.mutateAsync(payload),
 
   // ── due date ──────────────────────────────────────────────────────────────
+  // Phase 1.2 (F1.2.2) — replaces the F1.2.1-era stub which targeted a
+  // non-existent `cardApi.updateDueDate`. The new procedure lives at
+  // `v1.public.dueDate.setDueDate` and accepts the canonical DateOnly
+  // wire shape (YYYY-MM-DD) plus the standard idempotencyKey. boardId
+  // is required because the procedure rides on boardProtectedProcedure
+  // (boardMemberGuard reads boardId from rawInput).
+  setCardDueDate: async (payload: {
+    cardId: string;
+    boardId: string;
+    /** `YYYY-MM-DD` (DateOnly) or null to clear. NOT an ISO datetime. */
+    dueDate: string | null;
+    idempotencyKey: string;
+    correlationId?: string;
+  }) => (trpc as any).v1.public.dueDate.setDueDate.mutateAsync(payload),
+
+  /**
+   * @deprecated since F1.2.2 — use `setCardDueDate` instead. Left as
+   * a redirect for any uncaught caller in dev branches; will be
+   * removed in F1.2.3 once the call sites are audited.
+   */
   updateCardDueDate: async (payload: {
     cardId: string;
     dueDate: string | null;
     mutationId: string;
-  }) => cardApi.updateDueDate.mutateAsync(payload),
+  }) => {
+    throw new Error(
+      "boardApi.updateCardDueDate is removed. Use boardApi.setCardDueDate({ cardId, boardId, dueDate, idempotencyKey }).",
+    );
+  },
 
   // ============================================================================
   // 2.  Lists

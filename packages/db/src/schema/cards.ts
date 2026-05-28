@@ -7,6 +7,7 @@ import {
   text,
   jsonb,
   timestamp,
+  date,
   uniqueIndex,
   index,
   integer,
@@ -65,6 +66,17 @@ export const cards = pgTable(
     accountingData: jsonb("accounting_data"),
 
     // =========================================================================
+    // 🔹 Due Date  (Phase 1.2 — F1.2.2)
+    // =========================================================================
+    // Wall-clock semantics, not an instant. See migration
+    // 0008_phase1.2_due_date.sql header for the DATE-vs-TIMESTAMPTZ
+    // doctrine. The on-the-wire representation in @repo/domain is
+    // `DateOnly` (a branded `YYYY-MM-DD` string), kept in sync by
+    // the type alias on `Card.dueDate` in
+    // packages/domain/src/card/types.ts.
+    dueDate: date("due_date"),
+
+    // =========================================================================
     // 🔹 Lifecycle
     // =========================================================================
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -86,6 +98,15 @@ export const cards = pgTable(
     revisionIdx: index("idx_cards_revision").on(table.id, table.revision),
 
     deletedAtIdx: index("idx_cards_deleted_at").on(table.deletedAt),
+
+    // Partial index for overdue / due-today sweeps. Only live, scheduled
+    // cards land in this index — null and soft-deleted rows aren't
+    // candidates. Tenant-scoped first column so the planner can satisfy
+    // `tenant_id = $1 AND due_date < CURRENT_DATE` with an index-only scan.
+    // Mirrors `idx_cards_due_date` in migration 0008.
+    dueDateIdx: index("idx_cards_due_date")
+      .on(table.tenantId, table.dueDate)
+      .where(sql`${table.dueDate} IS NOT NULL AND ${table.deletedAt} IS NULL`),
 
     uniquePosIdx: uniqueIndex("idx_unique_card_pos_per_list")
       .on(table.listId, table.position)
