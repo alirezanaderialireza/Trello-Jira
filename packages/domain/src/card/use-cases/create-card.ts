@@ -107,6 +107,7 @@ export async function createCardUseCase<TTx>(
       description,
       position,
       revision: 0,
+      dueDate: null,
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
