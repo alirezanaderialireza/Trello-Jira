@@ -24,6 +24,8 @@ import { isActionFailure } from "../actions/responseTypes";
 
 import { getTokenStyle } from "@/lib/labels/tokenColorMap";
 import { CardDueDateBadge } from "@/components/cards/CardDueDateBadge";
+import { aggregateCardProgress } from "@/lib/checklists/computeProgress";
+import { toPersianNumber } from "@/lib/checklists/persianNumerals";
 
 // ============================================================================
 // 🧠 Types
@@ -80,6 +82,22 @@ const MAX_VISIBLE_LABELS = 3;
 const makeSelectCardDueDate =
   (id: string) => (state: any) =>
     state.cards[id]?.dueDate ?? null;
+
+// Selectors for the card's checklists (Phase 1.2 — F1.2.3.b). The
+// card's `checklists` slice carries an array of checklistIds; we
+// resolve each to its DTO via the global checklists map and aggregate
+// "done / total" across all of them via aggregateCardProgress
+// (apps/web/src/lib/checklists/computeProgress.ts). Re-renders are
+// gated by Object.is on the slices themselves — adding/removing a
+// checklist on this card OR toggling any item's isDone flips one of
+// the two references, which is exactly when the preview needs to
+// re-derive.
+const makeSelectCardChecklistIds =
+  (id: string) => (state: any) =>
+    state.cards[id]?.checklists;
+
+const selectAllChecklists = (state: any) =>
+  state.checklists;
 
 // ============================================================================
 // 🧠 SSR-safe Layout Effect
@@ -154,6 +172,25 @@ export const CardItem = memo(function CardItem({
     [cardId],
   );
   const cardDueDate = useBoardStore(selectCardDueDate) as string | null;
+
+  // ── Checklists progress (Phase 1.2 — F1.2.3.b) ──────────────────────────
+  const selectCardChecklistIds = useMemo(
+    () => makeSelectCardChecklistIds(cardId),
+    [cardId],
+  );
+  const cardChecklistIds = useBoardStore(selectCardChecklistIds);
+  const allChecklists    = useBoardStore(selectAllChecklists);
+
+  const checklistProgress = useMemo(() => {
+    if (!cardChecklistIds || cardChecklistIds.length === 0) return null;
+    const checklists = (cardChecklistIds as string[])
+      .map((id) => allChecklists[id])
+      .filter(Boolean) as Array<{ items: Array<{ isDone: boolean }> }>;
+    if (checklists.length === 0) return null;
+    const aggregate = aggregateCardProgress(checklists);
+    if (aggregate.total === 0) return null; // no items at all → don't show
+    return aggregate;
+  }, [cardChecklistIds, allChecklists]);
 
   const updateCardStore = useBoardStore(
     (s) => s.updateCard
@@ -563,6 +600,32 @@ export const CardItem = memo(function CardItem({
       {cardDueDate ? (
         <div className="mb-2">
           <CardDueDateBadge dueDate={cardDueDate} size="sm" />
+        </div>
+      ) : null}
+
+      {/* ================================================================== */}
+      {/* Checklists progress badge (Phase 1.2 — F1.2.3.b — D18) */}
+      {/* ================================================================== */}
+
+      {checklistProgress ? (
+        <div className="mb-2">
+          <span
+            role="status"
+            aria-label={`پیشرفت چک‌لیست‌ها: ${toPersianNumber(checklistProgress.done)} از ${toPersianNumber(checklistProgress.total)}`}
+            title={`${toPersianNumber(checklistProgress.percent)}٪`}
+            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+              checklistProgress.percent >= 100
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-slate-200 bg-slate-100 text-slate-600"
+            }`}
+          >
+            <span aria-hidden="true">
+              {checklistProgress.percent >= 100 ? "☑" : "☐"}
+            </span>
+            <span className="tabular-nums">
+              {`${toPersianNumber(checklistProgress.done)}/${toPersianNumber(checklistProgress.total)}`}
+            </span>
+          </span>
         </div>
       ) : null}
 
