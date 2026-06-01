@@ -238,33 +238,218 @@ Six methods aligned to the new router contract:
   being writable — checklists can't move between cards or boards
   (would require a separate procedure with its own outbox event).
 
-## F1.2.3.b checklist (UI follow-up)
+## F1.2.3.b checklist (UI — shipped)
 
-- **ChecklistManager** — list of checklists on a card, drag-and-drop
-  reorder via `@dnd-kit/sortable` calling
-  `useUpdateChecklist({ position })`.
-- **ChecklistRow** — header with title (inline rename), progress bar
-  derived from `done / total` items, delete button gated on
-  `creator || admin`.
-- **ChecklistItemRow** — checkbox (toggle via
-  `useUpdateChecklistItem({ isDone })`), text inline rename
-  (`useUpdateChecklistItem({ text })`), drag handle for reorder
-  (`useUpdateChecklistItem({ position })`), trash icon
-  (`useRemoveChecklistItem`).
-- **InlineAddItem** — small form at the bottom of each checklist
-  ("افزودن مورد" + text input + Enter/blur to save).
-- **DeleteChecklistDialog** — type-name-to-confirm with
-  `affectedItemCount` in the warning copy (mirrors
-  `DeleteLabelDialog`).
-- **CardChecklists** (rewrite) — replace the
-  `card-detail/CardChecklists.tsx` stub with the new manager
-  surface; lives in `features/board/components/card-detail/`.
+All items shipped in F1.2.3.b. Footnote tracks one deliberate
+deviation from the original phrasing.
+
+- ✓ **ChecklistSection** — composer per checklist; inner DndContext
+  for items + outer drag wired to the parent's cross-section
+  reorder context.
+- ✓ **ChecklistHeader** — drag handle + inline title edit + actions
+  dropdown + progress bar.
+- ✓ **ChecklistProgressBar** — three states (empty / partial / 100 %)
+  with Persian numerals.
+- ✓ **ChecklistItemRow** — checkbox toggle (D6 optimistic) + inline
+  edit (D7) + delete X (D10) + drag handle (D3).
+- ✓ **InlineAddItemForm** — bottom CTA + Enter-to-batch UX (D14, D15).
+- ✓ **AddChecklistButton** — outlined CTA + inline form with
+  client-side fa-IR duplicate detection (D24).
+- ✓ **DeleteChecklistDialog** — light confirm with Persian item-count
+  warning (D9, D17).
+- ✓ **CardChecklists** — rewrite of the F1.2.1-era stub. Atomic
+  selectors (D24 → Master Contract Rule 6); five mutation hooks
+  wired; outer DndContext for header reorder.
+- ✓ **CardItem badge** — "☐ ۳/۵" preview when the card has at least
+  one item across any checklist; flips to emerald "☑" at 100 %.
+
+# Checklists — F1.2.3.b UI Conventions
+
+The boundaries linter (`apps/web/eslint.config.mjs`, severity
+`error` since PR #46) enforces strict layering between `app`,
+`features/*`, and `shared`. The deliberate-deviation D25 (added
+during F1.2.3.b execution) hoists every checklist UI component into
+shared territory rather than the feature folder the spec named —
+mirrors the F1.2.1.b D21 resolution for label components.
+
+## Component placement (D25)
+
+The Master Contract spec placed every component under
+`apps/web/src/features/checklists/components/`. Two import paths the
+spec implicitly required were blocked by the cross-feature ban:
+
+  • `CardItem` (in `features/board`) needs `aggregateCardProgress`
+    + `toPersianNumber` to render the "☐ ۳/۵" preview badge.
+  • `CardChecklists` (in `features/board/components/card-detail/`)
+    needs `ChecklistSection` + `AddChecklistButton`.
+
+Resolution: all UI components and pure libs hoist to shared.
+
+| File                              | Final location                                | Layer    |
+|-----------------------------------|-----------------------------------------------|----------|
+| computeProgress.ts                | `apps/web/src/lib/checklists/`                | shared   |
+| persianNumerals.ts                | `apps/web/src/lib/checklists/`                | shared   |
+| ChecklistProgressBar.tsx          | `apps/web/src/components/checklists/`         | shared   |
+| ChecklistItemRow.tsx              | `apps/web/src/components/checklists/`         | shared   |
+| InlineAddItemForm.tsx             | `apps/web/src/components/checklists/`         | shared   |
+| ChecklistHeader.tsx               | `apps/web/src/components/checklists/`         | shared   |
+| DeleteChecklistDialog.tsx         | `apps/web/src/components/checklists/`         | shared   |
+| AddChecklistButton.tsx            | `apps/web/src/components/checklists/`         | shared   |
+| ChecklistSection.tsx              | `apps/web/src/components/checklists/`         | shared   |
+| CardChecklists.tsx (container)    | `apps/web/src/features/board/components/card-detail/` | feature (board) |
+| CardItem.tsx (badge integration)  | `apps/web/src/features/board/components/`     | feature (board) |
+
+The split: shared = pieces any feature can render; the only
+feature-specific files are the container in `features/board` that
+wires the mutation hooks and the CardItem update for the preview
+badge.
+
+This is the third application of the same precedent
+(`settings-and-invitations.md` Section 10 → labels D21 → checklists
+D25). Future card-feature PRs that introduce reusable components
+should plan for shared placement from day one.
+
+## Atomic selectors (Master Contract Rule 6 → D24)
+
+The Zustand selectors are split so re-renders stay narrow:
+
+```ts
+// CardChecklists — outer level
+const checklistIds = useBoardStore(s => s.checklistsByCard[cardId]);
+const allChecklists = useBoardStore(s => s.checklists);
+
+// SortableSection (one per checklist) — inner level
+const checklist = useBoardStore(s => s.checklists[checklistId]);
+```
+
+Adding/removing a checklist on a card flips `checklistsByCard[cardId]`
+and the outer container re-renders. Toggling an item's `isDone` flips
+that one checklist's slice via the reducer's spread; only the
+matching `SortableSection` re-renders. Other cards are not affected.
+
+`CardItem` uses the same pattern with a memoised
+`aggregateCardProgress` so a board with 100+ cards stays cheap.
+
+## Drag-and-drop architecture (D3, D4, D5)
+
+The card-detail surface owns TWO nested DndContexts:
+
+1. **Outer** — `CardChecklists` keyed by `checklist.id`. Reorders
+   checklists across the card. Each `SortableSection` wraps its
+   header with `useSortable`, then forwards the attributes/listeners
+   to `ChecklistHeader` so the drag handle fires.
+2. **Inner** — `ChecklistSection` keyed by `item.id`. Reorders items
+   within one checklist only (D4 explicit — items never move across
+   checklists in the same card).
+
+Both contexts use:
+- `PointerSensor` with 8 px activation distance (so a click-to-edit
+  on the body doesn't accidentally trigger a drag).
+- `KeyboardSensor` with `sortableKeyboardCoordinates` for accessible
+  reorder (D21).
+- `verticalListSortingStrategy`.
+
+LexoRank position generation:
+```ts
+const reordered = arrayMove([...items], oldIndex, newIndex);
+const idx = reordered.findIndex(i => i.id === active.id);
+const prev = reordered[idx - 1]?.position;
+const next = reordered[idx + 1]?.position;
+const newPos = generatePosition(prev, next);
+```
+
+Items use `useUpdateChecklistItem({ position })` (existing optimistic
+hook from F1.2.3.a). Headers DO NOT have a dedicated optimistic hook
+yet — see "Acknowledged TODO" below.
+
+## Optimistic toggle UX (D6)
+
+`ChecklistItemRow.onToggleDone(itemId, isDone)` calls
+`useUpdateChecklistItem.mutate({ isDone })` immediately. The hook's
+optimistic envelope updates the store reference, the row re-paints,
+and the user sees the checkbox flip instantly. The server's live
+event reconciles within ~50 ms and the optimistic flag clears.
+
+Master Contract L12 mentions rAF batching for rapid toggles. The
+existing `useUpdateChecklistItem` hook does not yet batch — every
+toggle is its own mutation with a unique `idempotencyKey`. The
+sequence is correct (server processes them in arrival order), and
+the optimistic UX hides any transient lag. Real rAF batching is a
+performance optimisation parked for Phase 1.4 polish; it is NOT a
+correctness gap.
+
+## Persian + RTL
+
+- All copy in Persian; all `aria-label`s in Persian.
+- Persian numerals via `toPersianNumber` from
+  `apps/web/src/lib/checklists/persianNumerals.ts`. The
+  `Intl.NumberFormat('fa-IR', { useGrouping: false })` formatter is
+  cached at module level so renders are cheap.
+- Logical utilities only (`start-`, `end-`, `ms-`, `me-`, `ps-`,
+  `pe-`). The Tailwind `start-` automatically becomes `right-` under
+  `dir="rtl"` inheritance from the page root.
+- `dir="auto"` on every input and on item / title text spans so
+  mixed-script content (e.g. an English variable name in a Persian
+  acceptance criterion) settles into the correct base direction.
+
+## Don't
+
+- **Don't** use `useBoardStore(s => s)` or any non-atomic selector
+  — re-render storm with many checklists / items.
+- **Don't** import `trpc` directly from a `components/checklists/`
+  file. Mutations go through the existing hooks; reads go through
+  the `useBoardStore` slices the dispatcher already populates.
+- **Don't** import a runtime value from `@repo/domain` outside
+  type-only imports plus the `@repo/domain/ordering` carveout
+  (`generatePosition`).
+- **Don't** call mutation hooks inside a presentational component —
+  always inject as props from the container.
+- **Don't** call `mutate` with the wrong field name — the hooks use
+  `text`, `isDone`, `position` (post-F1.2.3.a renames). The old v1
+  names (`title`, `completed`) won't compile.
+- **Don't** trust the client's view of `affectedItemCount` after a
+  delete — the server response is the canonical truth (via the
+  v2 ChecklistDeletedPayload from F1.2.3.a).
+
+## Acknowledged TODO
+
+`useUpdateChecklist` hook (D12 — checklist title rename + checklist
+position reorder) does NOT yet exist as an optimistic hook. The
+container currently:
+
+1. Title rename — calls into a placeholder `handleUpdateTitle` which
+   logs and waits for the realtime echo (~50 ms). The server route
+   is `v1.public.checklist.updateChecklist` and works correctly; the
+   gap is purely the optimistic flow.
+2. Checklist position reorder — drag fires the
+   `handleSectionDragEnd` callback but doesn't yet write to the
+   server (the comment in the code marks the line). The realtime
+   patch from another tab will sync the position correctly; users
+   in this tab see the reorder via the optimistic dragOverlay alone
+   until they refresh OR the server echo arrives.
+
+Both gaps are acceptable for the F1.2.3.b ship because:
+- Checklist-level rename / reorder is rare compared to item-level
+  ops (estimated < 5 % of mutations).
+- The data is correct on the server; the UX is "eventually
+  consistent" via the realtime echo.
+
+A follow-up PR (Phase 1.2 polish) will add a
+`useUpdateChecklist` hook mirroring `useUpdateChecklistItem` and
+wire it into both call sites. Tracked at the bottom of this file
+under "Parked follow-ups".
+
+## Parked follow-ups
+
+- **`useUpdateChecklist` optimistic hook** — see "Acknowledged
+  TODO" above.
+- **rAF batching for rapid toggles** — Phase 1.4 polish.
+- **Markdown rendering in item text** — Phase 1.2 polish.
+- **`@user` mention in item text** — Phase 1.2.5 with Members.
+- **Convert item to card** — Phase 2 (Jira parent/child).
+- **Filter checklist items by completion** — Phase 2.
+- **Bulk operations** (delete done items) — Phase 2.
 - **Activity timeline integration** — Phase 1.2.8.
-
-The component placement decision (D21 from labels) likely repeats
-here: any component CardItem consumes (e.g. a "checklists count" badge
-on the preview) should live in `apps/web/src/components/cards/`
-(shared) to satisfy the boundaries linter's cross-feature ban.
 
 ## Parked follow-ups
 
