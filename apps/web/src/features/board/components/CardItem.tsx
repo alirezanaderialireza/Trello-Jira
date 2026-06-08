@@ -22,9 +22,10 @@ import { useBoardStore } from "../store/useBoardStore";
 import { updateCardAction } from "../actions/board.actions";
 import { isActionFailure } from "../actions/responseTypes";
 
-import { getTokenStyle } from "@/lib/labels/tokenColorMap";
+import { getTokenStyle }           from "@/lib/labels/tokenColorMap";
 import { CardDueDateBadge }        from "@/components/cards/CardDueDateBadge";
 import { ChecklistProgressBadge }  from "@/components/cards/ChecklistProgressBadge";
+import { CardCommentsBadge }       from "@/components/cards/CardCommentsBadge";
 
 // ============================================================================
 // 🧠 Types
@@ -183,6 +184,14 @@ export const CardItem = memo(function CardItem({
     [cardId],
   );
   const checklistProgress = useBoardStore(selectChecklistProgress);
+
+  // ── Comment count (Phase 1.2 — F1.2.4.b) ─────────────────────────────────
+  const commentCount = useBoardStore(
+    useMemo(
+      () => (s: any): number => (s.commentsByCard[cardId] ?? []).length,
+      [cardId],
+    ),
+  ) as number;
 
   const updateCardStore = useBoardStore(
     (s) => s.updateCard
@@ -605,6 +614,16 @@ export const CardItem = memo(function CardItem({
             done={checklistProgress.done}
             total={checklistProgress.total}
           />
+        </div>
+      ) : null}
+
+      {/* ================================================================== */}
+      {/* Comments Badge (Phase 1.2 — F1.2.4.b) */}
+      {/* ================================================================== */}
+
+      {commentCount > 0 ? (
+        <div className="mb-2">
+          <CardCommentsBadge count={commentCount} />
         </div>
       ) : null}
 
