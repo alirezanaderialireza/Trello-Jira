@@ -298,23 +298,58 @@ export const boardApi = {
   // ============================================================================
   // 5.  Comments
   // ============================================================================
+  //
+  // Phase 1.2 (F1.2.4.a) — v2 contract. All methods now require boardId +
+  // idempotencyKey (was: mutationId, which was never sent to the server).
+  // The old `addComment` / `deleteComment` signatures are replaced; the
+  // facade method names align with the router procedure names (create /
+  // update / delete) for discoverability.
 
-  addComment: async (payload: {
-    cardId: string;
-    body: string;
-    mutationId: string;
+  createComment: async (payload: {
+    cardId:         string;
+    boardId:        string;
+    body:           string;
+    idempotencyKey: string;
+    correlationId?: string;
   }) => (trpc as any).v1.public.comment.create.mutateAsync(payload),
 
   updateComment: async (payload: {
-    commentId: string;
-    body: string;
-    mutationId: string;
+    commentId:      string;
+    boardId:        string;
+    body:           string;
+    idempotencyKey: string;
+    correlationId?: string;
   }) => (trpc as any).v1.public.comment.update.mutateAsync(payload),
 
   deleteComment: async (payload: {
-    commentId: string;
-    mutationId: string;
+    commentId:      string;
+    boardId:        string;
+    idempotencyKey: string;
+    correlationId?: string;
   }) => (trpc as any).v1.public.comment.delete.mutateAsync(payload),
+
+  /**
+   * Cursor-based list — used by CardComments (F1.2.4.b) to hydrate the
+   * store. Renamed from getByCard → list to match the router procedure.
+   */
+  listComments: async (payload: {
+    boardId:  string;
+    cardId:   string;
+    cursor?:  string;
+    limit?:   number;
+  }) => (trpc as any).v1.public.comment.list.query(payload),
+
+  // ── Deprecated shims (F1.2.4.a) ─────────────────────────────────────────
+  // Kept so any call sites that still reference the old names get a clear
+  // runtime error in development instead of a silent no-op.
+  // TODO F1.2.4.b: remove once CardComments.tsx is rewritten.
+
+  /** @deprecated — use createComment */
+  addComment: async (_payload: unknown): Promise<never> => {
+    throw new Error(
+      "boardApi.addComment is removed. Use boardApi.createComment({ cardId, boardId, body, idempotencyKey }).",
+    );
+  },
 
   // ============================================================================
   // 6.  Attachments  (not on the versioned router yet — kept as untyped escape hatch)
