@@ -6,7 +6,9 @@ import { CSS } from "@dnd-kit/utilities";
 import { MoreHorizontal } from "lucide-react";
 
 // 🌟 مسیر ایمپورت‌ها بر اساس معماری جدید Feature-Sliced Design اصلاح شد
-import { useBoardStore } from "../store/useBoardStore";
+// Phase 1.3 (F1.3.1) — granular reads now come from the board-state engine
+// instead of inline store selectors.
+import { useListCardIds, useList } from "../engine/useBoardState";
 import { CardItem } from "./CardItem";
 import CreateCardForm from "./create-card-form"; // 🌟 @ts-ignore حذف شد چون باگ پراپ‌ها رفع شده است
 import { CardErrorBoundary } from "../../../components/error/ErrorBoundary";
@@ -17,15 +19,9 @@ interface ListColumnProps {
   onDeleteCard: (id: string) => void;
 }
 
-const EMPTY_CARD_IDS: string[] = [];
-
 export const ListColumn = memo(function ListColumn({ listId, boardId, onDeleteCard }: ListColumnProps) {
-  // 🌟 (Fix) حذف آرگومان دوم (shallow) برای سازگاری کامل با Zustand v5
-  const cardIds = useBoardStore(
-    (s: any) => s.cardsByList[listId] ?? EMPTY_CARD_IDS
-  );
-  
-  const list = useBoardStore((s: any) => s.lists[listId]);
+  const cardIds = useListCardIds(listId);
+  const list = useList(listId);
 
   const {
     setNodeRef,

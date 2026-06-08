@@ -1,0 +1,60 @@
+---
+inclusion: manual
+---
+
+# Board Engine Conventions (F1.3)
+
+The board UI consumes a single facade, `useBoardEngine(boardId)`, built from
+four internal engines. This keeps `BoardView` thin and the powerful core
+engines (sync FSM, positioning, mutation lifecycle) untouched.
+
+```
+                 useBoardEngine(boardId)            ← the only thing the UI imports
+                 ┌───────────┬───────────┬───────────┬──────────────┐
+                 │useBoardState│useDragEngine│useSyncEngine│useResilience│
+                 └───────────┴───────────┴───────────┴──────────────┘
+                       │            │             │            │
+            granular selectors  dnd-kit      useSyncOrchestrator  memory/virtualization
+            (atomic, memoised)  lifecycle    (existing FSM)       traps + mobile
+```
+
+## Engine responsibilities
+
+| Engine          | Owns                                                              | Status |
+|-----------------|------------------------------------------------------------------|--------|
+| `useBoardState` | Atomic store selectors + derived ordered lists.                  | F1.3.1 ✅ |
+| `useDragEngine` | dnd-kit lifecycle (start/over/end), intent debounce, sensors.    | F1.3.2 |
+| `useSyncEngine` | Thin wrapper over the existing `useSyncOrchestrator`.            | F1.3.3 |
+| `useResilience` | Memory cleanup, virtualization trap, viewport-shift + flush.     | F1.3.4 |
+
+## F1.3.1 — Selector conventions (implemented)
+
+- Pure selector factories live in `engine/boardSelectors.ts` with **no runtime
+  imports** (store/React types are `import type`, erased at compile time). This
+  makes them unit-testable without a React tree or a Zustand instance.
+- `engine/useBoardState.ts` wraps each id-scoped factory in `useMemo([id])` so
+  the Zustand subscription path stays referentially stable.
+- Collection selectors return a module-level frozen `EMPTY_CARD_IDS` for a
+  missing slice — never a fresh `[]` (which would defeat Zustand's `Object.is`
+  bail-out and cause render loops).
+- `useDerivedLists` subscribes to exactly `listOrder` + `lists` and memoises
+  the projection. **No component subscribes to the whole board object.**
+- Components (`ListColumn`, `CardItem`) import these hooks instead of declaring
+  inline `makeSelect*` factories.
+
+## Hard guards (apply to every F1.3 sub-phase)
+
+- No changes to the core engines: sync FSM, `positioningEngine`,
+  `MutationLifecycleManager`, `useOptimisticMutation`, `createSnapshot`.
+- A single move path: all card/list moves go through `useMoveCard` /
+  `useMoveList`. No component calls `moveCardAction` directly.
+- No manual `setState` rollback or `structuredClone` in components — the
+  mutation lifecycle owns rollback.
+- Frontend only: no migrations, no API/DB changes.
+- User-facing behaviour is unchanged — this is a structural refactor.
+- RTL / Persian preserved.
+
+## Tests
+
+- `engine/__tests__/boardSelectors.test.ts` — selector correctness + stability.
+- Existing `store/__tests__/*` must keep passing (regression gate).

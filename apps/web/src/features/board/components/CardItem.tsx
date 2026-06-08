@@ -18,6 +18,7 @@ import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useBoardStore } from "../store/useBoardStore";
+import { useCardTitle } from "../engine/useBoardState";
 
 import { updateCardAction } from "../actions/board.actions";
 import { isActionFailure } from "../actions/responseTypes";
@@ -51,10 +52,6 @@ type UpdateCardPayload = {
 // ============================================================================
 // 🧠 Store Selectors
 // ============================================================================
-
-const makeSelectCardTitle =
-  (id: string) => (state: any) =>
-    state.cards[id]?.title;
 
 // 🌟 intentionally preserved
 const makeSelectCardUpdatedAt =
@@ -132,18 +129,14 @@ export const CardItem = memo(function CardItem({
   // Store
   // ==========================================================================
 
-  const selectTitle = useMemo(
-    () => makeSelectCardTitle(cardId),
-    [cardId]
-  );
+  // Phase 1.3 (F1.3.1) — title now flows through the centralised board-state
+  // engine selector instead of an inline factory.
+  const cardTitle = useCardTitle(cardId);
 
   const selectUpdatedAt = useMemo(
     () => makeSelectCardUpdatedAt(cardId),
     [cardId]
   );
-
-  const cardTitle =
-    useBoardStore(selectTitle);
 
   // intentionally kept for future sync logic
   useBoardStore(selectUpdatedAt);
