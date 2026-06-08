@@ -24,6 +24,7 @@ import { DrizzleUserBoardMetadataRepository } from "./repositories/userBoardMeta
 import { DrizzleLabelsRepository } from "./repositories/labels.repository";
 import { DrizzleChecklistsRepository } from "./repositories/checklists.repository";
 import { DrizzleCommentsRepository } from "./repositories/comments.repository";
+import { DrizzleCardAssigneesRepository } from "./repositories/cardAssignees.repository";
 import { BoardReadModels } from "./projections/board.read-models";
 
 // ============================================================================
@@ -72,6 +73,7 @@ export const workspaceRepo = new DrizzleWorkspaceRepository(db);
 export const labelsRepo = new DrizzleLabelsRepository(db);
 export const checklistsRepo = new DrizzleChecklistsRepository(db);
 export const commentsRepo = new DrizzleCommentsRepository(db);
+export const cardAssigneesRepo = new DrizzleCardAssigneesRepository(db);
 
 // ============================================================================
 // 🌟 4. Export Repository Classes (Type Usage)
@@ -90,6 +92,7 @@ export {
   DrizzleLabelsRepository,
   DrizzleChecklistsRepository,
   DrizzleCommentsRepository,
+  DrizzleCardAssigneesRepository,
   BoardReadModels,
 };
 
