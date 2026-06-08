@@ -24,6 +24,7 @@ import { isActionFailure } from "../actions/responseTypes";
 
 import { getTokenStyle }           from "@/lib/labels/tokenColorMap";
 import { CardDueDateBadge }        from "@/components/cards/CardDueDateBadge";
+import { AttachmentCountBadge }    from "@/components/cards/AttachmentCountBadge";
 import { ChecklistProgressBadge }  from "@/components/cards/ChecklistProgressBadge";
 import { CardCommentsBadge }       from "@/components/cards/CardCommentsBadge";
 
@@ -192,6 +193,22 @@ export const CardItem = memo(function CardItem({
       [cardId],
     ),
   ) as number;
+
+  // ── Attachment count (Phase 1.2 — F1.2.8) ──────────────────────────────
+  const attachmentCount = useBoardStore(
+    useMemo(
+      () => (s: any): number => s.cards[cardId]?.attachmentCount ?? 0,
+      [cardId],
+    ),
+  ) as number;
+
+  // ── Cover data (Phase 1.2 — F1.2.7 / F1.2.8) ────────────────────────────
+  const coverData = useBoardStore(
+    useMemo(
+      () => (s: any) => s.cards[cardId]?.coverData ?? null,
+      [cardId],
+    ),
+  ) as { type: string; id: string; url?: string } | null;
 
   const updateCardStore = useBoardStore(
     (s) => s.updateCard
@@ -543,6 +560,8 @@ export const CardItem = memo(function CardItem({
         hover:ring-1
         hover:ring-blue-400
         transition-all
+        overflow-hidden
+        ${coverData ? "pt-12" : ""}
         ${
           isDragging
             ? "opacity-50 rotate-3 scale-105 will-change-transform"
@@ -555,6 +574,23 @@ export const CardItem = memo(function CardItem({
         }
       `}
     >
+      {/* Cover strip (Phase 1.2 — F1.2.7/F1.2.8) */}
+      {coverData ? (
+        <div
+          className="absolute inset-x-0 top-0 h-10 rounded-t-lg"
+          aria-hidden="true"
+          style={
+            coverData.type === "image" && coverData.url
+              ? {
+                  backgroundImage:    `url(${coverData.url})`,
+                  backgroundSize:     "cover",
+                  backgroundPosition: "center",
+                }
+              : undefined
+          }
+        />
+      ) : null}
+
       {/* ================================================================== */}
       {/* Labels (top-3 visible + +N overflow per D5) */}
       {/* ================================================================== */}
@@ -624,6 +660,13 @@ export const CardItem = memo(function CardItem({
       {commentCount > 0 ? (
         <div className="mb-2">
           <CardCommentsBadge count={commentCount} />
+        </div>
+      ) : null}
+
+      {/* Attachments Badge (Phase 1.2 — F1.2.8) */}
+      {attachmentCount > 0 ? (
+        <div className="mb-2">
+          <AttachmentCountBadge count={attachmentCount} />
         </div>
       ) : null}
 
