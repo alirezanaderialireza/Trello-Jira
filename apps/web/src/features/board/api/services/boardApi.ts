@@ -363,6 +363,18 @@ export const boardApi = {
   },
 
   // ============================================================================
+  // 8.  Card Cover  (Phase 1.2 — F1.2.7)
+  // ============================================================================
+
+  setCardCover: async (payload: {
+    cardId:         string;
+    boardId:        string;
+    coverData:      { type: string; id: string } | null;
+    idempotencyKey: string;
+    correlationId?: string;
+  }) => (trpc as any).v1.public.cover.setCover.mutateAsync(payload),
+
+  // ============================================================================
   // 6.  Attachments  (not on the versioned router yet — kept as untyped escape hatch)
   // ============================================================================
 

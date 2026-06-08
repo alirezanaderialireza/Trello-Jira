@@ -137,6 +137,25 @@ export interface CardDueDateUpdatedEvent
   extends DomainEvent<"card.due_date_updated", CardDueDateUpdatedPayload> {}
 
 // ============================================================================
+// 10. Card Cover Updated  (Phase 1.2 — F1.2.7 — schemaVersion 2)
+// ============================================================================
+// null = cover cleared. Payload shape mirrors CardDueDateUpdatedPayload.
+export interface CoverData {
+  readonly type: "color" | "gradient";
+  readonly id:   string;
+}
+
+export interface CardCoverUpdatedPayload {
+  readonly cardId:    string;
+  readonly boardId:   string;
+  readonly oldCover:  CoverData | null;
+  readonly newCover:  CoverData | null;
+  readonly updatedBy: string;
+}
+export interface CardCoverUpdatedEvent
+  extends DomainEvent<"card.cover_updated", CardCoverUpdatedPayload> {}
+
+// ============================================================================
 // Aggregate Type Export
 // ============================================================================
 export type CardEvent =
@@ -148,4 +167,5 @@ export type CardEvent =
   | CardUnlockedEvent
   | CardAssigneeAddedEvent
   | CardAssigneeRemovedEvent
-  | CardDueDateUpdatedEvent;
+  | CardDueDateUpdatedEvent
+  | CardCoverUpdatedEvent;

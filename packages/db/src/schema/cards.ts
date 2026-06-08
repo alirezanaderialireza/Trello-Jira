@@ -77,6 +77,15 @@ export const cards = pgTable(
     dueDate: date("due_date"),
 
     // =========================================================================
+    // 🔹 Card Cover  (Phase 1.2 — F1.2.7)
+    // =========================================================================
+    // Token-based cover data: { type: "color" | "gradient", id: string } | null.
+    // Resolved to CSS via renderBackgroundCss() in the UI layer.
+    // Uses the same BackgroundData shape as board backgrounds.
+    // Image covers are reserved for F1.2.8 (Attachments).
+    coverData: jsonb("cover_data"),
+
+    // =========================================================================
     // 🔹 Lifecycle
     // =========================================================================
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -111,6 +120,11 @@ export const cards = pgTable(
     uniquePosIdx: uniqueIndex("idx_unique_card_pos_per_list")
       .on(table.listId, table.position)
       .where(sql`${table.deletedAt} IS NULL`),
+
+    // Partial index for cards with a cover — future "has cover" filter (F1.5).
+    coverIdx: index("idx_cards_cover")
+      .on(table.tenantId)
+      .where(sql`${table.coverData} IS NOT NULL AND ${table.deletedAt} IS NULL`),
   })
 );
 
