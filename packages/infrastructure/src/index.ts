@@ -6,6 +6,10 @@ import type {
   AggregateLockManager 
 } from "@repo/domain";
 
+// Phase 1.2 (F1.2.8) — Storage service
+export { createStorageService, StorageServiceImpl } from "./storage/storageService";
+export type { IStorageService, StorageServiceConfig, PresignedPutOptions, PresignedGetOptions } from "./storage/storageService";
+
 // Re-export auth, cache, audit, ws modules
 export { TokenService, TokenError } from "./auth/tokenService";
 export type { TokenPair, AccessTokenClaims, TokenServiceConfig } from "./auth/tokenService";
