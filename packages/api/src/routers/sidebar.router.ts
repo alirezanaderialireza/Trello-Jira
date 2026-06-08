@@ -45,6 +45,7 @@ import { withServiceRoleConnection } from "../services/serviceRoleConnection";
 import {
   DrizzleUserBoardMetadataRepository,
   DrizzleWorkspaceInvitationsRepository,
+  DrizzleNotificationsRepository,
   users,
 } from "@repo/db";
 import type { WorkspaceRole } from "@repo/domain/workspaces";
@@ -72,6 +73,14 @@ export interface SidebarBootstrapResponse {
     lastViewedAt: string;
   }>;
   pendingInvitationsCount: number;
+  /** Unread in-app notifications for the caller (F1.2.9). */
+  unreadNotificationsCount: number;
+  /**
+   * Combined unread badge for the TopNav bell: pending invitations plus
+   * unread notifications (F1.2.9). Clients should prefer this over
+   * pendingInvitationsCount, which is retained for backward compatibility.
+   */
+  totalUnreadCount: number;
   currentUser: {
     id: string;
     displayName: string;
@@ -93,13 +102,20 @@ export const sidebarRouter = router({
     // ctx.infra.db is the request's tenantContextMiddleware tx. All four
     // queries inherit the GUC and are RLS-correct.
 
-    const [workspacesRaw, starredRaw, recentRaw, userRow] = await Promise.all([
+    const [workspacesRaw, starredRaw, recentRaw, userRow, unreadNotificationsCount] = await Promise.all([
       ctx.repos.workspace.listForUser(userId),
       userMetaRepo.listStarred(userId),
       userMetaRepo.listRecent(userId, 5),
       ctx.infra.db.query.users.findFirst({
         where: eq(users.id, userId),
       }),
+      // Unread in-app notifications (F1.2.9). RLS scopes to the caller via
+      // current_user_id(); runs on the same request tx as the queries above.
+      new DrizzleNotificationsRepository(ctx.infra.db).countUnread(
+        userId,
+        ctx.session.tenantId,
+        ctx.infra.db,
+      ),
     ]);
 
     if (!userRow) {
@@ -182,6 +198,8 @@ export const sidebarRouter = router({
         })
         .filter((b): b is NonNullable<typeof b> => b !== null),
       pendingInvitationsCount,
+      unreadNotificationsCount,
+      totalUnreadCount: pendingInvitationsCount + unreadNotificationsCount,
       currentUser: {
         id: userRow.id,
         displayName: userRow.displayName,

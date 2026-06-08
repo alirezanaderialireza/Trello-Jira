@@ -8,6 +8,8 @@ import {
   protectedProcedure,
 } from "../trpc";
 
+import { DrizzleCardWatchersRepository } from "@repo/db";
+
 import type {
   DomainErrorReason,
 } from "@repo/domain";
@@ -155,6 +157,22 @@ export const cardRouter = router({
             });
 
           if (result.success) {
+            // Auto-watch (F1.2.9): the card creator starts watching it.
+            // The card was committed by the service's own transaction, so the
+            // FK is satisfied; we register the watcher on the request's RLS
+            // transaction (ctx.infra.db). Idempotent via ON CONFLICT DO NOTHING.
+            try {
+              const watchersRepo = new DrizzleCardWatchersRepository(ctx.infra.db);
+              await watchersRepo.watch(
+                result.cardId,
+                ctx.session.user.id,
+                ctx.session.tenantId,
+                ctx.infra.db,
+              );
+            } catch {
+              // Auto-watch is a convenience, not a correctness requirement.
+            }
+
             return {
               success: true,
               cardId: result.cardId,
