@@ -27,9 +27,9 @@ import { router, boardProtectedProcedure } from "../../trpc";
 import { DrizzleAttachmentsRepository, cards } from "@repo/db";
 import type { IStorageService } from "@repo/infrastructure";
 
-// Lazy-import StorageService so Turbopack/webpack never tries to bundle
-// @aws-sdk/* at build time — those packages are only available at runtime
-// after `pnpm add @aws-sdk/client-s3 @aws-sdk/s3-request-presigner`.
+// Lazy-import StorageService so Turbopack/webpack only pulls @aws-sdk/* into
+// the attachment code paths. The SDK is a declared dependency of
+// @repo/infrastructure and is marked external in next.config.mjs.
 let _storage: IStorageService | null = null;
 async function getStorage(): Promise<IStorageService> {
   if (_storage) return _storage;

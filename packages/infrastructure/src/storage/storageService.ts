@@ -6,12 +6,12 @@
 // same @aws-sdk/client-s3 interface — both accept standard S3 API calls.
 //
 // SDK dependency note:
-//   @aws-sdk/client-s3 and @aws-sdk/s3-request-presigner are NOT yet in
-//   packages/api/package.json. They are required at runtime only when
-//   requestUpload / confirmUpload procedures are called. The import at
-//   the top of the router uses `require()` dynamically so the CI lint
-//   and typecheck passes without the SDK installed. See attachment.router.ts
-//   for the dynamic-require wrapper.
+//   @aws-sdk/client-s3 and @aws-sdk/s3-request-presigner are declared as
+//   dependencies of @repo/infrastructure. They are loaded lazily via
+//   dynamic `await import(...)` inside StorageServiceImpl so the SDK is only
+//   pulled in on the upload/download/delete code paths and is marked external
+//   (see apps/web/next.config.mjs → serverExternalPackages) rather than
+//   bundled by Turbopack.
 //
 // This file provides the interface + factory that callers use.
 // The concrete implementation lives in StorageServiceImpl below.
@@ -84,9 +84,9 @@ export class StorageServiceImpl implements IStorageService {
     this.cfg = cfg;
   }
 
-  private getClient(): any {
+  private async getClient(): Promise<any> {
     if (this._client) return this._client;
-    const { S3Client } = require("@aws-sdk/client-s3");
+    const { S3Client } = await import("@aws-sdk/client-s3");
     this._client = new S3Client({
       region:      this.cfg.region,
       endpoint:    this.cfg.endpoint,
@@ -105,8 +105,13 @@ export class StorageServiceImpl implements IStorageService {
     maxSizeBytes,
     expiresIn = 300,
   }: PresignedPutOptions): Promise<string> {
-    const { PutObjectCommand } = require("@aws-sdk/client-s3");
-    const { getSignedUrl }     = require("@aws-sdk/s3-request-presigner");
+    const { PutObjectCommand } = await import("@aws-sdk/client-s3");
+    const { getSignedUrl }     = await import("@aws-sdk/s3-request-presigner");
+
+    // maxSizeBytes is enforced at presign time via the upstream request
+    // validation (router) and the bucket policy; referenced here to keep
+    // the option part of the typed contract.
+    void maxSizeBytes;
 
     const command = new PutObjectCommand({
       Bucket:      this.cfg.bucket,
@@ -114,7 +119,7 @@ export class StorageServiceImpl implements IStorageService {
       ContentType: mimeType,
     });
 
-    return getSignedUrl(this.getClient(), command, { expiresIn });
+    return getSignedUrl(await this.getClient(), command, { expiresIn });
   }
 
   async createPresignedGet({
@@ -122,8 +127,8 @@ export class StorageServiceImpl implements IStorageService {
     fileName,
     expiresIn = 3600,
   }: PresignedGetOptions): Promise<string> {
-    const { GetObjectCommand } = require("@aws-sdk/client-s3");
-    const { getSignedUrl }     = require("@aws-sdk/s3-request-presigner");
+    const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+    const { getSignedUrl }     = await import("@aws-sdk/s3-request-presigner");
 
     const command = new GetObjectCommand({
       Bucket:                     this.cfg.bucket,
@@ -131,16 +136,16 @@ export class StorageServiceImpl implements IStorageService {
       ResponseContentDisposition: `attachment; filename="${encodeURIComponent(fileName)}"`,
     });
 
-    return getSignedUrl(this.getClient(), command, { expiresIn });
+    return getSignedUrl(await this.getClient(), command, { expiresIn });
   }
 
   async deleteObject(objectKey: string): Promise<void> {
-    const { DeleteObjectCommand } = require("@aws-sdk/client-s3");
+    const { DeleteObjectCommand } = await import("@aws-sdk/client-s3");
     const command = new DeleteObjectCommand({
       Bucket: this.cfg.bucket,
       Key:    objectKey,
     });
-    await this.getClient().send(command);
+    await (await this.getClient()).send(command);
   }
 
   buildPublicUrl(objectKey: string): string {
