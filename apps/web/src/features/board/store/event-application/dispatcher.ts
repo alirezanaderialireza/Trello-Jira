@@ -19,6 +19,7 @@ import type {
   CardDueDateUpdatedEvent,
   CardLabelAddedEvent,
   CardLabelRemovedEvent,
+  CardCoverUpdatedEvent,
   // ── Phase 4 label ────────────────────────────────────────────────────────
   LabelCreatedEvent,
   LabelUpdatedEvent,
@@ -65,6 +66,7 @@ import { applyCardLocked, applyCardUnlocked }             from "./applyCardLocke
 import { applyCardAssigneeAdded, applyCardAssigneeRemoved } from "./applyCardAssignee";
 import { applyCardDueDateUpdated }                        from "./applyCardDueDate";
 import { applyCardLabelAdded, applyCardLabelRemoved }     from "./applyCardLabel";
+import { applyCardCoverUpdated }                          from "./applyCardCoverUpdated";
 
 // ── Phase 4 label reducers ───────────────────────────────────────────────────
 import { applyLabelCreated, applyLabelUpdated, applyLabelDeleted } from "./applyLabel";
@@ -127,6 +129,7 @@ type EventMap = {
   "card.due_date_updated": CardDueDateUpdatedEvent;
   "card.label_added":      CardLabelAddedEvent;
   "card.label_removed":    CardLabelRemovedEvent;
+  "card.cover_updated":    CardCoverUpdatedEvent;
   // ── List ──────────────────────────────────────────────────────────────────
   "list.created":  ListCreatedEvent;
   "list.updated":  ListUpdatedEvent;
@@ -184,6 +187,7 @@ const HANDLERS: HandlerRegistry = {
   "card.due_date_updated": applyCardDueDateUpdated,
   "card.label_added":      applyCardLabelAdded,
   "card.label_removed":    applyCardLabelRemoved,
+  "card.cover_updated":    applyCardCoverUpdated,
   // ── List ──────────────────────────────────────────────────────────────────
   "list.created": applyListCreated,
   "list.updated": applyListUpdated,

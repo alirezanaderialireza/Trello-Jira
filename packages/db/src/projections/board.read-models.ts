@@ -65,6 +65,8 @@ export class BoardReadModels {
           position: card.position,
           revision: card.revision,
           description: card.description,
+          dueDate: card.dueDate ?? null,
+          coverData: card.coverData ?? null,
         })),
       })),
     };

@@ -44,6 +44,8 @@ export type CardDto = {
    */
   dueDate?: string | null;
   locked?: boolean;
+  /** Phase 1.2 (F1.2.7) — Card Cover: { type, id } token or null. */
+  coverData?: { type: string; id: string } | null;
 };
 
 export type ListDto = {
