@@ -77,6 +77,17 @@ export const cards = pgTable(
     dueDate: date("due_date"),
 
     // =========================================================================
+    // 🔹 Card Cover  (Phase 1.2 — F1.2.7)
+    // =========================================================================
+    // Token: { type: "color"|"gradient"|"image", id: string } | null
+    coverData: jsonb("cover_data"),
+
+    // =========================================================================
+    // 🔹 Attachment count  (Phase 1.2 — F1.2.8)
+    // =========================================================================
+    attachmentCount: integer("attachment_count").notNull().default(0),
+
+    // =========================================================================
     // 🔹 Lifecycle
     // =========================================================================
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

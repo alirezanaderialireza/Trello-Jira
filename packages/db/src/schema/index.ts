@@ -18,3 +18,6 @@ export * from "./workspaceInvitations";
 export * from "./userBoardMetadata";
 export * from "./authTables";
 export * from "./sessions";
+
+export * from "./cardAssignees";
+export * from "./attachments";
