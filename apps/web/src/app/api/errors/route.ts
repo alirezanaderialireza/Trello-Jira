@@ -102,7 +102,6 @@ export async function POST(req: Request) {
   // 4. Record ----------------------------------------------------------------
   // For now: a structured `console.error` line. The platform log drain
   // captures it; alerting / dashboards can grep for `event: client_error`.
-  // eslint-disable-next-line no-console
   console.error(
     JSON.stringify({
       event: "client_error",

@@ -23,7 +23,8 @@ import { updateCardAction } from "../actions/board.actions";
 import { isActionFailure } from "../actions/responseTypes";
 
 import { getTokenStyle } from "@/lib/labels/tokenColorMap";
-import { CardDueDateBadge } from "@/components/cards/CardDueDateBadge";
+import { CardDueDateBadge }        from "@/components/cards/CardDueDateBadge";
+import { ChecklistProgressBadge }  from "@/components/cards/ChecklistProgressBadge";
 
 // ============================================================================
 // 🧠 Types
@@ -80,6 +81,27 @@ const MAX_VISIBLE_LABELS = 3;
 const makeSelectCardDueDate =
   (id: string) => (state: any) =>
     state.cards[id]?.dueDate ?? null;
+
+// Atomic selector for checklist progress (Phase 1.2 — F1.2.3.b).
+// Reads checklistsByCard[cardId] ids then sums done/total from the
+// checklists map. Returns { done, total } — only re-renders when the
+// numbers actually change.
+const makeSelectChecklistProgress =
+  (id: string) =>
+  (state: any): { done: number; total: number } => {
+    const ids: string[] = state.checklistsByCard[id] ?? [];
+    let done = 0;
+    let total = 0;
+    for (const clId of ids) {
+      const cl = state.checklists[clId];
+      if (!cl) continue;
+      for (const item of cl.items) {
+        total++;
+        if (item.isDone) done++;
+      }
+    }
+    return { done, total };
+  };
 
 // ============================================================================
 // 🧠 SSR-safe Layout Effect
@@ -154,6 +176,13 @@ export const CardItem = memo(function CardItem({
     [cardId],
   );
   const cardDueDate = useBoardStore(selectCardDueDate) as string | null;
+
+  // ── Checklist progress (Phase 1.2 — F1.2.3.b) ───────────────────────────
+  const selectChecklistProgress = useMemo(
+    () => makeSelectChecklistProgress(cardId),
+    [cardId],
+  );
+  const checklistProgress = useBoardStore(selectChecklistProgress);
 
   const updateCardStore = useBoardStore(
     (s) => s.updateCard
@@ -563,6 +592,19 @@ export const CardItem = memo(function CardItem({
       {cardDueDate ? (
         <div className="mb-2">
           <CardDueDateBadge dueDate={cardDueDate} size="sm" />
+        </div>
+      ) : null}
+
+      {/* ================================================================== */}
+      {/* Checklist Progress Badge (Phase 1.2 — F1.2.3.b) */}
+      {/* ================================================================== */}
+
+      {checklistProgress.total > 0 ? (
+        <div className="mb-2">
+          <ChecklistProgressBadge
+            done={checklistProgress.done}
+            total={checklistProgress.total}
+          />
         </div>
       ) : null}
 

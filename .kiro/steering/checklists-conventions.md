@@ -238,33 +238,109 @@ Six methods aligned to the new router contract:
   being writable — checklists can't move between cards or boards
   (would require a separate procedure with its own outbox event).
 
-## F1.2.3.b checklist (UI follow-up)
+## F1.2.3.b checklist (UI — ✅ shipped)
 
-- **ChecklistManager** — list of checklists on a card, drag-and-drop
-  reorder via `@dnd-kit/sortable` calling
-  `useUpdateChecklist({ position })`.
-- **ChecklistRow** — header with title (inline rename), progress bar
-  derived from `done / total` items, delete button gated on
-  `creator || admin`.
-- **ChecklistItemRow** — checkbox (toggle via
-  `useUpdateChecklistItem({ isDone })`), text inline rename
-  (`useUpdateChecklistItem({ text })`), drag handle for reorder
-  (`useUpdateChecklistItem({ position })`), trash icon
-  (`useRemoveChecklistItem`).
-- **InlineAddItem** — small form at the bottom of each checklist
-  ("افزودن مورد" + text input + Enter/blur to save).
-- **DeleteChecklistDialog** — type-name-to-confirm with
-  `affectedItemCount` in the warning copy (mirrors
-  `DeleteLabelDialog`).
-- **CardChecklists** (rewrite) — replace the
-  `card-detail/CardChecklists.tsx` stub with the new manager
-  surface; lives in `features/board/components/card-detail/`.
-- **Activity timeline integration** — Phase 1.2.8.
+All items shipped in F1.2.3.b.
 
-The component placement decision (D21 from labels) likely repeats
-here: any component CardItem consumes (e.g. a "checklists count" badge
-on the preview) should live in `apps/web/src/components/cards/`
-(shared) to satisfy the boundaries linter's cross-feature ban.
+- ✅ **useUpdateChecklist** — new hook in
+  `features/board/store/mutations/checklists/useUpdateChecklist.ts`.
+  Mirrors `useUpdateChecklistItem` exactly. Used for:
+  (a) inline rename of checklist title; (b) drag-and-drop reorder
+  of checklists within a card.
+- ✅ **ChecklistItemRow** — toggle `isDone`, inline rename `text`,
+  drag handle (position reorder), trash delete. Lives in
+  `features/board/components/card-detail/checklists/`.
+- ✅ **InlineAddItem** — "افزودن مورد" input with focus retention
+  after add (Trello-style multiple-add UX), Enter/Esc handling,
+  500-char client validation. Lives in same folder.
+- ✅ **DeleteChecklistDialog** — type-name-to-confirm modal,
+  `affectedItemCount` in Persian numerals, Escape/backdrop/X close,
+  fa-IR fold match. Lives in same folder.
+- ✅ **ChecklistRow** — inline title rename with duplicate check
+  (fa-IR fold), progress bar (done/total, Persian numerals), delete
+  button gated on `canDelete` (admin/owner), `@dnd-kit/sortable`
+  for items. Lives in same folder.
+- ✅ **ChecklistManager** — sortable checklist list with
+  `@dnd-kit/sortable`, add-checklist form with duplicate validation,
+  empty state, `DeleteChecklistDialog` wired. Lives in same folder.
+- ✅ **CardChecklists** (full rewrite) — replaces broken stub; tRPC
+  `checklist.list` + `checklist.listItems` per checklist, Zustand
+  store hydrated on success, subsequent reads from store. Accepts
+  `viewerId` + `viewerRole` for delete gating. Lives in
+  `features/board/components/card-detail/CardChecklists.tsx`.
+- ✅ **ChecklistProgressBadge** — shared badge (`components/cards/`)
+  showing `done/total` in Persian numerals. Shows only when
+  `total > 0`. Consumed by `CardItem` via atomic store selector.
+- ✅ **CardItem** updated — atomic `makeSelectChecklistProgress`
+  selector; renders `<ChecklistProgressBadge>` when `total > 0`.
+
+# F1.2.3.b UI Conventions
+
+## Component placement (T8 / D21 repeat)
+
+Same resolution as labels (D21): components consumed by
+`CardItem` (features/board) must live in **shared** territory
+because the boundaries linter blocks feature→feature imports.
+
+| File | Location | Layer |
+|---|---|---|
+| `ChecklistItemRow.tsx` | `features/board/components/card-detail/checklists/` | feature (board) |
+| `InlineAddItem.tsx` | same | feature (board) |
+| `DeleteChecklistDialog.tsx` | same | feature (board) |
+| `ChecklistRow.tsx` | same | feature (board) |
+| `ChecklistManager.tsx` | same | feature (board) |
+| `CardChecklists.tsx` | `features/board/components/card-detail/` | feature (board) |
+| `ChecklistProgressBadge.tsx` | `components/cards/` | **shared** |
+
+The four components in `features/board` use mutation hooks directly
+and therefore cannot be shared. Only the read-only badge that
+`CardItem` needs is in shared territory.
+
+## New hook: useUpdateChecklist
+
+`useUpdateChecklist` wraps `boardApi.updateChecklist` with the same
+optimistic-mutation pattern as `useUpdateChecklistItem`. Field mask:
+`title?` / `position?`. Required by both the inline title rename
+(ChecklistRow) and the drag-and-drop checklist reorder
+(ChecklistManager).
+
+## T7 hydration decision: separate listItems per checklist
+
+`checklist.list` returns checklists **without** items.
+`checklist.listItems` returns items for a single checklist.
+
+Choice made in `CardChecklists.tsx`: fetch checklists first, then
+`useQueries` to fetch all items in parallel (one query per checklist,
+React Query coordinates). Both results are written into the Zustand
+store via synthetic event envelopes on success.
+
+Rationale:
+- Keeps the server contract clean (no forced nesting).
+- Avoids adding a new `listWithItems` procedure for a small UI feature.
+- After hydration, all state reads go through the store — no
+  re-fetching on every toggle / rename / drag.
+- `staleTime: 30_000` on both queries; real-time updates come via WS.
+
+## ChecklistProgressBadge format
+
+- Icon: `CheckSquare` (lucide-react), h-3 w-3.
+- Text: `done/total` in Persian numerals (`toLocaleString("fa-IR")`).
+- Palette: `bg-emerald-900/50 text-emerald-400` when `done === total`,
+  `bg-slate-700 text-slate-400` otherwise.
+- Hidden when `total === 0` (component returns `null`).
+
+## Progress bar format (ChecklistRow)
+
+- `done / total * 100`, rounded to integer percent.
+- ARIA: `role="progressbar"`, `aria-valuenow`, label in Persian.
+- Color: `bg-emerald-500` fill over `bg-slate-700` track.
+
+## Parked follow-ups (unchanged)
+
+- **Activity timeline integration** → Phase 1.2.8 (payloads ready).
+- **Bulk reorder** → Phase 1.2 polish.
+- **Item count limit** → Phase 1.5 (rebalance worker).
+- **E2E spec** → Phase 1.4.
 
 ## Parked follow-ups
 
