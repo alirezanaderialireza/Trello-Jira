@@ -25,6 +25,9 @@ import { userBoardMetadataRouter } from "./routers/userBoardMetadata.router";
 import { userProfileRouter } from "./routers/userProfile.router";
 import { sidebarRouter } from "./routers/sidebar.router";
 
+// 🔔 Notifications (F1.2.9)
+import { notificationRouter } from "./routers/notification.router";
+
 // ⚡ Realtime & Sync
 import { realtimeSyncRouter } from "./routers/realtime/sync.router";
 import { presenceRouter } from "./routers/realtime/presence.router";
@@ -66,6 +69,8 @@ export const appRouter = router({
       userBoardMetadata: userBoardMetadataRouter,
       userProfile: userProfileRouter,
       sidebar: sidebarRouter,
+      // 🔔 Notifications (F1.2.9)
+      notification: notificationRouter,
     }),
 
     // ------------------------------------------------------------------------
