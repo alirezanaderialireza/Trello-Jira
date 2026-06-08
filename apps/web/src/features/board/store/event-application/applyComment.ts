@@ -1,4 +1,14 @@
 // apps/web/src/features/board/store/event-application/applyComment.ts
+//
+// Phase 1.2 (F1.2.4.a) — adapted to v2 event payload shape:
+//   CommentCreatedPayload  : + revision (D7)
+//   CommentDeletedPayload  : + deletedBy (D7 — ignored at store level,
+//                             used by activity timeline F1.2.8)
+//
+// Backward-compat: all new v2 fields read with ?? so an optimistic
+// envelope built client-side before the server echoes can still be
+// applied without crashing.
+
 import type {
   CommentCreatedEvent,
   CommentUpdatedEvent,
@@ -18,23 +28,26 @@ export function applyCommentCreated(
   const { commentId, cardId, boardId, authorId, body, createdAt } =
     envelope.event.payload;
 
-  // Idempotent: skip if this comment already exists at the same or higher version.
+  // v2: payload carries revision; fall back to envelope version for optimistic.
+  const revision: number =
+    (envelope.event.payload as any).revision ?? envelope.event.version;
+
+  // Idempotent: skip if already at same or higher revision.
   const existing = state.comments[commentId];
-  if (existing && existing.revision >= envelope.event.version) return {};
+  if (existing && existing.revision >= revision) return {};
 
   const comment: CommentDto = {
-    id:          commentId,
+    id:           commentId,
     cardId,
     boardId,
     authorId,
     body,
     createdAt,
-    revision:    envelope.event.version,
+    revision,
     isOptimistic: envelope.optimistic ?? false,
   };
 
-  const currentCard  = state.commentsByCard[cardId] ?? [];
-  // Idempotent append — preserve insertion order.
+  const currentCard      = state.commentsByCard[cardId] ?? [];
   const nextCardComments = currentCard.includes(commentId)
     ? currentCard
     : [...currentCard, commentId];
@@ -64,7 +77,7 @@ export function applyCommentUpdated(
         ...existing,
         body,
         editedAt,
-        revision:    envelope.event.version,
+        revision:     envelope.event.version,
         isOptimistic: envelope.optimistic ?? false,
       },
     },
@@ -72,6 +85,7 @@ export function applyCommentUpdated(
 }
 
 // ─── Deleted ─────────────────────────────────────────────────────────────────
+// v2: payload now carries `deletedBy` — ignored here (activity timeline).
 
 export function applyCommentDeleted(
   state: BoardStoreState,
@@ -83,7 +97,7 @@ export function applyCommentDeleted(
 
   const { [commentId]: _removed, ...remainingComments } = state.comments;
 
-  const currentCard     = state.commentsByCard[cardId] ?? [];
+  const currentCard      = state.commentsByCard[cardId] ?? [];
   const nextCardComments = currentCard.filter((id) => id !== commentId);
 
   return {
