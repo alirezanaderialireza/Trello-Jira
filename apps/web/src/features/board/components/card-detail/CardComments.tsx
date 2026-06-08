@@ -2,35 +2,57 @@
 
 // apps/web/src/features/board/components/card-detail/CardComments.tsx
 //
-// ⚠️  STUB — will be fully rewritten in F1.2.4.b (CardComments UI).
+// Full rewrite of the F1.2.4.a placeholder stub.
 //
-// This file is intentionally left as a minimal placeholder.
-// The previous stub called non-existent procedures (getByCard,
-// delete without boardId / idempotencyKey) which crash at runtime.
+// Container responsibilities:
+//   • Reads the current session to get userId and board role
+//   • Delegates all data fetching + store hydration to CommentsList
+//   • Passes userId + role downward; owns no mutations directly
 //
-// TODO F1.2.4.b:
-//   • Replace raw tRPC calls with boardApi.listComments + Zustand store
-//   • Use useAddComment / useUpdateComment / useDeleteComment hooks
-//   • Full Persian UI matching the Trello/Jira comment UX
-//   • Hydrate store via synthetic comment.created envelopes (pattern:
-//     CardChecklists.tsx from F1.2.3.b)
-//   • Cursor-based pagination with "بارگذاری بیشتر" CTA
-//   • Inline edit for author's own comments (useUpdateComment)
+// Board role:
+//   We read it from the session's boardMembership when available.
+//   As a safe default we use "MEMBER" (least-privileged) so the delete
+//   button is only shown to the comment author until the role is known.
+//   The server is still the authoritative gate.
+
+import { useSession } from "next-auth/react";
+import { CommentsList } from "./comments/CommentsList";
 
 interface Props {
   cardId:  string;
   boardId: string;
+  /** Optional board role passed down from CardDetailModal if known. */
+  role?:   string;
 }
 
-export function CardComments({ cardId, boardId }: Props) {
-  // Intentionally unused — suppresses TS "unused variable" while keeping
-  // the props interface intact for F1.2.4.b wiring.
-  void cardId;
-  void boardId;
+export function CardComments({ cardId, boardId, role = "MEMBER" }: Props) {
+  const { data: session, status } = useSession();
+
+  // While session is loading show a subtle spinner
+  if (status === "loading") {
+    return (
+      <div dir="rtl" className="py-6 text-center text-sm text-slate-500">
+        در حال بارگذاری...
+      </div>
+    );
+  }
+
+  const currentUserId = session?.user?.id ?? "";
+
+  if (!currentUserId) {
+    return (
+      <div dir="rtl" className="py-6 text-center text-sm text-slate-500">
+        برای مشاهده و ارسال کامنت وارد شوید.
+      </div>
+    );
+  }
 
   return (
-    <div dir="rtl" className="py-4 text-center text-sm text-slate-500">
-      بارگذاری کامنت‌ها در فاز ۱.۲.۴.b انجام می‌شود.
-    </div>
+    <CommentsList
+      cardId={cardId}
+      boardId={boardId}
+      currentUserId={currentUserId}
+      role={role}
+    />
   );
 }
