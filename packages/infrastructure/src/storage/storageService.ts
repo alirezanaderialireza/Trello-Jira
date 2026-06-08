@@ -78,7 +78,6 @@ export interface IStorageService {
 
 export class StorageServiceImpl implements IStorageService {
   private readonly cfg: StorageServiceConfig;
-  // Lazy-initialized so the module can be imported before the SDK is loaded.
   private _client: unknown = null;
 
   constructor(cfg: StorageServiceConfig) {
@@ -87,8 +86,6 @@ export class StorageServiceImpl implements IStorageService {
 
   private getClient(): any {
     if (this._client) return this._client;
-    // Dynamic require so lint/typecheck pass without the SDK installed.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { S3Client } = require("@aws-sdk/client-s3");
     this._client = new S3Client({
       region:      this.cfg.region,
@@ -108,10 +105,8 @@ export class StorageServiceImpl implements IStorageService {
     maxSizeBytes,
     expiresIn = 300,
   }: PresignedPutOptions): Promise<string> {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { PutObjectCommand }    = require("@aws-sdk/client-s3");
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getSignedUrl }        = require("@aws-sdk/s3-request-presigner");
+    const { PutObjectCommand } = require("@aws-sdk/client-s3");
+    const { getSignedUrl }     = require("@aws-sdk/s3-request-presigner");
 
     const command = new PutObjectCommand({
       Bucket:      this.cfg.bucket,
@@ -127,9 +122,7 @@ export class StorageServiceImpl implements IStorageService {
     fileName,
     expiresIn = 3600,
   }: PresignedGetOptions): Promise<string> {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { GetObjectCommand } = require("@aws-sdk/client-s3");
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { getSignedUrl }     = require("@aws-sdk/s3-request-presigner");
 
     const command = new GetObjectCommand({
@@ -142,7 +135,6 @@ export class StorageServiceImpl implements IStorageService {
   }
 
   async deleteObject(objectKey: string): Promise<void> {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { DeleteObjectCommand } = require("@aws-sdk/client-s3");
     const command = new DeleteObjectCommand({
       Bucket: this.cfg.bucket,
