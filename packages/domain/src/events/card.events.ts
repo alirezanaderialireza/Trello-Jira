@@ -75,23 +75,29 @@ export interface CardUnlockedEvent
   extends DomainEvent<"card.unlocked", CardUnlockedPayload> {}
 
 // ============================================================================
-// 7. Card Assignee Added
+// 7. Card Assignee Added  (schemaVersion 2 — F1.2.5)
 // ============================================================================
+// v1 (Phase-4 stub) — payload had only { cardId, boardId, assigneeId }.
+// v2 adds `assignedBy` for the Activity Timeline (F1.2.8). No v1
+// backward-compat needed — the stub router never emitted outbox events.
 export interface CardAssigneeAddedPayload {
-  readonly cardId: string;
-  readonly boardId: string;
+  readonly cardId:     string;
+  readonly boardId:    string;
   readonly assigneeId: string; // userId
+  readonly assignedBy: string; // userId of the actor (v2 addition)
 }
 export interface CardAssigneeAddedEvent
   extends DomainEvent<"card.assignee_added", CardAssigneeAddedPayload> {}
 
 // ============================================================================
-// 8. Card Assignee Removed
+// 8. Card Assignee Removed  (schemaVersion 2 — F1.2.5)
 // ============================================================================
+// v2 adds `removedBy` for Activity Timeline (F1.2.8).
 export interface CardAssigneeRemovedPayload {
-  readonly cardId: string;
-  readonly boardId: string;
+  readonly cardId:     string;
+  readonly boardId:    string;
   readonly assigneeId: string; // userId
+  readonly removedBy:  string; // userId of the actor (v2 addition)
 }
 export interface CardAssigneeRemovedEvent
   extends DomainEvent<"card.assignee_removed", CardAssigneeRemovedPayload> {}
