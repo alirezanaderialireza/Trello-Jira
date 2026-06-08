@@ -7,3 +7,4 @@
 
 export * from "./types";
 export * from "./use-cases/setCardDueDate";
+export * from "./use-cases/setCardCover";

@@ -17,6 +17,7 @@ export type DomainEventType =
   | "card.due_date_updated"
   | "card.label_added"
   | "card.label_removed"
+  | "card.cover_updated"
   // ── List ────────────────────────────────────────────────────────────────
   | "list.created"
   | "list.moved"
