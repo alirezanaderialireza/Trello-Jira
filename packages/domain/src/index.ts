@@ -43,3 +43,6 @@ export * from "./checklists";
 
 // 1️⃣2️⃣ Comments (Phase 1.2 — F1.2.4)
 export * from "./comments";
+
+// 1️⃣3️⃣ Assignees (Phase 1.2 — F1.2.5)
+export * from "./assignees";

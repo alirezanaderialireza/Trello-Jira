@@ -10,6 +10,7 @@ export * from "./boardMembers";
 export * from "./labels";
 export * from "./checklists";
 export * from "./comments";
+export * from "./cardAssignees";
 // Auth & Multi-tenant
 export * from "./users";
 export * from "./workspaces";

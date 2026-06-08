@@ -116,6 +116,15 @@ export type CommentDto = {
   isOptimistic?: boolean;
 };
 
+/**
+ * Phase 1.2 (F1.2.5) — board member cache for assignee display.
+ * Populated at board hydration from v1.public.boardMembers.getMembers.
+ * Type is defined in lib/members/types.ts (shared) so that shared
+ * components (AssigneeAvatarStack, CardAssigneesBadge) can import it
+ * without violating the boundaries linter.
+ */
+export type { BoardMemberDto } from "@/lib/members/types";
+
 export type AttachmentDto = {
   id: string;
   cardId: string;
@@ -293,6 +302,12 @@ export interface BoardStoreState {
   bufferedEvents: Record<string, WsEvent>;
   syncStatus: SyncStatus;
   pendingMutations: Record<string, PendingMutation>;
+
+  /**
+   * Phase 1.2 (F1.2.5) — board member cache for assignee display.
+   * userId → BoardMemberDto. Populated by hydrateBoardMembers action.
+   */
+  boardMembers: Record<string, BoardMemberDto>;
 }
 
 /** Maximum number of activity entries kept in the client-side window. */
@@ -329,6 +344,9 @@ export interface BoardStoreActions {
   // ── Activity Feed ────────────────────────────────────────────────────────
   /** Append an activity entry; evicts oldest when window is full. */
   appendActivity: (entry: ActivityEntry) => void;
+
+  /** Phase 1.2 (F1.2.5) — populate board member cache for assignee UI. */
+  hydrateBoardMembers: (members: BoardMemberDto[]) => void;
 
   // ── Legacy Bridge Actions (Phase 1-2, unchanged) ─────────────────────────
   addCard: (card: Partial<CardDto>) => void;
@@ -404,6 +422,7 @@ export const useBoardStore = create<BoardState>()((set) => ({
   bufferedEvents: {},
   syncStatus: "healthy",
   pendingMutations: {},
+  boardMembers: {},
   ...emptyPhase4State(),
 
   // ==========================================================================
@@ -653,6 +672,13 @@ export const useBoardStore = create<BoardState>()((set) => ({
           : next;
 
       return { activityFeed: windowed };
+    }),
+
+  hydrateBoardMembers: (members) =>
+    set(() => {
+      const next: Record<string, BoardMemberDto> = {};
+      for (const m of members) next[m.userId] = m;
+      return { boardMembers: next };
     }),
 
   // ==========================================================================

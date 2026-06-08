@@ -26,6 +26,7 @@ import { getTokenStyle }           from "@/lib/labels/tokenColorMap";
 import { CardDueDateBadge }        from "@/components/cards/CardDueDateBadge";
 import { ChecklistProgressBadge }  from "@/components/cards/ChecklistProgressBadge";
 import { CardCommentsBadge }       from "@/components/cards/CardCommentsBadge";
+import { CardAssigneesBadge }      from "@/components/cards/CardAssigneesBadge";
 
 // ============================================================================
 // 🧠 Types
@@ -84,9 +85,6 @@ const makeSelectCardDueDate =
     state.cards[id]?.dueDate ?? null;
 
 // Atomic selector for checklist progress (Phase 1.2 — F1.2.3.b).
-// Reads checklistsByCard[cardId] ids then sums done/total from the
-// checklists map. Returns { done, total } — only re-renders when the
-// numbers actually change.
 const makeSelectChecklistProgress =
   (id: string) =>
   (state: any): { done: number; total: number } => {
@@ -103,6 +101,13 @@ const makeSelectChecklistProgress =
     }
     return { done, total };
   };
+
+// ── Assignees (Phase 1.2 — F1.2.5) ──────────────────────────────────────────
+// Atomic selector: card.assignees[] + boardMembers cache.
+const makeSelectCardAssigneeIds =
+  (id: string) => (state: any): string[] =>
+    state.cards[id]?.assignees ?? [];
+const selectBoardMembers = (state: any) => state.boardMembers;
 
 // ============================================================================
 // 🧠 SSR-safe Layout Effect
@@ -192,6 +197,14 @@ export const CardItem = memo(function CardItem({
       [cardId],
     ),
   ) as number;
+
+  // ── Assignees (Phase 1.2 — F1.2.5) ─────────────────────────────────────
+  const selectCardAssigneeIds = useMemo(
+    () => makeSelectCardAssigneeIds(cardId),
+    [cardId],
+  );
+  const cardAssigneeIds = useBoardStore(selectCardAssigneeIds) as string[];
+  const boardMembers    = useBoardStore(selectBoardMembers);
 
   const updateCardStore = useBoardStore(
     (s) => s.updateCard
@@ -624,6 +637,19 @@ export const CardItem = memo(function CardItem({
       {commentCount > 0 ? (
         <div className="mb-2">
           <CardCommentsBadge count={commentCount} />
+        </div>
+      ) : null}
+
+      {/* ================================================================== */}
+      {/* Assignees Badge (Phase 1.2 — F1.2.5) */}
+      {/* ================================================================== */}
+
+      {cardAssigneeIds.length > 0 ? (
+        <div className="mb-2">
+          <CardAssigneesBadge
+            assigneeIds={cardAssigneeIds}
+            members={boardMembers}
+          />
         </div>
       ) : null}
 

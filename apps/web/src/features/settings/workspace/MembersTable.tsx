@@ -332,8 +332,7 @@ function Avatar({
   const initial = displayName.length > 0 ? Array.from(displayName)[0] : "?";
   if (avatarUrl) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element -- avatars are
-      // user-supplied URLs and may not match next/image domains config
+      /* eslint-disable-next-line @next/next/no-img-element -- avatars are user-supplied URLs and may not match next/image domains config */
       <img
         src={avatarUrl}
         alt=""
