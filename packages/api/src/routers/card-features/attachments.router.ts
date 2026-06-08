@@ -25,7 +25,18 @@ import { eq, and, isNull } from "drizzle-orm";
 
 import { router, boardProtectedProcedure } from "../../trpc";
 import { DrizzleAttachmentsRepository, cards } from "@repo/db";
-import { createStorageService } from "@repo/infrastructure";
+import type { IStorageService } from "@repo/infrastructure";
+
+// Lazy-import StorageService so Turbopack/webpack never tries to bundle
+// @aws-sdk/* at build time — those packages are only available at runtime
+// after `pnpm add @aws-sdk/client-s3 @aws-sdk/s3-request-presigner`.
+let _storage: IStorageService | null = null;
+async function getStorage(): Promise<IStorageService> {
+  if (_storage) return _storage;
+  const { createStorageService } = await import("@repo/infrastructure");
+  _storage = createStorageService();
+  return _storage;
+}
 
 import {
   addFileAttachment,
@@ -186,7 +197,7 @@ export const attachmentsRouter = router({
           const attachmentId = crypto.randomUUID();
           const objectKey    = `${ctx.session.tenantId}/${input.cardId}/${attachmentId}${extOf(input.fileName)}`;
 
-          const storage   = createStorageService();
+          const storage   = await getStorage();
           const uploadUrl = await storage.createPresignedPut({
             objectKey,
             mimeType:     input.mimeType,
@@ -231,7 +242,7 @@ export const attachmentsRouter = router({
           const count   = await repo.countByCardId(input.cardId as CardId, { tx: ctx.infra.db, tenantId: ctx.session.tenantId });
           if (count >= MAX_ATTACHMENTS) throw new AttachmentLimitError(MAX_ATTACHMENTS);
 
-          const storage   = createStorageService();
+          const storage   = await getStorage();
           const publicUrl = storage.buildPublicUrl(input.objectKey);
           const eventId   = crypto.randomUUID();
           const now       = new Date();
@@ -357,10 +368,11 @@ export const attachmentsRouter = router({
 
           // Fire-and-forget storage cleanup for file attachments.
           if (current.type === "file" && current.objectKey) {
-            const storage = createStorageService();
-            storage.deleteObject(current.objectKey).catch((err: unknown) => {
-              console.warn("[attachments.remove] storage cleanup failed", current.objectKey, err);
-            });
+            getStorage().then((s) =>
+              s.deleteObject(current.objectKey!).catch((err: unknown) => {
+                console.warn("[attachments.remove] storage cleanup failed", current.objectKey, err);
+              })
+            );
           }
 
           return { success: true as const };
