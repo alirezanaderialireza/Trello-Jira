@@ -40,3 +40,6 @@ export * from "./labels";
 
 // 1️⃣1️⃣ Checklists (Phase 1.2 — F1.2.3)
 export * from "./checklists";
+
+// 1️⃣2️⃣ Comments (Phase 1.2 — F1.2.4)
+export * from "./comments";
