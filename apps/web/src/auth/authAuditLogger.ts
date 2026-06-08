@@ -73,7 +73,6 @@ export async function recordAuthEvent(args: RecordAuthEventArgs): Promise<void> 
     });
   } catch (err) {
     // Swallow but log so a logging outage doesn't kill auth.
-    // eslint-disable-next-line no-console
     console.warn("[authAuditLogger] failed to record event", args.action, err);
   }
 }

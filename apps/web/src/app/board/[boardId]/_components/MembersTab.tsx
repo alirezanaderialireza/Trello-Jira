@@ -519,9 +519,9 @@ function Avatar({
 }) {
   const initial = displayName.length > 0 ? Array.from(displayName)[0] : "?";
   if (avatarUrl) {
-    // eslint-disable-next-line @next/next/no-img-element -- user-supplied URL,
-    // not guaranteed to match next/image domain config
     return (
+      // eslint-disable-next-line @next/next/no-img-element -- user-supplied URL,
+      // not guaranteed to match next/image domain config
       <img
         src={avatarUrl}
         alt=""
