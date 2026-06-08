@@ -23,7 +23,7 @@ engines (sync FSM, positioning, mutation lifecycle) untouched.
 | Engine          | Owns                                                              | Status |
 |-----------------|------------------------------------------------------------------|--------|
 | `useBoardState` | Atomic store selectors + derived ordered lists.                  | F1.3.1 ✅ |
-| `useDragEngine` | dnd-kit lifecycle (start/over/end), intent debounce, sensors.    | F1.3.2 |
+| `useDragEngine` | dnd-kit lifecycle (start/over/end), intent debounce, sensors.    | F1.3.2 ✅ |
 | `useSyncEngine` | Thin wrapper over the existing `useSyncOrchestrator`.            | F1.3.3 |
 | `useResilience` | Memory cleanup, virtualization trap, viewport-shift + flush.     | F1.3.4 |
 
@@ -57,4 +57,16 @@ engines (sync FSM, positioning, mutation lifecycle) untouched.
 ## Tests
 
 - `engine/__tests__/boardSelectors.test.ts` — selector correctness + stability.
+- `engine/__tests__/intentScheduler.test.ts` — debounce window (fake clock).
+- `engine/__tests__/dragResolution.test.ts` — drop-index / container math.
 - Existing `store/__tests__/*` must keep passing (regression gate).
+
+## F1.3.2 — Drag engine (implemented, not yet wired)
+
+- `engine/intentScheduler.ts` — pure 120ms debounce primitive with injectable
+  timers (so it is deterministically testable).
+- `engine/dragResolution.ts` — pure index/container resolution helpers.
+- `engine/useDragEngine.ts` — composes the above with `useMoveCard` /
+  `useMoveList` (the single move path, D3), `useBoardStore.moveCard` for the
+  visual-only over-feedback, and Pointer/Touch/Keyboard sensors (D7/D8).
+  Authored additive; BoardView is rewired to consume it in F1.3.3.
