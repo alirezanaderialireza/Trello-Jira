@@ -20,6 +20,7 @@ import type { WsEvent } from "../../store/sync/syncContracts";
 import type { RealtimeMessage, RealtimeRequest } from "./types";
 import type { ConnectionEvent, ConnectionMetrics, ConnectionState } from "./connectionFsm";
 import { telemetry } from "@/lib/telemetry/logEvent";
+import { useNotificationStore } from "@/lib/notifications/notificationStore";
 
 class BoardSocketClient {
   private ws: WebSocket | null = null;
@@ -200,6 +201,31 @@ class BoardSocketClient {
   private handleMessage(event: MessageEvent): void {
     try {
       const message: RealtimeMessage = JSON.parse(event.data as string);
+
+      // ── Notification push (F1.2.9) ──────────────────────────────────────
+      // The ws-server delivers `{ type: "NOTIFICATION", payload }` on the
+      // user's connection (any board they're subscribed to). Update the
+      // shared notification store so the bell badge reacts live. This is
+      // not a board-sync EVENT, so it bypasses the FSM entirely.
+      if ((message as { type?: string }).type === "NOTIFICATION") {
+        const payload = (message as { payload?: Record<string, unknown> }).payload ?? {};
+        const id = typeof payload.notificationId === "string" ? payload.notificationId : null;
+        const store = useNotificationStore.getState();
+        store.incrementUnread();
+        if (id) {
+          store.prependNotification({
+            id,
+            type:      typeof payload.notifType === "string" ? payload.notifType : "",
+            title:     typeof payload.title === "string" ? payload.title : "اعلان جدید",
+            body:      typeof payload.body === "string" ? payload.body : null,
+            cardId:    typeof payload.cardId === "string" ? payload.cardId : null,
+            boardId:   typeof payload.boardId === "string" ? payload.boardId : null,
+            read:      false,
+            createdAt: typeof payload.createdAt === "string" ? payload.createdAt : new Date().toISOString(),
+          });
+        }
+        return;
+      }
 
       switch (message.type) {
         case "EVENT":

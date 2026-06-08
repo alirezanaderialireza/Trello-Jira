@@ -121,3 +121,12 @@ export {
   workspaceSoftDeletedHtml,
   workspaceSoftDeletedText,
 } from "./templates/workspace-soft-deleted";
+
+// ── Notification template (F1.2.9) ───────────────────────────────────────────
+
+export {
+  type NotificationEmailParams,
+  notificationSubject,
+  notificationHtml,
+  notificationText,
+} from "./templates/notification";

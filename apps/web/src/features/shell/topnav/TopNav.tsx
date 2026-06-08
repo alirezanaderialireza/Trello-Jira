@@ -95,7 +95,11 @@ export function TopNav({
       <div className="flex items-center gap-1">
         {user && (
           <NotificationsBell
-            initialCount={initialData?.pendingInvitationsCount ?? 0}
+            initialCount={
+              initialData?.totalUnreadCount ??
+              initialData?.pendingInvitationsCount ??
+              0
+            }
             userTimezone={user.timezone}
           />
         )}

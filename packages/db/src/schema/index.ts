@@ -22,3 +22,5 @@ export * from "./sessions";
 
 export * from "./cardAssignees";
 export * from "./attachments";
+export * from "./cardWatchers";
+export * from "./notifications";
