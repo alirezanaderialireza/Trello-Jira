@@ -1,13 +1,15 @@
 "use client";
 
-// apps/web/src/features/assignees/components/AssigneePicker.tsx
+// apps/web/src/features/board/components/card-detail/AssigneePicker.tsx
 //
 // Popover for toggling assignees on a card. Mirrors LabelPicker.
+// Lives in features/board (not features/assignees) so it can import
+// from features/board hooks/store without violating the cross-feature
+// boundaries linter rule.
 //
 // UX contract (D3, D8):
 //   • Lists all active board members.
-//   • Caller's own entry pinned to top with badge «(شما)» when not
-//     yet assigned.
+//   • Caller's own entry pinned to top with badge «(شما)» when not yet assigned.
 //   • Search: fa-IR fold on displayName + email.
 //   • Click row → toggle assign/unassign.
 //   • Per-row loading spinner during in-flight mutation.
@@ -18,23 +20,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Search, X } from "lucide-react";
 
-import { UserAvatar }                from "@/components/users/UserAvatar";
-import type { BoardMemberDto }       from "@/features/board/store/useBoardStore";
-import { useAddCardAssignee }        from "@/features/board/store/mutations/cards/useAddCardAssignee";
-import { useRemoveCardAssignee }     from "@/features/board/store/mutations/cards/useRemoveCardAssignee";
+import { UserAvatar }            from "@/components/users/UserAvatar";
+import type { BoardMemberDto }   from "@/lib/members/types";
+import { useAddCardAssignee }    from "../../store/mutations/cards/useAddCardAssignee";
+import { useRemoveCardAssignee } from "../../store/mutations/cards/useRemoveCardAssignee";
 
 interface Props {
-  cardId:              string;
-  boardId:             string;
-  currentUserId:       string;
-  currentAssigneeIds:  ReadonlySet<string>;
-  boardMembers:        Record<string, BoardMemberDto>;
+  cardId:             string;
+  boardId:            string;
+  currentUserId:      string;
+  currentAssigneeIds: ReadonlySet<string>;
+  boardMembers:       Record<string, BoardMemberDto>;
   /** "OWNER" | "ADMIN" | "MEMBER" — for locked-card gate. */
-  role:                string;
-  isCardLocked:        boolean;
-  onClose:             () => void;
-  /** Ref to the trigger button — restored on close. */
-  triggerRef?:         React.RefObject<HTMLButtonElement | null>;
+  role:               string;
+  isCardLocked:       boolean;
+  onClose:            () => void;
+  triggerRef?:        React.RefObject<HTMLButtonElement | null>;
 }
 
 export function AssigneePicker({
@@ -60,10 +61,8 @@ export function AssigneePicker({
 
   const isLocked = isCardLocked && role === "MEMBER";
 
-  // Focus search on mount.
   useEffect(() => { queueMicrotask(() => searchRef.current?.focus()); }, []);
 
-  // Outside click + Esc.
   useEffect(() => {
     function onMouse(e: MouseEvent) {
       if (!rootRef.current?.contains(e.target as Node)) onClose();
@@ -79,7 +78,6 @@ export function AssigneePicker({
     };
   }, [onClose]);
 
-  // Build sorted member list: current user first, then alphabetical.
   const sortedMembers = useMemo(() => {
     const list = Object.values(boardMembers);
     return [...list].sort((a, b) => {
@@ -89,7 +87,6 @@ export function AssigneePicker({
     });
   }, [boardMembers, currentUserId]);
 
-  // Apply search filter (fa-IR fold).
   const filtered = useMemo(() => {
     const q = query.trim().toLocaleLowerCase("fa-IR");
     if (!q) return sortedMembers;
@@ -99,7 +96,6 @@ export function AssigneePicker({
     );
   }, [sortedMembers, query]);
 
-  // Reset focus on filter change.
   useEffect(() => {
     if (focusedIndex >= filtered.length) setFocusedIndex(filtered.length - 1);
   }, [filtered.length, focusedIndex]);
@@ -122,7 +118,6 @@ export function AssigneePicker({
     if (isLocked || pendingId) return;
     setPendingId(userId);
     const correlationId = crypto.randomUUID();
-
     if (currentAssigneeIds.has(userId)) {
       removeAssignee.mutate(
         { cardId, boardId, assigneeId: userId, actorId: currentUserId, correlationId },
@@ -145,7 +140,6 @@ export function AssigneePicker({
       aria-label="انتخاب مسئول"
       className="flex flex-col rounded-xl border border-slate-700 bg-slate-800 shadow-2xl w-[calc(100vw-2rem)] max-w-xs md:w-72"
     >
-      {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-700 px-4 py-3">
         <h3 className="text-sm font-semibold text-slate-100">مسئولان</h3>
         <button
@@ -158,7 +152,6 @@ export function AssigneePicker({
         </button>
       </div>
 
-      {/* Search */}
       <div className="px-4 pt-3 pb-1">
         <div className="relative">
           <Search className="pointer-events-none absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" aria-hidden="true" />
@@ -177,14 +170,12 @@ export function AssigneePicker({
         </div>
       </div>
 
-      {/* Lock notice */}
       {isLocked && (
         <p className="mx-4 mb-1 rounded-md bg-amber-900/30 px-3 py-1.5 text-xs text-amber-400">
           کارت قفل است. فقط مدیر می‌تواند مسئول تغییر دهد.
         </p>
       )}
 
-      {/* Member list */}
       <ul
         role="listbox"
         aria-label="فهرست اعضای برد"
@@ -228,8 +219,6 @@ export function AssigneePicker({
                     </div>
                     <span className="text-[11px] text-slate-500 truncate">{member.email}</span>
                   </div>
-
-                  {/* Status indicator */}
                   <span
                     className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border ${
                       isAssigned

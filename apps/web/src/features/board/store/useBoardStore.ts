@@ -119,16 +119,11 @@ export type CommentDto = {
 /**
  * Phase 1.2 (F1.2.5) — board member cache for assignee display.
  * Populated at board hydration from v1.public.boardMembers.getMembers.
- * Used by AssigneePicker and AssigneeAvatarStack to resolve display
- * names + avatars without a per-card round-trip.
+ * Type is defined in lib/members/types.ts (shared) so that shared
+ * components (AssigneeAvatarStack, CardAssigneesBadge) can import it
+ * without violating the boundaries linter.
  */
-export type BoardMemberDto = {
-  userId:      string;
-  role:        string;  // "OWNER" | "ADMIN" | "MEMBER"
-  displayName: string;
-  avatarUrl:   string | null;
-  email:       string;
-};
+export type { BoardMemberDto } from "@/lib/members/types";
 
 export type AttachmentDto = {
   id: string;

@@ -7,7 +7,7 @@
 // Renders nothing when assigneeIds.length === 0.
 
 import { AssigneeAvatarStack } from "@/components/users/AssigneeAvatarStack";
-import type { BoardMemberDto } from "@/features/board/store/useBoardStore";
+import type { BoardMemberDto } from "@/lib/members/types";
 
 interface Props {
   assigneeIds: readonly string[];

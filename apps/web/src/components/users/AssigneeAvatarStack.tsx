@@ -15,7 +15,7 @@
 // in RTL layout). Each avatar stacks with negative margin-start.
 
 import { UserAvatar } from "./UserAvatar";
-import type { BoardMemberDto } from "@/features/board/store/useBoardStore";
+import type { BoardMemberDto } from "@/lib/members/types";
 
 interface Props {
   assigneeIds:  readonly string[];

@@ -21,7 +21,7 @@ import { useBoardStore }         from "../../store/useBoardStore";
 import { useAddCardAssignee }    from "../../store/mutations/cards/useAddCardAssignee";
 import { useRemoveCardAssignee } from "../../store/mutations/cards/useRemoveCardAssignee";
 import { UserAvatar }            from "@/components/users/UserAvatar";
-import { AssigneePicker }        from "@/features/assignees/components/AssigneePicker";
+import { AssigneePicker }        from "./AssigneePicker";
 
 interface Props {
   cardId:  string;
