@@ -8,11 +8,12 @@ import { listRouter } from "./routers/list";
 import { cardRouter } from "./routers/card";
 
 // 🃏 Card Features (Phase 4 — Rich Card)
-import { labelsRouter } from "./routers/card-features/labels.router";
-import { checklistsRouter } from "./routers/card-features/checklists.router";
-import { commentsRouter } from "./routers/card-features/comments.router";
-import { dueDateRouter } from "./routers/card-features/due-date.router";
-import { activityRouter } from "./routers/card-features/activity.router";
+import { labelsRouter }      from "./routers/card-features/labels.router";
+import { checklistsRouter }  from "./routers/card-features/checklists.router";
+import { commentsRouter }    from "./routers/card-features/comments.router";
+import { dueDateRouter }     from "./routers/card-features/due-date.router";
+import { activityRouter }    from "./routers/card-features/activity.router";
+import { attachmentsRouter } from "./routers/card-features/attachments.router";
 
 // 🏢 Workspaces
 import { workspacesRouter } from "./routers/workspaces/workspaces.router";
@@ -48,12 +49,12 @@ export const appRouter = router({
       boardMembers: boardMembersRouter,
       list: listRouter,
       card: cardRouter,
-      // 🃏 Rich Card Features
-      label: labelsRouter,
-      checklist: checklistsRouter,
-      comment: commentsRouter,
-      dueDate: dueDateRouter,
-      activity: activityRouter,
+      label:       labelsRouter,
+      checklist:   checklistsRouter,
+      comment:     commentsRouter,
+      dueDate:     dueDateRouter,
+      activity:    activityRouter,
+      attachment:  attachmentsRouter,
       // 🏢 Workspaces
       workspace: workspacesRouter,
       // 👤 User & Sidebar (F3b)
