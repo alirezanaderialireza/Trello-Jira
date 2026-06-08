@@ -46,3 +46,6 @@ export * from "./comments";
 
 // 1️⃣3️⃣ Assignees (Phase 1.2 — F1.2.5)
 export * from "./assignees";
+
+// 1️⃣4️⃣ Attachments (Phase 1.2 — F1.2.8)
+export * from "./attachments";
