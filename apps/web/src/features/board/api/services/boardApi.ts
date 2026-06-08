@@ -103,18 +103,29 @@ export const boardApi = {
     mutationId: string;
   }) => cardApi.unlock.mutateAsync(payload),
 
-  // ── assignees ─────────────────────────────────────────────────────────────
+  // ── assignees (Phase 1.2 — F1.2.5) ─────────────────────────────────────
+  // Fixes runtime crash: cardApi.addAssignee / removeAssignee never existed.
+  // Now routes to v1.public.cardAssignee.* with boardId + idempotencyKey.
   addCardAssignee: async (payload: {
-    cardId: string;
-    assigneeId: string;
-    mutationId: string;
-  }) => cardApi.addAssignee.mutateAsync(payload),
+    cardId:         string;
+    boardId:        string;
+    assigneeId:     string;
+    idempotencyKey: string;
+    correlationId?: string;
+  }) => (trpc as any).v1.public.cardAssignee.addAssignee.mutateAsync(payload),
 
   removeCardAssignee: async (payload: {
-    cardId: string;
-    assigneeId: string;
-    mutationId: string;
-  }) => cardApi.removeAssignee.mutateAsync(payload),
+    cardId:         string;
+    boardId:        string;
+    assigneeId:     string;
+    idempotencyKey: string;
+    correlationId?: string;
+  }) => (trpc as any).v1.public.cardAssignee.removeAssignee.mutateAsync(payload),
+
+  listCardAssignees: async (payload: {
+    boardId: string;
+    cardId:  string;
+  }) => (trpc as any).v1.public.cardAssignee.list.query(payload),
 
   // ── due date ──────────────────────────────────────────────────────────────
   // Phase 1.2 (F1.2.2) — replaces the F1.2.1-era stub which targeted a
