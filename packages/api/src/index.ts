@@ -14,6 +14,7 @@ import { commentsRouter } from "./routers/card-features/comments.router";
 import { dueDateRouter } from "./routers/card-features/due-date.router";
 import { activityRouter } from "./routers/card-features/activity.router";
 import { assigneesRouter } from "./routers/card-features/assignees.router";
+import { coverRouter }     from "./routers/card-features/cover.router";
 
 // 🏢 Workspaces
 import { workspacesRouter } from "./routers/workspaces/workspaces.router";
@@ -56,6 +57,7 @@ export const appRouter = router({
       dueDate: dueDateRouter,
       activity: activityRouter,
       cardAssignee: assigneesRouter,
+      cover:        coverRouter,
       // 🏢 Workspaces
       workspace: workspacesRouter,
       // 👤 User & Sidebar (F3b)
