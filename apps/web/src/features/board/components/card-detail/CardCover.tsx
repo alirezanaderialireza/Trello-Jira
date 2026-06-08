@@ -13,11 +13,9 @@ import { useSetCardCover }               from "../../store/mutations/cards/useSe
 import {
   COLOR_PRESETS,
   GRADIENT_PRESETS,
-} from "@/features/board-settings/lib/backgroundPresets";
-import {
   renderBackgroundCss,
   isBackgroundData,
-} from "@/features/board-settings/lib/applyBackground";
+} from "@/lib/background";
 
 interface Props {
   cardId:  string;

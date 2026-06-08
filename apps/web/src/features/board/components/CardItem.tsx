@@ -27,7 +27,7 @@ import { CardDueDateBadge }        from "@/components/cards/CardDueDateBadge";
 import { ChecklistProgressBadge }  from "@/components/cards/ChecklistProgressBadge";
 import { CardCommentsBadge }       from "@/components/cards/CardCommentsBadge";
 import { CardAssigneesBadge }      from "@/components/cards/CardAssigneesBadge";
-import { renderBackgroundCss, isBackgroundData } from "@/features/board-settings/lib/applyBackground";
+import { renderBackgroundCss, isBackgroundData } from "@/lib/background";
 
 // ============================================================================
 // 🧠 Types
