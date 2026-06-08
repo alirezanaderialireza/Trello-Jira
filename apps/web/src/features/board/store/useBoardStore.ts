@@ -173,6 +173,13 @@ export type ActivityEntry = {
   eventType: string;
   /** Shallow copy of the relevant event payload for display / audit. */
   payload: Record<string, unknown>;
+  /**
+   * Phase 1.2 (F1.2.6) — enrichment fields set by the server-side activity
+   * router (via SQL JOINs) and forwarded into the store on hydration.
+   * Optional so existing applyActivity code path stays backward-compatible.
+   */
+  actorName?:      string | null;
+  actorAvatar?:    string | null;
 };
 
 // ============================================================================
