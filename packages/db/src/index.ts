@@ -25,6 +25,7 @@ import { DrizzleLabelsRepository } from "./repositories/labels.repository";
 import { DrizzleChecklistsRepository } from "./repositories/checklists.repository";
 import { DrizzleCommentsRepository } from "./repositories/comments.repository";
 import { DrizzleCardAssigneesRepository } from "./repositories/cardAssignees.repository";
+import { DrizzleAttachmentsRepository } from "./repositories/attachments.repository";
 import { BoardReadModels } from "./projections/board.read-models";
 
 // ============================================================================
@@ -74,6 +75,7 @@ export const labelsRepo = new DrizzleLabelsRepository(db);
 export const checklistsRepo = new DrizzleChecklistsRepository(db);
 export const commentsRepo = new DrizzleCommentsRepository(db);
 export const cardAssigneesRepo = new DrizzleCardAssigneesRepository(db);
+export const attachmentsRepo = new DrizzleAttachmentsRepository(db);
 
 // ============================================================================
 // 🌟 4. Export Repository Classes (Type Usage)
@@ -93,6 +95,7 @@ export {
   DrizzleChecklistsRepository,
   DrizzleCommentsRepository,
   DrizzleCardAssigneesRepository,
+  DrizzleAttachmentsRepository,
   BoardReadModels,
 };
 

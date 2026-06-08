@@ -79,11 +79,16 @@ export const cards = pgTable(
     // =========================================================================
     // 🔹 Card Cover  (Phase 1.2 — F1.2.7)
     // =========================================================================
-    // Token-based cover data: { type: "color" | "gradient", id: string } | null.
+    // Token: { type: "color"|"gradient"|"image", id: string } | null.
     // Resolved to CSS via renderBackgroundCss() in the UI layer.
-    // Uses the same BackgroundData shape as board backgrounds.
-    // Image covers are reserved for F1.2.8 (Attachments).
+    // Image covers are from F1.2.8 Attachments.
     coverData: jsonb("cover_data"),
+
+    // =========================================================================
+    // 🔹 Attachment count  (Phase 1.2 — F1.2.8)
+    // =========================================================================
+    // Denormalised — kept in sync by migration 0011's trigger.
+    attachmentCount: integer("attachment_count").notNull().default(0),
 
     // =========================================================================
     // 🔹 Lifecycle

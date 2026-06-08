@@ -8,6 +8,16 @@ const nextConfig = {
     "@repo/infrastructure",
   ],
 
+  // ── Server-only packages that must NOT be bundled ─────────────────────────
+  // @aws-sdk/* packages are dynamically imported at runtime only
+  // (in packages/api/src/routers/card-features/attachments.router.ts).
+  // Marking them external prevents Turbopack from trying to bundle them
+  // at build time when they're not installed.
+  serverExternalPackages: [
+    "@aws-sdk/client-s3",
+    "@aws-sdk/s3-request-presigner",
+  ],
+
   // ─── Type-check during build is intentionally disabled ────────────────────
   //
   // CI runs `pnpm turbo build --filter=web` to validate that Next.js can
