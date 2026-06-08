@@ -352,22 +352,23 @@ export const boardApi = {
   },
 
   // ============================================================================
-  // 6.  Attachments  (not on the versioned router yet — kept as untyped escape hatch)
+  // 6.  Attachments  (Phase 1.2 — F1.2.8)
   // ============================================================================
-
-  addAttachment: async (payload: {
-    cardId: string;
-    url: string;
-    mimeType: string;
-    fileName: string;
-    sizeBytes: number;
-    mutationId: string;
-  }) => (trpc as any).attachment.add.mutateAsync(payload),
+  // Fixes runtime crash: previous methods called (trpc as any).attachment.add /
+  // .remove which never existed. Now routes to v1.public.attachment.*.
 
   removeAttachment: async (payload: {
-    attachmentId: string;
-    mutationId: string;
-  }) => (trpc as any).attachment.remove.mutateAsync(payload),
+    attachmentId:   string;
+    boardId:        string;
+    cardId:         string;
+    idempotencyKey: string;
+    correlationId?: string;
+  }) => (trpc as any).v1.public.attachment.remove.mutateAsync(payload),
+
+  listAttachments: async (payload: {
+    boardId: string;
+    cardId:  string;
+  }) => (trpc as any).v1.public.attachment.list.query(payload),
 
   // ============================================================================
   // 7.  Templates  (not on the versioned router yet — kept as untyped escape hatch)

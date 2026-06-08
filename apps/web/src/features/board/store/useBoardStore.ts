@@ -44,6 +44,10 @@ export type CardDto = {
    */
   dueDate?: string | null;
   locked?: boolean;
+  /** Phase 1.2 (F1.2.7) — Card Cover token. */
+  coverData?: { type: string; id: string; url?: string } | null;
+  /** Phase 1.2 (F1.2.8) — denormalised from DB trigger. */
+  attachmentCount?: number;
 };
 
 export type ListDto = {
@@ -117,17 +121,24 @@ export type CommentDto = {
 };
 
 export type AttachmentDto = {
-  id: string;
-  cardId: string;
-  boardId: string;
-  url: string;
-  mimeType: string;
-  fileName: string;
-  sizeBytes: number;
+  id:         string;
+  cardId:     string;
+  boardId:    string;
+  /** Phase 1.2 (F1.2.8) — "file" | "link" */
+  type:       string;
+  url:        string;
+  objectKey?: string | null;
+  mimeType:   string;
+  fileName:   string;
+  sizeBytes:  number;
+  title?:     string | null;
   uploadedBy: string;
-  createdAt: string;
+  createdAt:  string;
   isOptimistic?: boolean;
 };
+
+/** Phase 1.2 (F1.2.8) — attachment count badge on CardItem preview. */
+// attachmentCount is stored on CardDto (from cards.attachment_count trigger).
 
 export type TemplateDto = {
   id: string;
