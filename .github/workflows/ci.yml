@@ -48,6 +48,13 @@ jobs:
           DATABASE_URL: postgresql://trello:ci@localhost:5432/trello_test
           REDIS_URL: redis://localhost:6379
           JWT_SECRET: ci-secret
+      # Infrastructure tests — F1.2.9 notification text builder (pure unit).
+      - name: Infrastructure tests
+        run: pnpm --filter @repo/infrastructure test
+        env:
+          DATABASE_URL: postgresql://trello:ci@localhost:5432/trello_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: ci-secret
       - name: Date engine tests
         run: pnpm --filter web exec npx vitest run src/lib/date.test.ts
         env:
