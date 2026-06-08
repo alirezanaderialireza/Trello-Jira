@@ -2,18 +2,19 @@
 
 // apps/web/src/features/board/components/card-detail/CardDetailModal.tsx
 //
-// Phase 1.2 (F1.2.4.b) — tab labels now in Persian; comment count shown
-// on the «گفت‌وگو» tab; CardComments receives role prop.
+// Phase 1.2 (F1.2.8) — CardAttachments added to details tab.
+// Tab labels are Persian; comment + attachment counts shown as badges.
 
-import { useCardModal }   from "../../hooks/useCardModal";
-import { useBoardStore }  from "../../store/useBoardStore";
-import { CardLabels }     from "./CardLabels";
-import { CardChecklists } from "./CardChecklists";
-import { CardComments }   from "./CardComments";
-import { CardDueDate }    from "./CardDueDate";
-import { CardActivity }   from "./CardActivity";
-import { CardAssignees }  from "./CardAssignees";
-import { CardCover }      from "./CardCover";
+import { useCardModal }    from "../../hooks/useCardModal";
+import { useBoardStore }   from "../../store/useBoardStore";
+import { CardLabels }      from "./CardLabels";
+import { CardChecklists }  from "./CardChecklists";
+import { CardComments }    from "./CardComments";
+import { CardDueDate }     from "./CardDueDate";
+import { CardActivity }    from "./CardActivity";
+import { CardAssignees }   from "./CardAssignees";
+import { CardCover }       from "./CardCover";
+import { CardAttachments } from "./CardAttachments";
 import { useMemo, useState } from "react";
 
 type Tab = "details" | "comments" | "activity";
@@ -24,9 +25,10 @@ const TAB_LABELS: Record<Tab, string> = {
   activity: "فعالیت",
 };
 
-// Atomic selector for comment count on this card
-const makeSelectCommentCount = (cardId: string) => (s: any): number =>
+const makeSelectCommentCount    = (cardId: string) => (s: any): number =>
   (s.commentsByCard[cardId] ?? []).length;
+const makeSelectAttachmentCount = (cardId: string) => (s: any): number =>
+  s.cards[cardId]?.attachmentCount ?? 0;
 
 export function CardDetailModal() {
   const { cardId, close } = useCardModal();
@@ -35,6 +37,10 @@ export function CardDetailModal() {
 
   const commentCount = useBoardStore(
     useMemo(() => makeSelectCommentCount(cardId ?? ""), [cardId]),
+  ) as number;
+
+  const attachmentCount = useBoardStore(
+    useMemo(() => makeSelectAttachmentCount(cardId ?? ""), [cardId]),
   ) as number;
 
   if (!cardId || !card) return null;
@@ -77,6 +83,11 @@ export function CardDetailModal() {
                   {commentCount.toLocaleString("fa-IR")}
                 </span>
               ) : null}
+              {tab === "details" && attachmentCount > 0 ? (
+                <span className="rounded-full bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-400 tabular-nums leading-none">
+                  {attachmentCount.toLocaleString("fa-IR")}🔗
+                </span>
+              ) : null}
             </button>
           ))}
         </div>
@@ -109,6 +120,9 @@ export function CardDetailModal() {
 
               {/* Checklists */}
               <CardChecklists cardId={cardId} boardId={card.boardId} />
+
+              {/* Attachments (Phase 1.2 — F1.2.8) */}
+              <CardAttachments cardId={cardId} boardId={card.boardId} />
             </div>
           )}
 
@@ -117,7 +131,7 @@ export function CardDetailModal() {
           )}
 
           {activeTab === "activity" && (
-            <CardActivity cardId={cardId} />
+            <CardActivity cardId={cardId} boardId={card.boardId} />
           )}
         </div>
       </div>

@@ -24,6 +24,7 @@ import { isActionFailure } from "../actions/responseTypes";
 
 import { getTokenStyle }           from "@/lib/labels/tokenColorMap";
 import { CardDueDateBadge }        from "@/components/cards/CardDueDateBadge";
+import { AttachmentCountBadge }    from "@/components/cards/AttachmentCountBadge";
 import { ChecklistProgressBadge }  from "@/components/cards/ChecklistProgressBadge";
 import { CardCommentsBadge }       from "@/components/cards/CardCommentsBadge";
 import { CardAssigneesBadge }      from "@/components/cards/CardAssigneesBadge";
@@ -207,12 +208,21 @@ export const CardItem = memo(function CardItem({
   const cardAssigneeIds = useBoardStore(selectCardAssigneeIds) as string[];
   const boardMembers    = useBoardStore(selectBoardMembers);
 
-  // ── Cover (Phase 1.2 — F1.2.7) ─────────────────────────────────────────
-  const selectCardCoverData = useMemo(
-    () => makeSelectCardCoverData(cardId),
-    [cardId],
-  );
-  const coverData = useBoardStore(selectCardCoverData) as { type: string; id: string } | null;
+  // ── Attachment count (Phase 1.2 — F1.2.8) ──────────────────────────────
+  const attachmentCount = useBoardStore(
+    useMemo(
+      () => (s: any): number => s.cards[cardId]?.attachmentCount ?? 0,
+      [cardId],
+    ),
+  ) as number;
+
+  // ── Cover (Phase 1.2 — F1.2.7/F1.2.8) ─────────────────────────────────
+  const coverData = useBoardStore(
+    useMemo(
+      () => (s: any) => s.cards[cardId]?.coverData ?? null,
+      [cardId],
+    ),
+  ) as { type: string; id: string; url?: string } | null;
 
   const updateCardStore = useBoardStore(
     (s) => s.updateCard
@@ -565,6 +575,7 @@ export const CardItem = memo(function CardItem({
         hover:ring-blue-400
         transition-all
         overflow-hidden
+        ${coverData ? "pt-12" : ""}
         ${
           isDragging
             ? "opacity-50 rotate-3 scale-105 will-change-transform"
@@ -575,9 +586,25 @@ export const CardItem = memo(function CardItem({
             ? "ring-2 ring-blue-500 border-blue-500 z-10"
             : ""
         }
-        ${isBackgroundData(coverData) ? "pt-12" : ""}
       `}
     >
+      {/* Cover strip (Phase 1.2 — F1.2.7/F1.2.8) */}
+      {coverData ? (
+        <div
+          className="absolute inset-x-0 top-0 h-10 rounded-t-lg"
+          aria-hidden="true"
+          style={
+            coverData.type === "image" && coverData.url
+              ? {
+                  backgroundImage:    `url(${coverData.url})`,
+                  backgroundSize:     "cover",
+                  backgroundPosition: "center",
+                }
+              : undefined
+          }
+        />
+      ) : null}
+
       {/* ================================================================== */}
       {/* Cover Strip (Phase 1.2 — F1.2.7) */}
       {/* ================================================================== */}
@@ -658,6 +685,13 @@ export const CardItem = memo(function CardItem({
       {commentCount > 0 ? (
         <div className="mb-2">
           <CardCommentsBadge count={commentCount} />
+        </div>
+      ) : null}
+
+      {/* Attachments Badge (Phase 1.2 — F1.2.8) */}
+      {attachmentCount > 0 ? (
+        <div className="mb-2">
+          <AttachmentCountBadge count={attachmentCount} />
         </div>
       ) : null}
 
