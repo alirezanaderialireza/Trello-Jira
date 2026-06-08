@@ -27,6 +27,7 @@ import { CardDueDateBadge }        from "@/components/cards/CardDueDateBadge";
 import { ChecklistProgressBadge }  from "@/components/cards/ChecklistProgressBadge";
 import { CardCommentsBadge }       from "@/components/cards/CardCommentsBadge";
 import { CardAssigneesBadge }      from "@/components/cards/CardAssigneesBadge";
+import { renderBackgroundCss, isBackgroundData } from "@/features/board-settings/lib/applyBackground";
 
 // ============================================================================
 // 🧠 Types
@@ -205,6 +206,13 @@ export const CardItem = memo(function CardItem({
   );
   const cardAssigneeIds = useBoardStore(selectCardAssigneeIds) as string[];
   const boardMembers    = useBoardStore(selectBoardMembers);
+
+  // ── Cover (Phase 1.2 — F1.2.7) ─────────────────────────────────────────
+  const selectCardCoverData = useMemo(
+    () => makeSelectCardCoverData(cardId),
+    [cardId],
+  );
+  const coverData = useBoardStore(selectCardCoverData) as { type: string; id: string } | null;
 
   const updateCardStore = useBoardStore(
     (s) => s.updateCard
@@ -556,6 +564,7 @@ export const CardItem = memo(function CardItem({
         hover:ring-1
         hover:ring-blue-400
         transition-all
+        overflow-hidden
         ${
           isDragging
             ? "opacity-50 rotate-3 scale-105 will-change-transform"
@@ -566,8 +575,20 @@ export const CardItem = memo(function CardItem({
             ? "ring-2 ring-blue-500 border-blue-500 z-10"
             : ""
         }
+        ${isBackgroundData(coverData) ? "pt-12" : ""}
       `}
     >
+      {/* ================================================================== */}
+      {/* Cover Strip (Phase 1.2 — F1.2.7) */}
+      {/* ================================================================== */}
+
+      {isBackgroundData(coverData) ? (
+        <div
+          className="absolute inset-x-0 top-0 h-10 rounded-t-lg"
+          style={{ background: renderBackgroundCss(coverData) }}
+          aria-hidden="true"
+        />
+      ) : null}
       {/* ================================================================== */}
       {/* Labels (top-3 visible + +N overflow per D5) */}
       {/* ================================================================== */}

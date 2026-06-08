@@ -13,6 +13,7 @@ import { CardComments }   from "./CardComments";
 import { CardDueDate }    from "./CardDueDate";
 import { CardActivity }   from "./CardActivity";
 import { CardAssignees }  from "./CardAssignees";
+import { CardCover }      from "./CardCover";
 import { useMemo, useState } from "react";
 
 type Tab = "details" | "comments" | "activity";
@@ -93,6 +94,9 @@ export function CardDetailModal() {
                   {card.description || "توضیحاتی ثبت نشده است."}
                 </p>
               </div>
+
+              {/* Cover */}
+              <CardCover cardId={cardId} boardId={card.boardId} />
 
               {/* Due Date */}
               <CardDueDate cardId={cardId} boardId={card.boardId} />
