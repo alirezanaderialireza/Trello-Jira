@@ -12,6 +12,7 @@ import { CardChecklists } from "./CardChecklists";
 import { CardComments }   from "./CardComments";
 import { CardDueDate }    from "./CardDueDate";
 import { CardActivity }   from "./CardActivity";
+import { CardAssignees }  from "./CardAssignees";
 import { useMemo, useState } from "react";
 
 type Tab = "details" | "comments" | "activity";
@@ -95,6 +96,9 @@ export function CardDetailModal() {
 
               {/* Due Date */}
               <CardDueDate cardId={cardId} boardId={card.boardId} />
+
+              {/* Assignees */}
+              <CardAssignees cardId={cardId} boardId={card.boardId} role={undefined} />
 
               {/* Labels */}
               <CardLabels cardId={cardId} boardId={card.boardId} />
