@@ -10,15 +10,13 @@
 //   skip whatever they happen to break.
 //
 // Selector strategy:
-//   The (auth) pages predate F4 and use plain <label> elements
-//   without `htmlFor`, so Playwright's `getByLabel` doesn't bind
-//   to them. We use stable structural selectors instead:
-//     • `input[type="email"]`     — there is only one per page
-//     • `input[type="password"]`  — same
-//     • `getByRole("button", ...) — submit button by Persian name
-//   This keeps the spec resilient to copy tweaks while not
-//   depending on classnames that change between Tailwind-version
-//   bumps.
+//   After F1.4.5 every (auth) input has a unique `id` + a matching
+//   `<label htmlFor>`, so Playwright's `getByLabel` binds correctly.
+//   We target inputs by their Persian label and the submit button by
+//   role + Persian name.
+//   NOTE: on /signup, the label "رمز عبور" is a substring of
+//   "تکرار رمز عبور", so both password fields use { exact: true } to
+//   stay unambiguous under Playwright strict mode.
 
 import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
@@ -57,18 +55,19 @@ export interface SignInParams {
  *   driving the login UI like a real user.
  *
  * Selector strategy:
- *   The signup form's inputs have stable `name` attributes. We
- *   target by `name` rather than `type=password` because the form
- *   has TWO password fields (password + confirm), and Playwright's
- *   strict locator mode would refuse to fill an ambiguous match.
+ *   After F1.4.5 the signup inputs have `id` + `<label htmlFor>` AND
+ *   stable `name` attributes. We use getByLabel (Persian labels).
+ *   The form has TWO password fields whose labels are "رمز عبور" and
+ *   "تکرار رمز عبور" — since the former is a substring of the latter,
+ *   both use { exact: true } so Playwright strict mode picks exactly one.
  */
 export async function signUp(page: Page, params: SignupParams): Promise<void> {
   await page.goto("/signup");
-  await page.locator('input[name="displayName"]').fill(params.displayName);
-  await page.locator('input[name="email"]').fill(params.email);
-  await page.locator('input[name="password"]').fill(params.password);
-  await page.locator('input[name="confirmPassword"]').fill(params.password);
-  await page.getByRole("button", { name: /ثبت‌نام|signup|sign up/i }).click();
+  await page.getByLabel("نام نمایشی").fill(params.displayName);
+  await page.getByLabel("ایمیل", { exact: true }).fill(params.email);
+  await page.getByLabel("رمز عبور", { exact: true }).fill(params.password);
+  await page.getByLabel("تکرار رمز عبور", { exact: true }).fill(params.password);
+  await page.getByRole("button", { name: /ثبت‌نام/ }).click();
 
   // Wait for the inline success card. The page has BOTH an h1 and a
   // descriptive paragraph that contain Persian text matching the
@@ -100,9 +99,11 @@ export async function signUp(page: Page, params: SignupParams): Promise<void> {
  */
 export async function signIn(page: Page, params: SignInParams): Promise<void> {
   await page.goto("/login");
-  await page.locator('input[type="email"]').fill(params.email);
-  await page.locator('input[type="password"]').fill(params.password);
-  await page.getByRole("button", { name: /ورود|login|sign in/i }).click();
+  // (auth) pages now have htmlFor + id (F1.4.5), so getByLabel binds.
+  // Login labels "ایمیل" / "رمز عبور" are each unique on this page.
+  await page.getByLabel("ایمیل", { exact: true }).fill(params.email);
+  await page.getByLabel("رمز عبور", { exact: true }).fill(params.password);
+  await page.getByRole("button", { name: /ورود/ }).click();
   await expect(page).toHaveURL(/\/workspaces|\/invitations\//, { timeout: 15_000 });
 }
 
