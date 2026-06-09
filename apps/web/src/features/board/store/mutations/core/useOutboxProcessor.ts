@@ -28,8 +28,8 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { boardRealtimeClient } from "../../api/realtime/boardRealtimeClient";
-import type { DeadLetterEntry } from "../../api/realtime/outboxProcessor";
+import { boardRealtimeClient } from "../../../api/realtime/boardRealtimeClient";
+import type { DeadLetterEntry } from "../../../api/realtime/outboxProcessor";
 
 // ============================================================================
 // ⚙️ Config

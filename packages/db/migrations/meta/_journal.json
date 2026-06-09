@@ -120,6 +120,13 @@
       "when": 1779384000000,
       "tag": "0016_outbox_activity_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1779385000000,
+      "tag": "0017_outbox_tenant_rls",
+      "breakpoints": true
     }
   ]
 }

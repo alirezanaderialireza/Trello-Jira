@@ -30,7 +30,7 @@ export function useSetCardCover() {
     mutationFn: async (vars: SetCardCoverVars) => {
       // Defensive: if the cover router isn't mounted yet (pre-F1.2.7 merge)
       // the call will fail with a 404/trpc-error. We catch and surface a toast.
-      const { trpc } = await import("../../../../utils/trpc");
+      const { trpc } = await import("../../../../../utils/trpc");
       return (trpc as any).v1.public.cover.setCover.mutateAsync({
         cardId:         vars.cardId,
         boardId:        vars.boardId,

@@ -3,12 +3,12 @@
 // The single "glue" hook that wires everything together.
 //
 // Responsibilities:
-//   1. Mounts the SyncStateMachine effect handler
-//   2. Routes FSM effects → boardSocketClient / projectionRebuildTooling
-//   3. Mirrors FSM SyncState back into useBoardStore.syncStatus (so UI works)
-//   4. Handles full resync: wipe → fetch → replay → apply
+//   1. Registers the SyncStateMachine effect runner (via setSyncEffectRunner)
+//   2. Routes FSM effects → boardSocketClient / projectionRebuildTooling / timers
+//   3. Mirrors FSM status into useBoardStore.syncStatus (UPDATE_STORE_STATUS)
+//   4. Handles full resync / replay: wipe → fetch → replay → apply
 //   5. Coordinates MutationLifecycleManager with store's restoreSnapshot
-//   6. Provides public API: triggerManualReconnect()
+//   6. Provides public API: triggerManualReconnect() / triggerFullResync()
 //
 // Usage (mount once per board, inside BoardView or a parent layout):
 //   useSyncOrchestrator({ boardId, authToken, fetchJournal })
@@ -18,7 +18,7 @@
 
 import { useEffect, useCallback, useRef } from "react";
 import { useBoardStore } from "../useBoardStore";
-import { getSyncFSM, resetSyncFSM } from "./syncFSMSingleton";
+import { getSyncFSM, resetSyncFSM, setSyncEffectRunner } from "./syncFSMSingleton";
 import {
   getMutationLifecycleManager,
   resetMutationLifecycleManager,
@@ -67,41 +67,129 @@ export function useSyncOrchestrator(
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const isResyncingRef = useRef(false);
+  const gapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ──────────────────────────────────────────────────────────────────────────
-  // Effect handler: translates FSM effects into concrete side effects
+  // Shared full-resync / replay routine (wipe → fetch → replay → apply)
+  // ──────────────────────────────────────────────────────────────────────────
+  const runFullResync = useCallback(async () => {
+    const fsm = getSyncFSM();
+
+    if (isResyncingRef.current) return;
+    if (!fetchJournal) {
+      console.warn("[SyncOrchestrator] No fetchJournal — cannot resync");
+      return;
+    }
+
+    isResyncingRef.current = true;
+
+    // Cancel any previous resync
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+
+    try {
+      const liveState = useBoardStore.getState();
+      const result = await rebuildProjection(liveState, {
+        boardId,
+        tenantId: "", // tenantId from session — not available here; omit
+        fetchJournal,
+        snapshotInterval: 100,
+        enableLog: process.env.NODE_ENV === "development",
+        abortSignal: abortControllerRef.current.signal,
+        onProgress: (progress) => {
+          if (process.env.NODE_ENV === "development") {
+            console.log(
+              `[SyncOrchestrator] Resync ${progress.phase} ${progress.percent}%: ${progress.message}`,
+            );
+          }
+        },
+      });
+
+      if (result.success && result.state) {
+        useBoardStore.setState({
+          lists: result.state.lists,
+          cards: result.state.cards,
+          cardsByList: result.state.cardsByList,
+          listOrder: result.state.listOrder,
+          boardSequence: result.state.boardSequence,
+          bufferedEvents: {},
+          pendingMutations: {},
+          syncStatus: "synced",
+        });
+
+        fsm.send({
+          type: "REPLAY_COMPLETE",
+          finalSequence: result.state.boardSequence,
+        });
+      } else {
+        console.error("[SyncOrchestrator] Rebuild failed:", result.error);
+        fsm.send({
+          type: "REPLAY_FAILED",
+          reason: result.error ?? "rebuild_failed",
+        });
+      }
+    } catch (err: unknown) {
+      if ((err as { name?: string })?.name !== "AbortError") {
+        console.error("[SyncOrchestrator] Resync error:", err);
+        fsm.send({ type: "REPLAY_FAILED", reason: "resync_threw" });
+      }
+    } finally {
+      isResyncingRef.current = false;
+    }
+  }, [boardId, fetchJournal]);
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Effect runner: translates FSM effects into concrete side effects.
+  //
+  // Effects emitted by the FSM (see syncStateMachine.ts → SyncEffect):
+  //   UPDATE_STORE_STATUS, START_GAP_TIMER, CANCEL_GAP_TIMER, REQUEST_CATCH_UP,
+  //   START_REPLAY, SCHEDULE_RECONNECT, CANCEL_RECONNECT, TRIGGER_FULL_RESYNC,
+  //   LOG
   // ──────────────────────────────────────────────────────────────────────────
   const handleEffect = useCallback(
-    async (effect: SyncEffect) => {
+    (effect: SyncEffect) => {
       const fsm = getSyncFSM();
       const store = useBoardStore.getState();
 
       switch (effect.type) {
-        // ── Connect WebSocket ────────────────────────────────────────────
-        case "CONNECT_WS": {
-          boardSocket.doConnect(effect.boardId, effect.lastSequence);
+        // ── Mirror FSM status into the store (single source of truth for UI) ──
+        case "UPDATE_STORE_STATUS": {
+          useBoardStore.setState({ syncStatus: effect.status });
           break;
         }
 
-        // ── Disconnect WebSocket ─────────────────────────────────────────
-        case "DISCONNECT_WS": {
-          boardSocket.disconnect();
+        // ── Gap timer: declare the gap unrecoverable after timeoutMs ──────────
+        case "START_GAP_TIMER": {
+          if (gapTimerRef.current) clearTimeout(gapTimerRef.current);
+          gapTimerRef.current = setTimeout(() => {
+            gapTimerRef.current = null;
+            getSyncFSM().send({ type: "GAP_TIMEOUT" });
+          }, effect.timeoutMs);
           break;
         }
 
-        // ── Pull missed events (gap recovery) ────────────────────────────
-        case "PULL_MISSED_EVENTS": {
-          if (!fetchJournal) break;
+        case "CANCEL_GAP_TIMER": {
+          if (gapTimerRef.current) {
+            clearTimeout(gapTimerRef.current);
+            gapTimerRef.current = null;
+          }
+          break;
+        }
 
-          try {
-            const page = await fetchJournal({
-              boardId: effect.boardId,
-              fromSequence: effect.fromSequence,
-              limit: 200,
-            });
-
-            if (page.events.length > 0) {
-              // Apply missed events through the normal reconcile path
+        // ── Pull missed events to fill a sequence gap ─────────────────────────
+        case "REQUEST_CATCH_UP": {
+          if (!fetchJournal) {
+            fsm.send({ type: "RESYNC_REQUIRED" });
+            break;
+          }
+          void (async () => {
+            try {
+              const page = await fetchJournal({
+                boardId,
+                fromSequence: effect.fromSequence,
+                limit: 200,
+              });
               for (const entry of page.events) {
                 store.applyWebsocketEvent({
                   sequence: entry.sequence,
@@ -109,134 +197,63 @@ export function useSyncOrchestrator(
                   payload: entry.payload,
                 });
               }
+              fsm.send({ type: "GAP_FILLED" });
+            } catch (err) {
+              console.error("[SyncOrchestrator] Catch-up failed:", err);
+              fsm.send({ type: "RESYNC_REQUIRED" });
             }
-
-            fsm.send({ type: "GAP_FILLED" });
-          } catch (err: any) {
-            console.error("[SyncOrchestrator] Pull missed events failed:", err);
-            fsm.send({ type: "RESYNC_REQUIRED" });
-          }
+          })();
           break;
         }
 
-        // ── Full resync: wipe → fetch → replay → apply ───────────────────
-        case "REQUEST_FULL_RESYNC": {
-          if (isResyncingRef.current) break;
-          if (!fetchJournal) {
-            console.warn("[SyncOrchestrator] No fetchJournal — cannot resync");
-            break;
-          }
-
-          isResyncingRef.current = true;
-
-          // Cancel any previous resync
-          abortControllerRef.current?.abort();
-          abortControllerRef.current = new AbortController();
-
-          try {
-            const liveState = useBoardStore.getState();
-            const result = await rebuildProjection(liveState, {
-              boardId: effect.boardId,
-              tenantId: "", // tenantId from session — not available here; omit
-              fetchJournal,
-              snapshotInterval: 100,
-              enableLog: process.env.NODE_ENV === "development",
-              abortSignal: abortControllerRef.current.signal,
-              onProgress: (progress) => {
-                if (process.env.NODE_ENV === "development") {
-                  console.log(
-                    `[SyncOrchestrator] Resync ${progress.phase} ${progress.percent}%: ${progress.message}`,
-                  );
-                }
-              },
-            });
-
-            if (result.success && result.state) {
-              // Apply rebuilt state to store
-              useBoardStore.setState({
-                lists: result.state.lists,
-                cards: result.state.cards,
-                cardsByList: result.state.cardsByList,
-                listOrder: result.state.listOrder,
-                boardSequence: result.state.boardSequence,
-                bufferedEvents: {},
-                pendingMutations: {},
-                syncStatus: "synced",
-              });
-
-              fsm.send({
-                type: "REPLAY_COMPLETE",
-                finalSequence: result.state.boardSequence,
-              });
-            } else {
-              console.error("[SyncOrchestrator] Rebuild failed:", result.error);
-              fsm.send({
-                type: "REPLAY_FAILED",
-                reason: result.error ?? "rebuild_failed",
-              });
-            }
-          } catch (err: any) {
-            if (err?.name !== "AbortError") {
-              console.error("[SyncOrchestrator] Resync error:", err);
-            }
-          } finally {
-            isResyncingRef.current = false;
-          }
+        // ── Incremental replay (gap timed out) ───────────────────────────────
+        case "START_REPLAY": {
+          void runFullResync();
           break;
         }
 
-        // ── Schedule reconnect ───────────────────────────────────────────
+        // ── Full resync (unrecoverable desync) ───────────────────────────────
+        case "TRIGGER_FULL_RESYNC": {
+          void runFullResync();
+          break;
+        }
+
+        // ── Schedule a reconnect attempt with backoff ─────────────────────────
         case "SCHEDULE_RECONNECT": {
-          // boardSocketClient schedules its own reconnect internally.
-          // FSM just records the attempt count via RECONNECT_ATTEMPT.
+          if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = setTimeout(() => {
+            reconnectTimerRef.current = null;
+            const seq = useBoardStore.getState().boardSequence;
+            boardSocket.doConnect(boardId, seq);
+            getSyncFSM().send({ type: "RECONNECT_ATTEMPT", attempt: effect.attempt });
+          }, effect.delayMs);
           break;
         }
 
-        // ── Notify user offline ──────────────────────────────────────────
-        case "NOTIFY_USER_OFFLINE": {
-          // Update store status so UI can show offline banner
-          useBoardStore.setState({ syncStatus: "offline" });
+        case "CANCEL_RECONNECT": {
+          if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
+          }
           break;
         }
 
-        // ── Log ──────────────────────────────────────────────────────────
+        // ── Structured log ────────────────────────────────────────────────────
         case "LOG": {
           if (process.env.NODE_ENV === "development") {
-            const method = effect.level === "error"
-              ? console.error
-              : effect.level === "warn"
-              ? console.warn
-              : console.log;
-            method(`[SyncFSM] ${effect.message}`, effect.data ?? "");
+            console.log(`[SyncFSM] ${effect.action}`, effect.data ?? {});
           }
-          break;
-        }
-
-        // ── BroadcastChannel tab state ───────────────────────────────────
-        case "BROADCAST_TAB_STATE": {
-          // Handled inside SyncStateMachine class directly
           break;
         }
       }
     },
-    [boardId, fetchJournal],
-  );
-
-  // ──────────────────────────────────────────────────────────────────────────
-  // Mirror FSM state → store syncStatus
-  // ──────────────────────────────────────────────────────────────────────────
-  const handleStateChange = useCallback(
-    (fsmState: import("./syncStateMachine").SyncState) => {
-      useBoardStore.setState({ syncStatus: fsmState });
-    },
-    [],
+    [boardId, fetchJournal, runFullResync],
   );
 
   // ──────────────────────────────────────────────────────────────────────────
   // Mount / Unmount
   // ──────────────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const fsm = getSyncFSM();
     const mlm = getMutationLifecycleManager();
 
     // Wire rollback callback
@@ -244,36 +261,34 @@ export function useSyncOrchestrator(
       useBoardStore.getState().restoreSnapshot(snapshot);
     });
 
-    // Wire FSM effect handler
-    fsm.onEffect(handleEffect);
+    // Register the FSM effect runner.
+    setSyncEffectRunner(handleEffect);
 
-    // Subscribe to state changes for store mirroring
-    const unsubscribeFSM = fsm.subscribe((state, _ctx, _event) => {
-      handleStateChange(state);
-    });
-
-    // Start the board session
+    // Start the board session (sends CONNECT_REQUESTED through the FSM).
     boardSocket.connect(boardId, authToken);
 
     return () => {
-      // Cleanup on unmount (board unload)
-      unsubscribeFSM();
+      // Cleanup on unmount (board unload / board change).
+      setSyncEffectRunner(null);
       boardSocket.disconnect();
       abortControllerRef.current?.abort();
+      if (gapTimerRef.current) clearTimeout(gapTimerRef.current);
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      gapTimerRef.current = null;
+      reconnectTimerRef.current = null;
       resetMutationLifecycleManager();
       resetSyncFSM();
     };
-  }, [boardId, authToken, handleEffect, handleStateChange]);
+  }, [boardId, authToken, handleEffect]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // Public API
   // ──────────────────────────────────────────────────────────────────────────
   const triggerManualReconnect = useCallback(() => {
-    // The new SyncStateMachine has no dedicated MANUAL_RECONNECT message —
-    // a manual user retry is the same shape as the auto-reconnect loop's
-    // first attempt, so we send RECONNECT_ATTEMPT with attempt=0. The FSM
-    // will route it through the reconnect path and trigger the
-    // SCHEDULE_RECONNECT effect.
+    // The SyncStateMachine has no dedicated MANUAL_RECONNECT message — a manual
+    // user retry is the same shape as the auto-reconnect loop's first attempt,
+    // so we send RECONNECT_ATTEMPT with attempt=0. The FSM routes it through the
+    // reconnect path and emits the SCHEDULE_RECONNECT effect.
     getSyncFSM().send({ type: "RECONNECT_ATTEMPT", attempt: 0 });
   }, []);
 

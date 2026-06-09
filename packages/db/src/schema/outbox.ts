@@ -17,6 +17,16 @@ export const outboxEvents = pgTable(
     eventId: uuid("event_id").primaryKey().defaultRandom(),
 
     // =========================================================================
+    // 🔹 Multi-tenancy (H-04 / A-02)
+    // =========================================================================
+    // Tenant isolation column. Nullable at the type level because the value is
+    // populated by the `app.outbox_set_tenant_id()` BEFORE INSERT trigger
+    // (migration 0017) rather than by every call site — so existing
+    // `outbox.append()` writers don't all need to thread tenantId. RLS
+    // split-policies on this table fail closed when tenant_id is NULL.
+    tenantId: uuid("tenant_id"),
+
+    // =========================================================================
     // 🔹 Schema Version
     // =========================================================================
     eventVersion: varchar("event_version", { length: 32 }).notNull(),
@@ -65,6 +75,9 @@ export const outboxEvents = pgTable(
 
     aggregateSequenceIdx: index("outbox_agg_seq_idx")
       .on(table.aggregateId, table.sequence),
+
+    // Tenant-scoped lookups (RLS filter + activity feed). See migration 0017.
+    tenantIdx: index("outbox_tenant_idx").on(table.tenantId),
   })
 );
 
