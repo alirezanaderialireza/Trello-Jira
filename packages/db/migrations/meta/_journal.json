@@ -71,6 +71,48 @@
       "when": 1779377000000,
       "tag": "0009_phase1.2_checklists",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1779378000000,
+      "tag": "0010_phase1.2_comments",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1779379000000,
+      "tag": "0011_phase1.2_attachments",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1779380000000,
+      "tag": "0012_phase1.2_card_cover",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1779381000000,
+      "tag": "0013_phase1.2_card_assignees",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1779382000000,
+      "tag": "0014_phase1.2_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1779383000000,
+      "tag": "0015_cleanup_stale_due_date_jsonb",
+      "breakpoints": true
     }
   ]
 }

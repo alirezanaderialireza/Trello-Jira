@@ -31,6 +31,17 @@ jobs:
       # web sandbox cannot produce). See apps/web/e2e/LOCAL_RUNBOOK.md
       # steps 3 + 9. Tracked in .kiro/steering/phase-1.1-complete.md.
       - run: pnpm install --no-frozen-lockfile
+      # Fresh-DB provisioning guard (C-01). Apply EVERY migration from the
+      # Drizzle journal against a clean Postgres. Before this step the journal
+      # had drifted from the SQL files (entries stopped at 0009 while
+      # 0010-0015 existed on disk), so a fresh DB silently lacked the
+      # comments/attachments/card_assignees/notifications tables + cover_data
+      # column. Running `drizzle-kit migrate` here makes any future journal/
+      # file drift fail CI loudly instead of in production.
+      - name: DB migrate (fresh-DB provisioning guard)
+        run: pnpm --filter @repo/db migrate
+        env:
+          DATABASE_URL: postgresql://trello:ci@localhost:5432/trello_test
       # Architecture lint — runs first because it's fastest and most likely
       # to catch a layering regression. Phase 0.6 enables boundaries on every
       # `packages/*` and the apps/web client; new violations block CI.
