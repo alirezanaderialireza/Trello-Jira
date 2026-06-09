@@ -57,11 +57,18 @@ END$$;
 -- 1. card_assignees table
 -- ============================================================================
 
+-- NOTE (provisioning fix): user_id / assigned_by are varchar(128) and hold
+-- Auth.js subject IDs. They must NOT carry a FK to users(id) — users.id is a
+-- `uuid`, so a varchar->uuid foreign key is a type mismatch that Postgres
+-- rejects ("incompatible types: character varying and uuid"). This made
+-- `drizzle-kit migrate` fail on a fresh DB (push silently dropped the bad FK,
+-- which is why it was never caught). Same no-FK pattern as board_members,
+-- comments.author_id, card_watchers.user_id and notifications.user_id.
 CREATE TABLE IF NOT EXISTS "card_assignees" (
-  "card_id"     uuid         NOT NULL REFERENCES "cards"("id")  ON DELETE CASCADE,
-  "user_id"     varchar(128) NOT NULL REFERENCES "users"("id")  ON DELETE CASCADE,
+  "card_id"     uuid         NOT NULL REFERENCES "cards"("id") ON DELETE CASCADE,
+  "user_id"     varchar(128) NOT NULL,
   "tenant_id"   uuid         NOT NULL,
-  "assigned_by" varchar(128) NOT NULL REFERENCES "users"("id"),
+  "assigned_by" varchar(128) NOT NULL,
   "assigned_at" timestamp with time zone NOT NULL DEFAULT now(),
 
   PRIMARY KEY ("card_id", "user_id")
