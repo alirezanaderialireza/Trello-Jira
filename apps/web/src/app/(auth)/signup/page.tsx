@@ -61,23 +61,23 @@ export default function SignupPage() {
     <div className="min-h-screen flex items-center justify-center bg-slate-900">
       <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 p-8 shadow-2xl">
         <h1 className="text-2xl font-bold text-white text-center mb-6">ثبت‌نام در Trello OS</h1>
-        {error && <div className="mb-4 rounded-lg bg-red-900/30 border border-red-800 p-3 text-sm text-red-300">{error}</div>}
+        {error && <div id="signup-error" role="alert" className="mb-4 rounded-lg bg-red-900/30 border border-red-800 p-3 text-sm text-red-300">{error}</div>}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm text-slate-400 mb-1">نام نمایشی</label>
-            <input type="text" name="displayName" autoComplete="name" placeholder="نام نمایشی" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required maxLength={100} className="w-full rounded-lg border border-slate-600 bg-slate-700 px-4 py-2.5 text-white focus:border-blue-500 focus:outline-none" />
+            <label htmlFor="signup-displayName" className="block text-sm text-slate-300 mb-1">نام نمایشی</label>
+            <input id="signup-displayName" type="text" name="displayName" autoComplete="name" placeholder="نام نمایشی" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required maxLength={100} className="w-full rounded-lg border border-slate-600 bg-slate-700 px-4 py-2.5 text-white focus:border-blue-500 focus:outline-none" />
           </div>
           <div>
-            <label className="block text-sm text-slate-400 mb-1">ایمیل</label>
-            <input type="email" name="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required className="w-full rounded-lg border border-slate-600 bg-slate-700 px-4 py-2.5 text-white focus:border-blue-500 focus:outline-none" />
+            <label htmlFor="signup-email" className="block text-sm text-slate-300 mb-1">ایمیل</label>
+            <input id="signup-email" type="email" name="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required className="w-full rounded-lg border border-slate-600 bg-slate-700 px-4 py-2.5 text-white focus:border-blue-500 focus:outline-none" />
           </div>
           <div>
-            <label className="block text-sm text-slate-400 mb-1">رمز عبور</label>
-            <input type="password" name="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} className="w-full rounded-lg border border-slate-600 bg-slate-700 px-4 py-2.5 text-white focus:border-blue-500 focus:outline-none" />
+            <label htmlFor="signup-password" className="block text-sm text-slate-300 mb-1">رمز عبور</label>
+            <input id="signup-password" type="password" name="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} className="w-full rounded-lg border border-slate-600 bg-slate-700 px-4 py-2.5 text-white focus:border-blue-500 focus:outline-none" />
           </div>
           <div>
-            <label className="block text-sm text-slate-400 mb-1">تکرار رمز عبور</label>
-            <input type="password" name="confirmPassword" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required className="w-full rounded-lg border border-slate-600 bg-slate-700 px-4 py-2.5 text-white focus:border-blue-500 focus:outline-none" />
+            <label htmlFor="signup-confirmPassword" className="block text-sm text-slate-300 mb-1">تکرار رمز عبور</label>
+            <input id="signup-confirmPassword" type="password" name="confirmPassword" autoComplete="new-password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required className="w-full rounded-lg border border-slate-600 bg-slate-700 px-4 py-2.5 text-white focus:border-blue-500 focus:outline-none" />
           </div>
           <button type="submit" disabled={loading} className="w-full rounded-lg bg-blue-600 py-2.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50">
             {loading ? "در حال ثبت‌نام..." : "ثبت‌نام"}

@@ -103,15 +103,18 @@ function ResetPasswordForm() {
           </p>
         )}
         {error && (
-          <div className="mb-4 rounded-lg bg-red-900/30 border border-red-800 p-3 text-sm text-red-300">
+          <div role="alert" className="mb-4 rounded-lg bg-red-900/30 border border-red-800 p-3 text-sm text-red-300">
             {error}
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm text-slate-400 mb-1">رمز عبور جدید</label>
+            <label htmlFor="reset-password" className="block text-sm text-slate-300 mb-1">رمز عبور جدید</label>
             <input
+              id="reset-password"
+              name="password"
               type="password"
+              autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -121,9 +124,12 @@ function ResetPasswordForm() {
             />
           </div>
           <div>
-            <label className="block text-sm text-slate-400 mb-1">تکرار رمز عبور</label>
+            <label htmlFor="reset-confirmPassword" className="block text-sm text-slate-300 mb-1">تکرار رمز عبور</label>
             <input
+              id="reset-confirmPassword"
+              name="confirmPassword"
               type="password"
+              autoComplete="new-password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               required

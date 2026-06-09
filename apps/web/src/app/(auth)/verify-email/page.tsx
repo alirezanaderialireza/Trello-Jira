@@ -111,10 +111,14 @@ function VerifyEmailInner() {
         {status === "error" && !resendSent && (
           <>
             <h1 className="text-xl font-bold text-red-400 mb-4">✗ خطا</h1>
-            <p className="text-slate-300 text-sm mb-4">{errorMessage}</p>
+            <p role="alert" className="text-slate-300 text-sm mb-4">{errorMessage}</p>
             <form onSubmit={handleResend} className="space-y-3">
+              <label htmlFor="verify-resend-email-error" className="sr-only">ایمیل برای ارسال لینک جدید</label>
               <input
+                id="verify-resend-email-error"
+                name="email"
                 type="email"
+                autoComplete="email"
                 value={resendEmail}
                 onChange={(e) => setResendEmail(e.target.value)}
                 required
@@ -144,8 +148,12 @@ function VerifyEmailInner() {
               لطفاً ایمیل خود را وارد کرده تا لینک مجدد ارسال شود.
             </p>
             <form onSubmit={handleResend} className="space-y-3">
+              <label htmlFor="verify-resend-email-idle" className="sr-only">ایمیل</label>
               <input
+                id="verify-resend-email-idle"
+                name="email"
                 type="email"
+                autoComplete="email"
                 value={resendEmail}
                 onChange={(e) => setResendEmail(e.target.value)}
                 required

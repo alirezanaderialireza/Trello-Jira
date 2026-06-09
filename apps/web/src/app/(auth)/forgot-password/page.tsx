@@ -58,13 +58,17 @@ export default function ForgotPasswordPage() {
           ایمیل خود را وارد کنید تا لینک بازنشانی ارسال شود.
         </p>
         {error && (
-          <div className="mb-4 rounded-lg bg-red-900/30 border border-red-800 p-3 text-sm text-red-300">
+          <div role="alert" className="mb-4 rounded-lg bg-red-900/30 border border-red-800 p-3 text-sm text-red-300">
             {error}
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-4">
+          <label htmlFor="forgot-email" className="sr-only">ایمیل</label>
           <input
+            id="forgot-email"
+            name="email"
             type="email"
+            autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
