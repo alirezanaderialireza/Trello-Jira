@@ -28,6 +28,7 @@ import {
   type SoftDeleteAction,
   type SoftDeleteResult,
 } from "./DeleteWorkspaceDialog";
+import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 
 export type LeaveAction = (input: {
   workspaceId: string;
@@ -61,19 +62,14 @@ export function DangerZone({
 }: Props) {
   const router = useRouter();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
   const [isLeaving, startLeave] = useTransition();
 
   const isOwner = currentUserRole === "OWNER";
 
   // ── Leave ─────────────────────────────────────────────────────────────────
-  const handleLeave = () => {
-    if (
-      !window.confirm(
-        `آیا می‌خواهید از فضای کاری «${workspaceName}» خارج شوید؟`,
-      )
-    ) {
-      return;
-    }
+  const performLeave = () => {
+    setLeaveConfirmOpen(false);
     startLeave(async () => {
       const result = await onLeave({ workspaceId });
       if (result.ok) {
@@ -136,7 +132,7 @@ export function DangerZone({
         action={
           <button
             type="button"
-            onClick={handleLeave}
+            onClick={() => setLeaveConfirmOpen(true)}
             disabled={isLeaving}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -180,6 +176,18 @@ export function DangerZone({
         onClose={() => setDeleteOpen(false)}
         onConfirm={onSoftDelete}
         onResult={handleDeleteResult}
+      />
+
+      <ConfirmDialog
+        open={leaveConfirmOpen}
+        title="خروج از فضای کاری"
+        description={`آیا می‌خواهید از فضای کاری «${workspaceName}» خارج شوید؟`}
+        confirmLabel="خروج"
+        cancelLabel="انصراف"
+        variant="danger"
+        isPending={isLeaving}
+        onConfirm={performLeave}
+        onCancel={() => setLeaveConfirmOpen(false)}
       />
     </div>
   );
