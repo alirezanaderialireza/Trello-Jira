@@ -103,6 +103,25 @@ const BOARD_TITLE = "تابلوی برنامه‌ریزی";
 //
 // See .kiro/steering/phase-1.1-complete.md → "Polish followups" for
 // the parked-TODO entry that tracks this.
+//
+// ─── F1.4.6-web update — READY FOR LOCAL UNSKIP ──────────────────────────
+// Selectors have been reconciled against the REAL UI (each step carries a
+// traceability comment naming its source component). Specifically:
+//   • Persian UI is final (F1.4.5) — predictive English selectors replaced.
+//   • window.confirm steps (7 archive, 12 leave) migrated to the manual
+//     ConfirmDialog (F1.4.4); confirm clicks are scoped to role="alertdialog".
+//   • step 10 (star) is now a HARD assertion (BoardStarButton, F1.4.4).
+//   • step 11's incorrect combobox assertion was fixed to assert the
+//     owner-only transfer button disappears.
+//   • auth fixtures use getByLabel (F1.4.5 added htmlFor + id).
+// This is still .skip and CI stays continue-on-error: true ON PURPOSE — the
+// web sandbox cannot run Playwright to verify. TO ACTIVATE (local only):
+//   1. follow apps/web/e2e/LOCAL_RUNBOOK.md,
+//   2. remove `.skip` below,
+//   3. confirm all 4 cases pass (desktop + mobile × 1 retry),
+//   4. flip ci.yml e2e `continue-on-error: false` + `--frozen-lockfile`,
+//   5. record outcomes in apps/web/e2e/e2e-results.md.
+// ─────────────────────────────────────────────────────────────────────────
 test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
   let userAContext: BrowserContext;
   let userBContext: BrowserContext;
