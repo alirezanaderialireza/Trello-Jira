@@ -82,7 +82,7 @@ function VerifyEmailInner() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-900">
+    <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4">
       <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 p-8 text-center">
         {/* ── verifying ── */}
         {status === "loading" && (
@@ -111,10 +111,14 @@ function VerifyEmailInner() {
         {status === "error" && !resendSent && (
           <>
             <h1 className="text-xl font-bold text-red-400 mb-4">✗ خطا</h1>
-            <p className="text-slate-300 text-sm mb-4">{errorMessage}</p>
+            <p role="alert" className="text-slate-300 text-sm mb-4">{errorMessage}</p>
             <form onSubmit={handleResend} className="space-y-3">
+              <label htmlFor="verify-resend-email-error" className="sr-only">ایمیل برای ارسال لینک جدید</label>
               <input
+                id="verify-resend-email-error"
+                name="email"
                 type="email"
+                autoComplete="email"
                 value={resendEmail}
                 onChange={(e) => setResendEmail(e.target.value)}
                 required
@@ -129,7 +133,7 @@ function VerifyEmailInner() {
                 {resendLoading ? "در حال ارسال..." : "ارسال لینک جدید"}
               </button>
             </form>
-            <Link href="/login" className="mt-4 inline-block text-slate-500 hover:text-slate-300 text-sm">
+            <Link href="/login" className="mt-4 inline-block text-slate-400 hover:text-slate-200 text-sm">
               بازگشت به ورود
             </Link>
           </>
@@ -144,8 +148,12 @@ function VerifyEmailInner() {
               لطفاً ایمیل خود را وارد کرده تا لینک مجدد ارسال شود.
             </p>
             <form onSubmit={handleResend} className="space-y-3">
+              <label htmlFor="verify-resend-email-idle" className="sr-only">ایمیل</label>
               <input
+                id="verify-resend-email-idle"
+                name="email"
                 type="email"
+                autoComplete="email"
                 value={resendEmail}
                 onChange={(e) => setResendEmail(e.target.value)}
                 required
@@ -160,7 +168,7 @@ function VerifyEmailInner() {
                 {resendLoading ? "در حال ارسال..." : "ارسال مجدد لینک"}
               </button>
             </form>
-            <Link href="/login" className="mt-4 inline-block text-slate-500 hover:text-slate-300 text-sm">
+            <Link href="/login" className="mt-4 inline-block text-slate-400 hover:text-slate-200 text-sm">
               بازگشت به ورود
             </Link>
           </>
@@ -188,7 +196,7 @@ function VerifyEmailInner() {
 // layout shift when the content hydrates on the client.
 function VerifyEmailFallback() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-900">
+    <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4">
       <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 p-8 text-center">
         <div className="h-8 w-8 mx-auto animate-spin rounded-full border-2 border-slate-600 border-t-blue-400 mb-4" />
         <p className="text-slate-300">در حال بارگذاری...</p>

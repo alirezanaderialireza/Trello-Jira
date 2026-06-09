@@ -88,7 +88,7 @@ export function BoardMembersPanel({ boardId }: Props) {
 
                 <button
                   onClick={() => setRemoveTarget(member.userId)}
-                  className="ml-1 rounded p-1 text-slate-400 hover:bg-red-900/30 hover:text-red-400"
+                  className="ms-1 rounded p-1 text-slate-400 hover:bg-red-900/30 hover:text-red-400"
                   title="Remove member"
                 >
                   <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -117,7 +117,7 @@ export function BoardMembersPanel({ boardId }: Props) {
               type="text"
               value={inviteUserId}
               onChange={(e) => setInviteUserId(e.target.value)}
-              placeholder="User ID or email"
+              placeholder="شناسه کاربر یا ایمیل"
               className="flex-1 rounded border border-slate-600 bg-slate-700 px-3 py-1.5 text-sm text-white placeholder-slate-400 focus:border-blue-500 focus:outline-none"
             />
             <select

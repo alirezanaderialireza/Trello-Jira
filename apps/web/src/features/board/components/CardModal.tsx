@@ -344,7 +344,7 @@ const SyncStatus = ({
     return (
       <Loader2
         className="w-4 h-4 text-blue-500 animate-spin"
-        aria-label="Saving..."
+        aria-label="در حال ذخیره..."
       />
     );
   }
@@ -353,7 +353,7 @@ const SyncStatus = ({
     return (
       <CheckCircle2
         className="w-4 h-4 text-green-500"
-        aria-label="Saved successfully"
+        aria-label="با موفقیت ذخیره شد"
       />
     );
   }
@@ -362,7 +362,7 @@ const SyncStatus = ({
     return (
       <AlertCircle
         className="w-4 h-4 text-red-500"
-        aria-label="Error saving"
+        aria-label="خطا در ذخیره"
       />
     );
   }
@@ -371,7 +371,7 @@ const SyncStatus = ({
     return (
       <AlertTriangle
         className="w-4 h-4 text-yellow-500 animate-pulse"
-        aria-label="Version conflict"
+        aria-label="تعارض نسخه"
       />
     );
   }
@@ -445,7 +445,7 @@ const TitleEditor = memo(
           }
           onBlur={handleBlur}
           rows={1}
-          aria-label="Card Title"
+          aria-label="عنوان کارت"
           className="text-xl font-bold w-full bg-transparent border-none outline-none resize-none overflow-hidden focus:ring-2 focus:ring-blue-500 rounded p-1"
         />
 
@@ -515,8 +515,8 @@ const DescriptionEditor = memo(
             handleChange(e.target.value)
           }
           onBlur={handleBlur}
-          placeholder="Add a more detailed description..."
-          aria-label="Card Description"
+          placeholder="توضیحات بیشتری اضافه کنید..."
+          aria-label="توضیحات کارت"
           className="w-full min-h-[120px] p-3 bg-gray-50 border border-gray-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none resize-none overflow-hidden"
         />
       </div>
@@ -648,6 +648,22 @@ export default function CardModal() {
   }, [activeCardId, closeCardModal]);
 
   // ========================================================================
+  // Focus restore — return focus to whatever opened the modal (the card)
+  // once it closes, so keyboard users are not dropped at the top of the DOM.
+  // ========================================================================
+
+  useEffect(() => {
+    if (!activeCardId) return;
+    const trigger =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    return () => {
+      trigger?.focus();
+    };
+  }, [activeCardId]);
+
+  // ========================================================================
   // Empty State
   // ========================================================================
 
@@ -680,14 +696,14 @@ export default function CardModal() {
       >
         {/* Header */}
         <div className="flex justify-between items-start p-4 border-b">
-          <div className="w-full pr-8">
+          <div className="w-full pe-8">
             <TitleEditor
               cardId={activeCardId}
               initialTitle={title}
             />
 
             <p className="text-sm text-gray-500">
-              in list{" "}
+              در لیست{" "}
               <span className="underline font-medium">
                 {listTitle}
               </span>
@@ -696,10 +712,10 @@ export default function CardModal() {
 
           <button
             onClick={closeCardModal}
-            aria-label="Close modal"
-            className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="بستن"
+            className="absolute top-4 end-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <X size={20} />
+            <X size={20} aria-hidden="true" />
           </button>
         </div>
 

@@ -70,15 +70,15 @@ export default function WorkspaceDetailPage() {
   // ── Loading / error gates ──────────────────────────────────────────────
   if (wsLoading) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-400">
-        Loading workspace...
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-slate-300">
+        در حال بارگذاری فضای کاری...
       </div>
     );
   }
   if (wsError || !workspace) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center text-red-400">
-        Workspace not found
+        فضای کاری پیدا نشد
       </div>
     );
   }
@@ -95,30 +95,30 @@ export default function WorkspaceDetailPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold">{workspace.name}</h1>
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-slate-400">
               /{workspace.slug} • {workspace.role}
             </p>
           </div>
           <Link
             href="/workspaces"
-            className="text-sm text-slate-400 hover:text-white"
+            className="text-sm text-slate-300 hover:text-white"
           >
-            ← All Workspaces
+            → همه فضاهای کاری
           </Link>
         </div>
 
         {/* Boards list */}
         <section className="rounded-lg border border-slate-700 bg-slate-800 p-6 mb-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold">Boards</h2>
+            <h2 className="text-lg font-semibold">بوردها</h2>
             {boardsLoading && (
-              <span className="text-xs text-slate-500">Loading...</span>
+              <span className="text-xs text-slate-400">در حال بارگذاری...</span>
             )}
           </div>
 
           {!boardsLoading && (boards?.length ?? 0) === 0 && (
-            <p className="text-sm text-slate-400">
-              No boards yet — create your first one below.
+            <p className="text-sm text-slate-300">
+              هنوز بوردی ساخته نشده — اولین بورد خود را پایین بسازید.
             </p>
           )}
 
@@ -131,7 +131,7 @@ export default function WorkspaceDetailPage() {
                     className="block rounded-md border border-slate-700 bg-slate-900 px-4 py-3 hover:border-slate-500 transition-colors"
                   >
                     <p className="font-medium text-white truncate">{b.title}</p>
-                    <p className="mt-1 text-[10px] uppercase tracking-wider text-slate-500">
+                    <p className="mt-1 text-[10px] uppercase tracking-wider text-slate-400">
                       {b.role}
                     </p>
                   </Link>
@@ -166,7 +166,7 @@ export default function WorkspaceDetailPage() {
               <input
                 value={newBoardTitle}
                 onChange={(e) => setNewBoardTitle(e.target.value)}
-                placeholder="Board title..."
+                placeholder="عنوان بورد..."
                 className="flex-1 rounded-lg border border-slate-600 bg-slate-700 px-4 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
               />
               <button
@@ -174,7 +174,7 @@ export default function WorkspaceDetailPage() {
                 disabled={!newBoardTitle.trim() || creating}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
               >
-                {creating ? "Creating..." : "Create"}
+                {creating ? "در حال ساخت..." : "ساخت"}
               </button>
             </form>
           </section>

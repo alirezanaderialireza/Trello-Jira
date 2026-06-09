@@ -39,7 +39,7 @@ export function CreateCardForm({ onCreate }: { onCreate: (title: string) => Prom
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         disabled={loading}
-        placeholder="Enter card title..."
+        placeholder="عنوان کارت را وارد کنید..."
         style={{ 
           padding: "12px 16px", 
           border: "1px solid #d2d2d7", 
@@ -67,7 +67,7 @@ export function CreateCardForm({ onCreate }: { onCreate: (title: string) => Prom
           transition: "all 0.2s ease"
         }}
       >
-        {loading ? "Creating..." : "Create Card"}
+        {loading ? "در حال ایجاد..." : "ایجاد کارت"}
       </button>
     </div>
   );

@@ -28,13 +28,13 @@ export function BoardCard({ board, onMutated }: BoardCardProps) {
       }`}
     >
       {/* Settings dropdown (top-right) */}
-      <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100">
+      <div className="absolute end-2 top-2 opacity-0 transition-opacity group-hover:opacity-100">
         <BoardSettingsDropdown board={board} onMutated={onMutated} />
       </div>
 
       {/* Board link */}
       <Link href={`/board/${board.id}`} className="block">
-        <h3 className="truncate pr-8 text-base font-semibold text-white">
+        <h3 className="truncate pe-8 text-base font-semibold text-white">
           {board.title}
         </h3>
 
