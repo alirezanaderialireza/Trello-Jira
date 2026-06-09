@@ -57,7 +57,7 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
     };
   }, [open]);
 
-  const renameMutation = trpc.v1.public.boardManagement.renameBoard.useMutation({
+  const renameMutation = trpc.v1.public.boardManagement.updateBoardMetadata.useMutation({
     onSuccess: () => { toast.success("نام بورد تغییر کرد."); setRenaming(false); onMutated(); },
     onError: (e) => toast.error(e.message),
   });
