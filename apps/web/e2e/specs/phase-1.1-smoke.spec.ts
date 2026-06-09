@@ -229,19 +229,23 @@ test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
 
     // ── 7. User A archives the board ────────────────────────────────────
     await test.step("7. User A archives the board", async () => {
+      // Selector source: app/board/[boardId]/_components/DangerTab.tsx +
+      // app/board/[boardId]/_components/BoardSettings.tsx (reconciled
+      // F1.4.6-web). Navigating with ?settings=danger auto-mounts the
+      // settings drawer on the danger tab (BoardSettings owns the
+      // ?settings=<tab> query param).
+      //
+      // Archive is now a MANUAL ConfirmDialog (F1.4.4), NOT window.confirm:
+      //   • panel trigger:  <button>بایگانی</button>  (Archive icon + text)
+      //   • ConfirmDialog:  role="alertdialog", confirmLabel="بایگانی"
+      // Both buttons share the name "بایگانی", so we scope the confirm
+      // click to the alertdialog. (The old page.once("dialog") shim is
+      // removed — there is no window.confirm anymore.)
       await userAPage.goto(`/board/${boardId}?settings=danger`);
-      await userAPage.getByRole("button", { name: /^بایگانی$|بایگانی بورد/ }).click();
-      // window.confirm — Playwright auto-accepts dialogs unless we
-      // register a listener. Register it just before the click.
-      // (Playwright expects the listener BEFORE triggering the
-      // dialog; we do this dance once, so the click + accept is
-      // wrapped together.)
-      // The above click triggered window.confirm, but Playwright
-      // auto-dismisses. Re-trigger after attaching a listener:
-      userAPage.once("dialog", (dialog) => dialog.accept());
-      // Already clicked — the dialog handler covers the next click
-      // if the user has to retry. The archived banner should
-      // appear on the board page within a beat.
+      await userAPage.getByRole("button", { name: "بایگانی", exact: true }).click();
+      const archiveDialog = userAPage.getByRole("alertdialog");
+      await archiveDialog.getByRole("button", { name: "بایگانی" }).click();
+      // The board page renders an archived banner (page.tsx) once archived.
       await userAPage.goto(`/board/${boardId}`);
       await expect(userAPage.getByText(/این بورد بایگانی شده/)).toBeVisible({ timeout: 10_000 });
     });
@@ -260,8 +264,11 @@ test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
 
     // ── 9. User A unarchives the board ─────────────────────────────────
     await test.step("9. User A unarchives the board", async () => {
+      // Selector source: DangerTab.tsx — when archived, the panel shows
+      // <button>خروج از بایگانی</button>. Unarchive runs directly (no
+      // confirmation dialog), so a single click suffices.
       await userAPage.goto(`/board/${boardId}?settings=danger`);
-      await userAPage.getByRole("button", { name: /خروج از بایگانی/i }).click();
+      await userAPage.getByRole("button", { name: /خروج از بایگانی/ }).click();
       await userAPage.goto(`/board/${boardId}`);
       // The archived banner should be gone.
       await expect(userAPage.getByText(/این بورد بایگانی شده/)).not.toBeVisible();
@@ -312,9 +319,17 @@ test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
 
     // ── 12. User A leaves the workspace ─────────────────────────────────
     await test.step("12. User A leaves the workspace", async () => {
+      // Selector source: features/settings/workspace/DangerZone.tsx
+      // (reconciled F1.4.6-web). Leave is now a MANUAL ConfirmDialog
+      // (F1.4.4), NOT window.confirm:
+      //   • panel trigger:  <button>خروج از فضای کاری</button>
+      //   • ConfirmDialog:  role="alertdialog", confirmLabel="خروج"
+      // Scope the confirm click to the alertdialog. (The old
+      // page.once("dialog") shim is removed — no window.confirm anymore.)
       await userAPage.goto(`/workspaces/${workspaceSlug}/settings/danger`);
-      userAPage.once("dialog", (dialog) => dialog.accept());
-      await userAPage.getByRole("button", { name: /خروج از فضای کاری/i }).first().click();
+      await userAPage.getByRole("button", { name: "خروج از فضای کاری" }).click();
+      const leaveDialog = userAPage.getByRole("alertdialog");
+      await leaveDialog.getByRole("button", { name: "خروج", exact: true }).click();
       // After leaving, User A is bounced to /workspaces.
       await userAPage.waitForURL(/\/workspaces$/);
       // The workspace should no longer be in the sidebar.
