@@ -1,4 +1,7 @@
--- Migration: 0011_phase1.2_card_assignees.sql
+-- Migration: 0013_phase1.2_card_assignees.sql
+-- (Renamed from 0011 in C-02: the 0011 prefix collided with
+--  0011_phase1.2_attachments.sql, making migration order non-deterministic.
+--  Moved to the free 0013 slot. SQL body unchanged.)
 -- Phase 1.2 (F1.2.5) — Card Assignees junction table.
 --
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -44,7 +47,7 @@
 DO $$
 BEGIN
   RAISE NOTICE
-    '[migration 0011] Phase 1.2 F1.2.5 — creating card_assignees junction table '
+    '[migration 0013] Phase 1.2 F1.2.5 — creating card_assignees junction table '
     'with denormalised tenant_id, assigned_by/at audit columns, composite PK, '
     'reverse-lookup index for "My Cards" (F1.5), and split per-command RLS.';
 END$$;
