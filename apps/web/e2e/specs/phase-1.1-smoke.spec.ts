@@ -137,16 +137,16 @@ test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
     let workspaceSlug = "";
     await test.step("2. User A creates a workspace", async () => {
       await userAPage.goto("/workspaces");
-      // (app)/workspaces/page.tsx renders the Create form INLINE — there
-      // is no dialog/CTA. The form has:
-      //   • <input placeholder="Workspace name..." />
-      //   • <button type="submit">Create</button>
-      // After submit there is no redirect; the page calls refetch() +
-      // toast.success() and the new workspace card appears in the grid.
-      // We click the card to navigate into /workspaces/[slug] and
-      // capture the slug from the URL.
-      await userAPage.locator('input[placeholder*="Workspace name"]').fill(WORKSPACE_NAME);
-      await userAPage.getByRole("button", { name: /^Create$/i }).click();
+      // Selector source: app/(app)/workspaces/page.tsx (reconciled F1.4.6-web).
+      //   The Create form is INLINE (no dialog/CTA):
+      //     • <input placeholder="نام فضای کاری..." />   (no id/label)
+      //     • <button type="submit">ساخت</button>
+      //   After submit there is no redirect; the page calls refetch() +
+      //   toast.success("فضای کاری ساخته شد.") and the new workspace card
+      //   appears in the grid. We click the card to navigate into
+      //   /workspaces/[slug] and capture the slug from the URL.
+      await userAPage.getByPlaceholder(/نام فضای کاری/).fill(WORKSPACE_NAME);
+      await userAPage.getByRole("button", { name: "ساخت", exact: true }).click();
 
       // Wait for the workspace card to appear in the list. Card is
       // a <Link> so getByRole("link") with the Persian workspace name
@@ -165,8 +165,13 @@ test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
     // ── 3. User A creates a board inside the workspace ──────────────────
     let boardId = "";
     await test.step("3. User A creates a board", async () => {
-      await userAPage.locator('input[placeholder*="Board title"], input[placeholder*="عنوان"]').first().fill(BOARD_TITLE);
-      await userAPage.getByRole("button", { name: /Create|ساخت|ایجاد/i }).click();
+      // Selector source: app/(app)/workspaces/[slug]/page.tsx (reconciled
+      // F1.4.6-web). The create-board form is INLINE (not a dialog):
+      //   • <input placeholder="عنوان بورد..." />   (no id/label)
+      //   • <button type="submit">ساخت</button>  ("در حال ساخت..." while pending)
+      //   onSuccess → router.push(`/board/${created.id}`)
+      await userAPage.getByPlaceholder(/عنوان بورد/).fill(BOARD_TITLE);
+      await userAPage.getByRole("button", { name: "ساخت", exact: true }).click();
 
       await userAPage.waitForURL(/\/board\/[0-9a-f-]+/);
       const url = new URL(userAPage.url());
@@ -177,12 +182,20 @@ test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
 
     // ── 4. User A invites User B by email ───────────────────────────────
     await test.step("4. User A invites User B", async () => {
+      // Selector source: features/settings/workspace/InviteMemberModal.tsx
+      // (reconciled F1.4.6-web):
+      //   • trigger: <button> with Plus icon + text "دعوت عضو"
+      //   • modal:   role="dialog" aria-labelledby="invite-member-title"
+      //   • email:   <label htmlFor="invite-email">ایمیل</label>
+      //   • submit:  <button>ارسال دعوت</button>  ("در حال ارسال..." pending)
+      // Scope email/submit to the dialog so we don't collide with member
+      // emails rendered in the table behind it.
       await userAPage.goto(`/workspaces/${workspaceSlug}/settings/members`);
-      await userAPage.getByRole("button", { name: /دعوت عضو/i }).click();
-      // Modal — email + role.
-      await userAPage.locator('input[type="email"]').fill(USER_B.email);
+      await userAPage.getByRole("button", { name: /دعوت عضو/ }).click();
+      const inviteDialog = userAPage.getByRole("dialog");
+      await inviteDialog.getByLabel("ایمیل").fill(USER_B.email);
       // Default role is MEMBER; spec keeps that.
-      await userAPage.getByRole("button", { name: /ارسال دعوت/i }).click();
+      await inviteDialog.getByRole("button", { name: /ارسال دعوت/ }).click();
       // Toast confirms; the modal closes and the pending list
       // re-renders. Assert the email shows up in the pending row.
       await expect(userAPage.getByText(USER_B.email)).toBeVisible({ timeout: 10_000 });
@@ -194,13 +207,17 @@ test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
       const token = await seedFixture.getInvitationToken(USER_B.email);
       expect(token).not.toBeNull();
       await userBPage.goto(`/invitations/${encodeURIComponent(token!)}`);
-      await userBPage.getByRole("button", { name: /پذیرش دعوت/i }).click();
+      // Selector source: features/invitation/AcceptInvitationCard.tsx —
+      // logged-in default state renders <button>پذیرش دعوت</button>.
+      await userBPage.getByRole("button", { name: /پذیرش دعوت/ }).click();
       // Successful accept navigates to /workspaces/[slug].
       await userBPage.waitForURL(new RegExp(`/workspaces/${workspaceSlug}`));
     });
 
     // ── 6. Both users see each other in the members list ────────────────
     await test.step("6. Both users see each other in the members list", async () => {
+      // Selector source: features/settings/workspace/MembersTable.tsx —
+      // each row renders the member's displayName in a <p> (getByText).
       await userAPage.goto(`/workspaces/${workspaceSlug}/settings/members`);
       await expect(userAPage.getByText(USER_A.displayName)).toBeVisible();
       await expect(userAPage.getByText(USER_B.displayName)).toBeVisible();
