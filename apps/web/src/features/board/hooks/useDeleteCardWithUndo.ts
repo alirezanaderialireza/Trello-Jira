@@ -33,9 +33,9 @@ export function useDeleteCardWithUndo() {
 
       deleteCardStore(cardId);
 
-      toast("Card deleted", {
+      toast("کارت حذف شد", {
         action: {
-          label: "Undo",
+          label: "بازگردانی",
           onClick: () => {
             undoneRef.current = true;
             useBoardStore.setState(previousState);
@@ -46,7 +46,7 @@ export function useDeleteCardWithUndo() {
           try {
             await deleteCardAction({ id: cardId, mutationId: crypto.randomUUID() });
           } catch {
-            toast.error("Failed to delete card. Rolling back.");
+            toast.error("حذف کارت ناموفق بود؛ در حال بازگردانی.");
             useBoardStore.setState(previousState);
           }
         },

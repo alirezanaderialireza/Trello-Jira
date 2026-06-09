@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 import { BoardSettingsDropdown } from "./BoardSettingsDropdown";
+import { toJalaliDisplay, utcFromServer, getUserTZ } from "@/lib/date";
 
 interface BoardCardProps {
   board: {
@@ -44,13 +44,13 @@ export function BoardCard({ board, onMutated }: BoardCardProps) {
           </span>
           {isArchived && (
             <span className="rounded bg-amber-900/50 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">
-              Archived
+              بایگانی‌شده
             </span>
           )}
         </div>
 
         <p className="mt-2 text-[11px] text-slate-500">
-          Updated {new Date(board.updatedAt).toLocaleDateString()}
+          به‌روزرسانی {toJalaliDisplay(utcFromServer(board.updatedAt), getUserTZ())}
         </p>
       </Link>
     </div>
