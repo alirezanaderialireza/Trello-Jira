@@ -103,6 +103,25 @@ const BOARD_TITLE = "تابلوی برنامه‌ریزی";
 //
 // See .kiro/steering/phase-1.1-complete.md → "Polish followups" for
 // the parked-TODO entry that tracks this.
+//
+// ─── F1.4.6-web update — READY FOR LOCAL UNSKIP ──────────────────────────
+// Selectors have been reconciled against the REAL UI (each step carries a
+// traceability comment naming its source component). Specifically:
+//   • Persian UI is final (F1.4.5) — predictive English selectors replaced.
+//   • window.confirm steps (7 archive, 12 leave) migrated to the manual
+//     ConfirmDialog (F1.4.4); confirm clicks are scoped to role="alertdialog".
+//   • step 10 (star) is now a HARD assertion (BoardStarButton, F1.4.4).
+//   • step 11's incorrect combobox assertion was fixed to assert the
+//     owner-only transfer button disappears.
+//   • auth fixtures use getByLabel (F1.4.5 added htmlFor + id).
+// This is still .skip and CI stays continue-on-error: true ON PURPOSE — the
+// web sandbox cannot run Playwright to verify. TO ACTIVATE (local only):
+//   1. follow apps/web/e2e/LOCAL_RUNBOOK.md,
+//   2. remove `.skip` below,
+//   3. confirm all 4 cases pass (desktop + mobile × 1 retry),
+//   4. flip ci.yml e2e `continue-on-error: false` + `--frozen-lockfile`,
+//   5. record outcomes in apps/web/e2e/e2e-results.md.
+// ─────────────────────────────────────────────────────────────────────────
 test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
   let userAContext: BrowserContext;
   let userBContext: BrowserContext;
@@ -137,16 +156,16 @@ test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
     let workspaceSlug = "";
     await test.step("2. User A creates a workspace", async () => {
       await userAPage.goto("/workspaces");
-      // (app)/workspaces/page.tsx renders the Create form INLINE — there
-      // is no dialog/CTA. The form has:
-      //   • <input placeholder="Workspace name..." />
-      //   • <button type="submit">Create</button>
-      // After submit there is no redirect; the page calls refetch() +
-      // toast.success() and the new workspace card appears in the grid.
-      // We click the card to navigate into /workspaces/[slug] and
-      // capture the slug from the URL.
-      await userAPage.locator('input[placeholder*="Workspace name"]').fill(WORKSPACE_NAME);
-      await userAPage.getByRole("button", { name: /^Create$/i }).click();
+      // Selector source: app/(app)/workspaces/page.tsx (reconciled F1.4.6-web).
+      //   The Create form is INLINE (no dialog/CTA):
+      //     • <input placeholder="نام فضای کاری..." />   (no id/label)
+      //     • <button type="submit">ساخت</button>
+      //   After submit there is no redirect; the page calls refetch() +
+      //   toast.success("فضای کاری ساخته شد.") and the new workspace card
+      //   appears in the grid. We click the card to navigate into
+      //   /workspaces/[slug] and capture the slug from the URL.
+      await userAPage.getByPlaceholder(/نام فضای کاری/).fill(WORKSPACE_NAME);
+      await userAPage.getByRole("button", { name: "ساخت", exact: true }).click();
 
       // Wait for the workspace card to appear in the list. Card is
       // a <Link> so getByRole("link") with the Persian workspace name
@@ -165,8 +184,13 @@ test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
     // ── 3. User A creates a board inside the workspace ──────────────────
     let boardId = "";
     await test.step("3. User A creates a board", async () => {
-      await userAPage.locator('input[placeholder*="Board title"], input[placeholder*="عنوان"]').first().fill(BOARD_TITLE);
-      await userAPage.getByRole("button", { name: /Create|ساخت|ایجاد/i }).click();
+      // Selector source: app/(app)/workspaces/[slug]/page.tsx (reconciled
+      // F1.4.6-web). The create-board form is INLINE (not a dialog):
+      //   • <input placeholder="عنوان بورد..." />   (no id/label)
+      //   • <button type="submit">ساخت</button>  ("در حال ساخت..." while pending)
+      //   onSuccess → router.push(`/board/${created.id}`)
+      await userAPage.getByPlaceholder(/عنوان بورد/).fill(BOARD_TITLE);
+      await userAPage.getByRole("button", { name: "ساخت", exact: true }).click();
 
       await userAPage.waitForURL(/\/board\/[0-9a-f-]+/);
       const url = new URL(userAPage.url());
@@ -177,12 +201,20 @@ test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
 
     // ── 4. User A invites User B by email ───────────────────────────────
     await test.step("4. User A invites User B", async () => {
+      // Selector source: features/settings/workspace/InviteMemberModal.tsx
+      // (reconciled F1.4.6-web):
+      //   • trigger: <button> with Plus icon + text "دعوت عضو"
+      //   • modal:   role="dialog" aria-labelledby="invite-member-title"
+      //   • email:   <label htmlFor="invite-email">ایمیل</label>
+      //   • submit:  <button>ارسال دعوت</button>  ("در حال ارسال..." pending)
+      // Scope email/submit to the dialog so we don't collide with member
+      // emails rendered in the table behind it.
       await userAPage.goto(`/workspaces/${workspaceSlug}/settings/members`);
-      await userAPage.getByRole("button", { name: /دعوت عضو/i }).click();
-      // Modal — email + role.
-      await userAPage.locator('input[type="email"]').fill(USER_B.email);
+      await userAPage.getByRole("button", { name: /دعوت عضو/ }).click();
+      const inviteDialog = userAPage.getByRole("dialog");
+      await inviteDialog.getByLabel("ایمیل").fill(USER_B.email);
       // Default role is MEMBER; spec keeps that.
-      await userAPage.getByRole("button", { name: /ارسال دعوت/i }).click();
+      await inviteDialog.getByRole("button", { name: /ارسال دعوت/ }).click();
       // Toast confirms; the modal closes and the pending list
       // re-renders. Assert the email shows up in the pending row.
       await expect(userAPage.getByText(USER_B.email)).toBeVisible({ timeout: 10_000 });
@@ -194,13 +226,17 @@ test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
       const token = await seedFixture.getInvitationToken(USER_B.email);
       expect(token).not.toBeNull();
       await userBPage.goto(`/invitations/${encodeURIComponent(token!)}`);
-      await userBPage.getByRole("button", { name: /پذیرش دعوت/i }).click();
+      // Selector source: features/invitation/AcceptInvitationCard.tsx —
+      // logged-in default state renders <button>پذیرش دعوت</button>.
+      await userBPage.getByRole("button", { name: /پذیرش دعوت/ }).click();
       // Successful accept navigates to /workspaces/[slug].
       await userBPage.waitForURL(new RegExp(`/workspaces/${workspaceSlug}`));
     });
 
     // ── 6. Both users see each other in the members list ────────────────
     await test.step("6. Both users see each other in the members list", async () => {
+      // Selector source: features/settings/workspace/MembersTable.tsx —
+      // each row renders the member's displayName in a <p> (getByText).
       await userAPage.goto(`/workspaces/${workspaceSlug}/settings/members`);
       await expect(userAPage.getByText(USER_A.displayName)).toBeVisible();
       await expect(userAPage.getByText(USER_B.displayName)).toBeVisible();
@@ -212,19 +248,23 @@ test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
 
     // ── 7. User A archives the board ────────────────────────────────────
     await test.step("7. User A archives the board", async () => {
+      // Selector source: app/board/[boardId]/_components/DangerTab.tsx +
+      // app/board/[boardId]/_components/BoardSettings.tsx (reconciled
+      // F1.4.6-web). Navigating with ?settings=danger auto-mounts the
+      // settings drawer on the danger tab (BoardSettings owns the
+      // ?settings=<tab> query param).
+      //
+      // Archive is now a MANUAL ConfirmDialog (F1.4.4), NOT window.confirm:
+      //   • panel trigger:  <button>بایگانی</button>  (Archive icon + text)
+      //   • ConfirmDialog:  role="alertdialog", confirmLabel="بایگانی"
+      // Both buttons share the name "بایگانی", so we scope the confirm
+      // click to the alertdialog. (The old page.once("dialog") shim is
+      // removed — there is no window.confirm anymore.)
       await userAPage.goto(`/board/${boardId}?settings=danger`);
-      await userAPage.getByRole("button", { name: /^بایگانی$|بایگانی بورد/ }).click();
-      // window.confirm — Playwright auto-accepts dialogs unless we
-      // register a listener. Register it just before the click.
-      // (Playwright expects the listener BEFORE triggering the
-      // dialog; we do this dance once, so the click + accept is
-      // wrapped together.)
-      // The above click triggered window.confirm, but Playwright
-      // auto-dismisses. Re-trigger after attaching a listener:
-      userAPage.once("dialog", (dialog) => dialog.accept());
-      // Already clicked — the dialog handler covers the next click
-      // if the user has to retry. The archived banner should
-      // appear on the board page within a beat.
+      await userAPage.getByRole("button", { name: "بایگانی", exact: true }).click();
+      const archiveDialog = userAPage.getByRole("alertdialog");
+      await archiveDialog.getByRole("button", { name: "بایگانی" }).click();
+      // The board page renders an archived banner (page.tsx) once archived.
       await userAPage.goto(`/board/${boardId}`);
       await expect(userAPage.getByText(/این بورد بایگانی شده/)).toBeVisible({ timeout: 10_000 });
     });
@@ -243,8 +283,11 @@ test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
 
     // ── 9. User A unarchives the board ─────────────────────────────────
     await test.step("9. User A unarchives the board", async () => {
+      // Selector source: DangerTab.tsx — when archived, the panel shows
+      // <button>خروج از بایگانی</button>. Unarchive runs directly (no
+      // confirmation dialog), so a single click suffices.
       await userAPage.goto(`/board/${boardId}?settings=danger`);
-      await userAPage.getByRole("button", { name: /خروج از بایگانی/i }).click();
+      await userAPage.getByRole("button", { name: /خروج از بایگانی/ }).click();
       await userAPage.goto(`/board/${boardId}`);
       // The archived banner should be gone.
       await expect(userAPage.getByText(/این بورد بایگانی شده/)).not.toBeVisible();
@@ -252,52 +295,60 @@ test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
 
     // ── 10. User A stars the board ─────────────────────────────────────
     await test.step("10. User A stars the board", async () => {
+      // Selector source: features/board/components/BoardStarButton.tsx
+      // (F1.4.4, reconciled F1.4.6-web). The button sits in the BoardView
+      // header with a Persian aria-label containing "موارد ستاره‌دار":
+      //   • not starred: «افزودن «<title>» به موارد ستاره‌دار»
+      //   • starred:     «حذف «<title>» از موارد ستاره‌دار»
+      // The button now always exists, so this is a HARD assertion (the
+      // previous best-effort soft/count check is removed).
       await userAPage.goto(`/board/${boardId}`);
-      // Star toggle UI: locate by aria-label or title. The exact
-      // affordance lives inside BoardView; the F4 sidebar's
-      // starred section reads userBoardMetadata.isStarred. If the
-      // UI doesn't expose a star toggle yet, this step is best-
-      // effort — wrapped in a soft assertion.
-      const starButton = userAPage.getByRole("button", {
-        name: /(ستاره|star|bookmark)/i,
-      });
-      const starCount = await starButton.count();
-      if (starCount > 0) {
-        await starButton.first().click();
-        // Refresh sidebar bootstrap.
-        await userAPage.goto("/workspaces");
-        await expect(userAPage.getByText(BOARD_TITLE)).toBeVisible();
-      } else {
-        test.info().annotations.push({
-          type: "skipped",
-          description:
-            "Star toggle not surfaced in current UI; tracked as polish followup.",
-        });
-      }
+      const starButton = userAPage.getByRole("button", { name: /موارد ستاره‌دار/ });
+      await expect(starButton).toBeVisible({ timeout: 10_000 });
+      await starButton.click();
+      // The starred board appears in the sidebar's Starred section, which
+      // the (app) layout renders on /workspaces.
+      await userAPage.goto("/workspaces");
+      await expect(userAPage.getByText(BOARD_TITLE).first()).toBeVisible({ timeout: 10_000 });
     });
 
     // ── 11. User A transfers ownership to User B ────────────────────────
     await test.step("11. User A transfers workspace ownership to User B", async () => {
+      // Selector source: features/settings/workspace/MembersTable.tsx +
+      // TransferOwnershipDialog.tsx (reconciled F1.4.6-web):
+      //   • row action (OWNER viewer, non-OWNER row): <button>ارتقاء به مالک</button>
+      //   • dialog (role="dialog"): confirm <button>تأیید انتقال مالکیت</button>
       await userAPage.goto(`/workspaces/${workspaceSlug}/settings/members`);
-      // The "ارتقاء به مالک" button shows on User B's row only when
-      // the current viewer is OWNER and the target is not OWNER.
-      await userAPage.getByRole("button", { name: /ارتقاء به مالک/i }).first().click();
-      // Confirmation dialog — click "تأیید انتقال مالکیت".
-      await userAPage.getByRole("button", { name: /تأیید انتقال مالکیت/i }).click();
-      // After success, User A's role chip should switch to ADMIN.
-      // The role chip lives in the sidebar header AND on the
-      // settings layout breadcrumb. Either is acceptable here.
+      await userAPage.getByRole("button", { name: /ارتقاء به مالک/ }).first().click();
+      await userAPage.getByRole("button", { name: /تأیید انتقال مالکیت/ }).click();
+      // After the transfer, User A is ADMIN (no longer OWNER), so the
+      // owner-only "ارتقاء به مالک" controls disappear for every row.
+      //
+      // NOTE (F1.4.6-web fix): the previous assertion looked for a role
+      // <combobox> on User A's own row, which is INCORRECT — MembersTable
+      // never renders a role <select> for the current user's own row
+      // (canChangeRole = !isOwnerRow && !isSelf), and after the transfer
+      // there are zero comboboxes. We assert the owner-only transfer
+      // button is gone instead, which correctly proves the demotion.
       await userAPage.goto(`/workspaces/${workspaceSlug}/settings/members`);
-      // The role select for User A's row should now appear (since
-      // they are no longer OWNER).
-      await expect(userAPage.getByRole("combobox").first()).toBeVisible();
+      await expect(
+        userAPage.getByRole("button", { name: /ارتقاء به مالک/ }),
+      ).toHaveCount(0);
     });
 
     // ── 12. User A leaves the workspace ─────────────────────────────────
     await test.step("12. User A leaves the workspace", async () => {
+      // Selector source: features/settings/workspace/DangerZone.tsx
+      // (reconciled F1.4.6-web). Leave is now a MANUAL ConfirmDialog
+      // (F1.4.4), NOT window.confirm:
+      //   • panel trigger:  <button>خروج از فضای کاری</button>
+      //   • ConfirmDialog:  role="alertdialog", confirmLabel="خروج"
+      // Scope the confirm click to the alertdialog. (The old
+      // page.once("dialog") shim is removed — no window.confirm anymore.)
       await userAPage.goto(`/workspaces/${workspaceSlug}/settings/danger`);
-      userAPage.once("dialog", (dialog) => dialog.accept());
-      await userAPage.getByRole("button", { name: /خروج از فضای کاری/i }).first().click();
+      await userAPage.getByRole("button", { name: "خروج از فضای کاری" }).click();
+      const leaveDialog = userAPage.getByRole("alertdialog");
+      await leaveDialog.getByRole("button", { name: "خروج", exact: true }).click();
       // After leaving, User A is bounced to /workspaces.
       await userAPage.waitForURL(/\/workspaces$/);
       // The workspace should no longer be in the sidebar.
