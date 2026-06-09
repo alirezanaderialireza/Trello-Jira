@@ -18,7 +18,7 @@
 // in standalone badges.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { WorkspaceRole } from "@repo/domain";
+import type { WorkspaceRole } from "@repo/domain/workspaces";
 
 /**
  * Persian display label for each `WorkspaceRole`. Used by sidebar

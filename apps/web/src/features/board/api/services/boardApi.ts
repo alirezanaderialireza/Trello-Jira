@@ -380,6 +380,18 @@ export const boardApi = {
   // Fixes runtime crash: previous methods called (trpc as any).attachment.add /
   // .remove which never existed. Now routes to v1.public.attachment.*.
 
+  // Generic add (link-style) attachment facade. Routes to the addLink
+  // procedure on the versioned router. Used by the optimistic
+  // useAddAttachment hook.
+  addAttachment: async (payload: {
+    cardId:     string;
+    url:        string;
+    mimeType:   string;
+    fileName:   string;
+    sizeBytes:  number;
+    mutationId: string;
+  }) => (trpc as any).v1.public.attachment.addLink.mutateAsync(payload),
+
   removeAttachment: async (payload: {
     attachmentId:   string;
     boardId:        string;

@@ -39,29 +39,28 @@ export interface WsEvent {
 }
 
 // ============================================================================
-// SyncStatus — union of FSM SyncState (superset of old enum)
+// SyncStatus — alias of the FSM SyncState
 // ============================================================================
 
 /**
- * SyncStatus is now identical to FSM SyncState.
+ * SyncStatus is identical to the FSM SyncState, i.e. one of:
+ *   "IDLE" | "CONNECTING" | "HEALTHY" | "GAP" | "REPLAYING" | "DESYNCED"
+ *   | "RECONNECTING"
  *
- * Backward-compat mapping for old consumers:
- *   "healthy"      → "synced"
- *   "gap_detected" → "catching_up"
- *   "reconnecting" → "reconnecting"
- *   "desynced"     → "offline"
- *
- * Old consumers that used the 4-value enum will now see 6 states.
- * The UI layer handles all 6 states explicitly.
+ * The UI layer normalises these into UISyncStatus via useSyncStatus() and must
+ * never switch on this raw type directly.
  */
 export type SyncStatus = SyncState;
 
-// Convenience mapping from old values to new FSM states
+/**
+ * Mapping from the legacy 4-value status enum to the canonical FSM SyncState.
+ * Kept for any old consumer that still produces the legacy strings.
+ */
 export const LEGACY_SYNC_STATUS_MAP: Record<string, SyncStatus> = {
-  healthy:       "synced",
-  gap_detected:  "catching_up",
-  reconnecting:  "reconnecting",
-  desynced:      "offline",
+  healthy:       "HEALTHY",
+  gap_detected:  "GAP",
+  reconnecting:  "RECONNECTING",
+  desynced:      "DESYNCED",
 };
 
 // ============================================================================

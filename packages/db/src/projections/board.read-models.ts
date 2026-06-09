@@ -1,6 +1,6 @@
 // packages/db/src/projections/board.read-models.ts
-import { eq, and, isNull, asc } from "drizzle-orm";
-import { boards, lists, cards } from "../schema";
+import { eq, and, isNull, asc, inArray } from "drizzle-orm";
+import { boards, lists, cards, cardLabels, cardAssignees } from "../schema";
 
 export class BoardReadModels {
   // 🔹 اضافه کردن list برای سازگاری با routerها
@@ -50,6 +50,50 @@ export class BoardReadModels {
       },
     });
 
+    // ── Batched per-card relation hydration (no N+1) ─────────────────────────
+    // labels (card_labels), assignees (card_assignees) and attachmentCount are
+    // NOT covered by the cards relation graph, so the initial projection used
+    // to render "naked" cards until per-card queries / realtime events arrived.
+    // We fetch all label + assignee rows for the board's cards in two queries
+    // and group them in memory, matching the store `CardDto` shape
+    // (labels: labelId[], assignees: userId[], attachmentCount: number).
+    const cardIds: string[] = allLists.flatMap((list: any) =>
+      (list.cards ?? []).map((c: any) => c.id),
+    );
+
+    const labelsByCard: Record<string, string[]> = {};
+    const assigneesByCard: Record<string, string[]> = {};
+
+    if (cardIds.length > 0) {
+      const labelRows = await this.db
+        .select({ cardId: cardLabels.cardId, labelId: cardLabels.labelId })
+        .from(cardLabels)
+        .where(
+          and(
+            eq(cardLabels.tenantId, params.tenantId),
+            inArray(cardLabels.cardId, cardIds),
+          ),
+        );
+      for (const row of labelRows as Array<{ cardId: string; labelId: string }>) {
+        (labelsByCard[row.cardId] ??= []).push(row.labelId);
+      }
+
+      const assigneeRows = await this.db
+        .select({ cardId: cardAssignees.cardId, userId: cardAssignees.userId })
+        .from(cardAssignees)
+        .where(
+          and(
+            eq(cardAssignees.tenantId, params.tenantId),
+            inArray(cardAssignees.cardId, cardIds),
+          ),
+        )
+        // D7: assignedAt asc → stable avatar ordering on the card preview.
+        .orderBy(asc(cardAssignees.assignedAt));
+      for (const row of assigneeRows as Array<{ cardId: string; userId: string }>) {
+        (assigneesByCard[row.cardId] ??= []).push(row.userId);
+      }
+    }
+
     const projection = {
       id: board.id,
       title: board.title,
@@ -67,6 +111,10 @@ export class BoardReadModels {
           description: card.description,
           dueDate: card.dueDate ?? null,
           coverData: card.coverData ?? null,
+          // ── Hydrated relations (match store CardDto) ─────────────────────
+          labels: labelsByCard[card.id] ?? [],
+          assignees: assigneesByCard[card.id] ?? [],
+          attachmentCount: card.attachmentCount ?? 0,
         })),
       })),
     };

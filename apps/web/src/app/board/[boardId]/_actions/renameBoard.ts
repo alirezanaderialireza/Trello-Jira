@@ -3,10 +3,9 @@
 // apps/web/src/app/board/[boardId]/_actions/renameBoard.ts
 //
 // Backs the About tab's title rename. Calls
-// v1.public.boardManagement.renameBoard. Description is NOT included
-// in F5b — the renameBoard procedure currently accepts only `title`
-// (steering TODO: extend renameBoard or add a dedicated procedure
-// when description editor lands in F1.2).
+// v1.public.boardManagement.updateBoardMetadata (title only) so the rename
+// emits a board.renamed outbox event (realtime + activity feed). The legacy
+// renameBoard procedure (no outbox) is deprecated.
 
 import { revalidatePath } from "next/cache";
 
@@ -41,9 +40,10 @@ export async function renameBoardAction(
   const caller = appRouter.createCaller(ctx);
 
   try {
-    await caller.v1.public.boardManagement.renameBoard({
+    await caller.v1.public.boardManagement.updateBoardMetadata({
       boardId: input.boardId,
       title: trimmed,
+      idempotencyKey: crypto.randomUUID(),
     });
     revalidatePath(`/board/${input.boardId}`);
     return { ok: true };

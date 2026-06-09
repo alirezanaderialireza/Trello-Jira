@@ -126,8 +126,12 @@ export type CommentDto = {
  * Type is defined in lib/members/types.ts (shared) so that shared
  * components (AssigneeAvatarStack, CardAssigneesBadge) can import it
  * without violating the boundaries linter.
+ *
+ * Imported locally (so it can be referenced in BoardStoreState/actions
+ * below) AND re-exported for consumers that import it from the store.
  */
-export type { BoardMemberDto } from "@/lib/members/types";
+import type { BoardMemberDto } from "@/lib/members/types";
+export type { BoardMemberDto };
 
 export type AttachmentDto = {
   id:         string;

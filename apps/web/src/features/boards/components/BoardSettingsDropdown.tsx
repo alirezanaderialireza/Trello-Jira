@@ -57,7 +57,7 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
     };
   }, [open]);
 
-  const renameMutation = trpc.v1.public.boardManagement.renameBoard.useMutation({
+  const renameMutation = trpc.v1.public.boardManagement.updateBoardMetadata.useMutation({
     onSuccess: () => { toast.success("نام بورد تغییر کرد."); setRenaming(false); onMutated(); },
     onError: (e) => toast.error(e.message),
   });
@@ -102,7 +102,7 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
               onSubmit={(e) => {
                 e.preventDefault();
                 if (newTitle.trim() && newTitle !== board.title) {
-                  renameMutation.mutate({ boardId: board.id, title: newTitle.trim() });
+                  renameMutation.mutate({ boardId: board.id, title: newTitle.trim(), idempotencyKey: crypto.randomUUID() });
                 } else {
                   setRenaming(false);
                 }

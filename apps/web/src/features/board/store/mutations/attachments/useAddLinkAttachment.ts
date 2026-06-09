@@ -6,7 +6,7 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { toast }        from "sonner";
-import { trpc }         from "../../../../utils/trpc";
+import { trpc }         from "../../../../../utils/trpc";
 
 interface AddLinkVars {
   cardId:  string;

@@ -78,8 +78,11 @@ export const activityRouter = router({
         LEFT JOIN labels l ON l.id = (o.payload->>'labelId')
           AND l.tenant_id = ${tenantId}
         LEFT JOIN lists fl ON fl.id = (o.payload->>'fromListId')
+          AND fl.tenant_id = ${tenantId}
         LEFT JOIN lists tl ON tl.id = (o.payload->>'toListId')
-        WHERE o.payload->>'cardId' = ${cardId}
+          AND tl.tenant_id = ${tenantId}
+        WHERE o.tenant_id = ${tenantId}
+          AND o.payload->>'cardId' = ${cardId}
           AND o.payload->>'boardId' = ${boardId}
           AND ${CARD_TOPICS_FILTER}
           ${cursorClause}
@@ -159,7 +162,8 @@ export const activityRouter = router({
           o.payload->>'authorId',
           o.payload->>'createdBy'
         )
-        WHERE o.payload->>'boardId' = ${boardId}
+        WHERE o.tenant_id = ${tenantId}
+          AND o.payload->>'boardId' = ${boardId}
           AND ${CARD_TOPICS_FILTER}
           ${cursorClause}
         ORDER BY o.occurred_at DESC
