@@ -22,7 +22,7 @@ import { BoardSettings } from "./_components/BoardSettings";
 
 import { archiveBoardAction } from "./_actions/archiveBoard";
 import { changeBoardMemberRoleAction } from "./_actions/changeBoardMemberRole";
-import { deleteBoardAction } from "./_actions/deleteBoard";
+import { softDeleteBoardAction } from "./_actions/softDeleteBoard";
 import { inviteBoardMemberAction } from "./_actions/inviteBoardMember";
 import { removeBoardMemberAction } from "./_actions/removeBoardMember";
 import { renameBoardAction } from "./_actions/renameBoard";
@@ -44,7 +44,7 @@ const BOARD_SETTINGS_ACTIONS = {
   onRename: renameBoardAction,
   onArchive: archiveBoardAction,
   onUnarchive: unarchiveBoardAction,
-  onDelete: deleteBoardAction,
+  onDelete: softDeleteBoardAction,
   onRestore: restoreBoardAction,
   onSetBackground: setBackgroundAction,
   onUpdateVisibility: updateBoardVisibilityAction,

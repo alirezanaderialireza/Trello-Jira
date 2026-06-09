@@ -35,22 +35,22 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
   }, [open]);
 
   const renameMutation = trpc.v1.public.boardManagement.renameBoard.useMutation({
-    onSuccess: () => { toast.success("Board renamed."); setRenaming(false); onMutated(); },
+    onSuccess: () => { toast.success("نام بورد تغییر کرد."); setRenaming(false); onMutated(); },
     onError: (e) => toast.error(e.message),
   });
 
   const archiveMutation = trpc.v1.public.boardManagement.archiveBoard.useMutation({
-    onSuccess: () => { toast.success("Board archived."); setOpen(false); onMutated(); },
+    onSuccess: () => { toast.success("بورد بایگانی شد."); setOpen(false); onMutated(); },
     onError: (e) => toast.error(e.message),
   });
 
   const unarchiveMutation = trpc.v1.public.boardManagement.unarchiveBoard.useMutation({
-    onSuccess: () => { toast.success("Board restored."); setOpen(false); onMutated(); },
+    onSuccess: () => { toast.success("بورد از بایگانی خارج شد."); setOpen(false); onMutated(); },
     onError: (e) => toast.error(e.message),
   });
 
-  const deleteMutation = trpc.v1.public.boardManagement.deleteBoard.useMutation({
-    onSuccess: () => { toast.success("Board deleted."); setOpen(false); onMutated(); },
+  const deleteMutation = trpc.v1.public.boardManagement.softDeleteBoard.useMutation({
+    onSuccess: () => { toast.success("بورد حذف شد."); setOpen(false); onMutated(); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -61,7 +61,7 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
       <button
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(!open); }}
         className="rounded p-1 text-slate-400 hover:bg-slate-600 hover:text-white"
-        aria-label="Board settings"
+        aria-label="تنظیمات بورد"
       >
         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01" />
@@ -69,7 +69,7 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-8 z-50 w-56 rounded-lg border border-slate-600 bg-slate-800 py-1 shadow-xl">
+        <div dir="rtl" className="absolute left-0 top-8 z-50 w-56 rounded-lg border border-slate-600 bg-slate-800 py-1 text-right shadow-xl">
           {/* Rename */}
           {renaming ? (
             <form
@@ -91,16 +91,16 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
                 className="w-full rounded border border-slate-600 bg-slate-700 px-2 py-1 text-sm text-white focus:border-blue-500 focus:outline-none"
               />
               <div className="mt-1 flex gap-1">
-                <button type="submit" className="rounded bg-blue-600 px-2 py-0.5 text-xs text-white">Save</button>
-                <button type="button" onClick={() => setRenaming(false)} className="text-xs text-slate-400">Cancel</button>
+                <button type="submit" className="rounded bg-blue-600 px-2 py-0.5 text-xs text-white">ذخیره</button>
+                <button type="button" onClick={() => setRenaming(false)} className="text-xs text-slate-400">انصراف</button>
               </div>
             </form>
           ) : (
             <button
               onClick={() => { setRenaming(true); setNewTitle(board.title); }}
-              className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-700"
+              className="w-full px-3 py-2 text-right text-sm text-slate-300 hover:bg-slate-700"
             >
-              Rename
+              تغییر نام
             </button>
           )}
 
@@ -108,16 +108,16 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
           {isArchived ? (
             <button
               onClick={() => unarchiveMutation.mutate({ boardId: board.id })}
-              className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-700"
+              className="w-full px-3 py-2 text-right text-sm text-slate-300 hover:bg-slate-700"
             >
-              Restore from archive
+              خروج از بایگانی
             </button>
           ) : (
             <button
               onClick={() => archiveMutation.mutate({ boardId: board.id })}
-              className="w-full px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-700"
+              className="w-full px-3 py-2 text-right text-sm text-slate-300 hover:bg-slate-700"
             >
-              Archive
+              بایگانی
             </button>
           )}
 
@@ -127,13 +127,14 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
               <div className="mx-3 my-1 border-t border-slate-700" />
               <button
                 onClick={() => {
-                  if (confirm(`Delete "${board.title}" permanently? This cannot be undone.`)) {
+                  // TODO(F1.4.4): replace window.confirm with Radix ConfirmDialog
+                  if (confirm(`حذف «${board.title}»؟ این عمل قابل بازگشت نیست.`)) {
                     deleteMutation.mutate({ boardId: board.id });
                   }
                 }}
-                className="w-full px-3 py-2 text-left text-sm text-red-400 hover:bg-red-900/30"
+                className="w-full px-3 py-2 text-right text-sm text-red-400 hover:bg-red-900/30"
               >
-                Delete board
+                حذف بورد
               </button>
             </>
           )}
