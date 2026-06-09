@@ -82,7 +82,7 @@ function VerifyEmailInner() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-900">
+    <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4">
       <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 p-8 text-center">
         {/* ── verifying ── */}
         {status === "loading" && (
@@ -196,7 +196,7 @@ function VerifyEmailInner() {
 // layout shift when the content hydrates on the client.
 function VerifyEmailFallback() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-900">
+    <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4">
       <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 p-8 text-center">
         <div className="h-8 w-8 mx-auto animate-spin rounded-full border-2 border-slate-600 border-t-blue-400 mb-4" />
         <p className="text-slate-300">در حال بارگذاری...</p>

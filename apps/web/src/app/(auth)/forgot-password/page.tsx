@@ -35,7 +35,7 @@ export default function ForgotPasswordPage() {
 
   if (sent) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900">
+      <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4">
         <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 p-8 text-center">
           <h1 className="text-xl font-bold text-white mb-4">✓ ایمیل ارسال شد</h1>
           <p className="text-slate-300 text-sm">
@@ -51,7 +51,7 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-900">
+    <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4">
       <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 p-8 shadow-2xl">
         <h1 className="text-2xl font-bold text-white text-center mb-6">بازنشانی رمز عبور</h1>
         <p className="text-sm text-slate-400 text-center mb-4">

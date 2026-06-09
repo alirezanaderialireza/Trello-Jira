@@ -703,7 +703,7 @@ export default function CardModal() {
             />
 
             <p className="text-sm text-gray-500">
-              in list{" "}
+              در لیست{" "}
               <span className="underline font-medium">
                 {listTitle}
               </span>

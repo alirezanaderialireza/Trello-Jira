@@ -43,7 +43,7 @@ function LoginForm() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-900">
+    <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4">
       <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 p-8 shadow-2xl">
         <h1 className="text-2xl font-bold text-white text-center mb-6">ورود به Trello OS</h1>
         {error && <div id="login-error" role="alert" className="mb-4 rounded-lg bg-red-900/30 border border-red-800 p-3 text-sm text-red-300">{error}</div>}
@@ -76,7 +76,7 @@ function LoginForm() {
 // no layout shift when the inner content hydrates on the client.
 function LoginFallback() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-900">
+    <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4">
       <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-800 p-8 shadow-2xl">
         <h1 className="text-2xl font-bold text-white text-center mb-6">ورود به Trello OS</h1>
         <div className="h-40" />

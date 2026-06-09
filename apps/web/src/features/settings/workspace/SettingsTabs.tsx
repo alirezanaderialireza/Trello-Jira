@@ -40,7 +40,7 @@ export function SettingsTabs({ slug, role: _role }: Props) {
 
   return (
     <nav
-      className="flex gap-1 border-b border-slate-200"
+      className="flex gap-1 overflow-x-auto border-b border-slate-200"
       aria-label="تب‌های تنظیمات"
     >
       {TABS.map((tab) => {
