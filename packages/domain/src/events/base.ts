@@ -33,6 +33,7 @@ export type DomainEventType =
   | "board.soft_deleted"
   | "board.restored"
   | "board.background_changed"
+  | "board.description_updated"
   // ── Board members (F3b) ─────────────────────────────────────────────────
   // Naming convention mirrors `workspace.member.*` from F3a.2: the
   // membership row is a sub-resource of the board aggregate, so events
