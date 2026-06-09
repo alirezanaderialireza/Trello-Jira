@@ -84,6 +84,17 @@ const sql = DATABASE_URL ? postgres(DATABASE_URL, { prepare: false, max: 5, idle
 const boardClients = new Map<string, Set<ClientState>>();
 
 // ============================================================================
+// User registry — userId → Set<ClientState>  (F1.2.9 notifications)
+// ============================================================================
+//
+// Independent of boardClients: a user's notification stream follows the
+// authenticated connection, not the board they happen to be viewing. A user
+// may have several connections (multiple tabs); a NEW_NOTIFICATION published
+// on `user:{userId}:notifications` is delivered to all of them.
+
+const userClients = new Map<string, Set<ClientState>>();
+
+// ============================================================================
 // WebSocket Server
 // ============================================================================
 
@@ -119,11 +130,13 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     broadcastPresenceLeave(client);
+    unregisterUserClient(client);
     unsubscribeClient(client);
   });
 
   ws.on("error", () => {
     broadcastPresenceLeave(client);
+    unregisterUserClient(client);
     unsubscribeClient(client);
   });
 });
@@ -203,6 +216,14 @@ async function subscribeClient(
   } else {
     // Dev mode: accept userId from message payload
     client.userId = userId ?? null;
+  }
+
+  // ── User notification stream (F1.2.9) ────────────────────────────────────
+  // Once the connection has an authenticated userId, register it in the
+  // user registry and ensure we're subscribed to its notification channel.
+  if (client.userId) {
+    registerUserClient(client);
+    ensureUserNotificationSubscription(client.userId);
   }
 
   if (client.boardId) {
@@ -489,8 +510,57 @@ function ensureRedisSubscription(boardId: string) {
   }
 }
 
+// ============================================================================
+// User notification registry + subscription (F1.2.9)
+// ============================================================================
+
+function registerUserClient(client: ClientState) {
+  if (!client.userId) return;
+  let set = userClients.get(client.userId);
+  if (!set) { set = new Set(); userClients.set(client.userId, set); }
+  set.add(client);
+}
+
+function unregisterUserClient(client: ClientState) {
+  if (!client.userId) return;
+  const set = userClients.get(client.userId);
+  if (set) {
+    set.delete(client);
+    if (set.size === 0) userClients.delete(client.userId);
+  }
+}
+
+function ensureUserNotificationSubscription(userId: string) {
+  const channel = `user:${userId}:notifications`;
+  if (!subscribedChannels.has(channel)) {
+    subscribedChannels.add(channel);
+    redisSub.subscribe(channel);
+  }
+}
+
 redisSub.on("message", (channel, message) => {
   const parts = channel.split(":");
+
+  // ── User notification channel (F1.2.9): user:{userId}:notifications ───────
+  if (parts[0] === "user" && parts[2] === "notifications") {
+    const userId = parts[1];
+    if (!userId) return;
+    const clients = userClients.get(userId);
+    if (!clients || clients.size === 0) return;
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(message);
+    } catch (err) {
+      console.error("[WS] Failed to parse notification message", err);
+      return;
+    }
+    for (const client of clients) {
+      send(client, { type: "NOTIFICATION", payload });
+    }
+    return;
+  }
+
   const boardId = parts[1];
   const channelType = parts[2]; // "events" or "presence"
   if (!boardId) return;
@@ -581,6 +651,7 @@ const heartbeatInterval = setInterval(() => {
         console.log(`[WS] Terminating stale client ${client.connectionId}`);
         broadcastPresenceLeave(client);
         client.ws.terminate();
+        unregisterUserClient(client);
         unsubscribeClient(client);
         continue;
       }

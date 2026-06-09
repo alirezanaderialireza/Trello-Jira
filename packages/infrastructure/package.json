@@ -6,11 +6,13 @@
   "exports": {
     ".": "./src/index.ts",
     "./auth/argon2Hasher": "./src/auth/argon2Hasher.ts",
-    "./email": "./src/email/index.ts"
+    "./email": "./src/email/index.ts",
+    "./notifications": "./src/notifications/notificationText.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src --max-warnings=0"
+    "lint": "eslint src --max-warnings=0",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.700.0",
@@ -24,6 +26,7 @@
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",
     "@types/node": "^25.6.0",
-    "typescript": "latest"
+    "typescript": "latest",
+    "vitest": "latest"
   }
 }

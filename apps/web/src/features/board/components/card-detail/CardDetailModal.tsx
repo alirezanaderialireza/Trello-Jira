@@ -15,6 +15,7 @@ import { CardActivity }    from "./CardActivity";
 import { CardAssignees }   from "./CardAssignees";
 import { CardCover }       from "./CardCover";
 import { CardAttachments } from "./CardAttachments";
+import { CardWatchButton } from "./CardWatchButton";
 import { useMemo, useState } from "react";
 
 type Tab = "details" | "comments" | "activity";
@@ -54,15 +55,18 @@ export function CardDetailModal() {
           <h2 dir="auto" className="text-lg font-semibold text-white truncate">
             {card.title}
           </h2>
-          <button
-            onClick={close}
-            aria-label="بستن"
-            className="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-white"
-          >
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2">
+            <CardWatchButton cardId={cardId} boardId={card.boardId} />
+            <button
+              onClick={close}
+              aria-label="بستن"
+              className="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-white"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* Tab navigation */}

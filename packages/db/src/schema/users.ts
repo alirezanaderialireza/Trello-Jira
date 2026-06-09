@@ -1,6 +1,6 @@
 // packages/db/src/schema/users.ts
 
-import { pgTable, uuid, varchar, text, timestamp, jsonb, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { pgTable, uuid, varchar, text, timestamp, jsonb, uniqueIndex, index, boolean } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const users = pgTable(
@@ -22,6 +22,12 @@ export const users = pgTable(
     avatarUrl: text("avatar_url"),
     bio: text("bio"),
     preferences: jsonb("preferences").notNull().default(sql`'{}'::jsonb`),
+
+    // Phase 1.2 (mig 0014, F1.2.9) — email notification opt-out flag. When
+    // false the outbox-worker skips sending notification emails to this user.
+    emailNotificationsEnabled: boolean("email_notifications_enabled")
+      .notNull()
+      .default(true),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

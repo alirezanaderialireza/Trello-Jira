@@ -16,11 +16,22 @@
 // handler that succeeds without throwing is treated as delivered.
 
 import { workspaceInvitationCreatedHandler } from "./workspaceInvitationCreated.handler";
+import { cardNotificationHandler } from "./cardNotification.handler";
+import { boardNotificationHandler } from "./boardNotification.handler";
 
 import type { EventHandler } from "../types";
 
 const HANDLERS: Record<string, EventHandler> = {
   "workspace.invitation.created": workspaceInvitationCreatedHandler,
+  // Card notifications (F1.2.9) — fan-out to card watchers.
+  "card.updated":             cardNotificationHandler,
+  "card.assignee_added":      cardNotificationHandler,
+  "card.due_date_updated":    cardNotificationHandler,
+  "comment.created":          cardNotificationHandler,
+  "checklist.item_updated":   cardNotificationHandler,
+  // Board notifications (F1.2.9) — single affected member.
+  "board.member.added":       boardNotificationHandler,
+  "board.member.removed":     boardNotificationHandler,
 };
 
 /**

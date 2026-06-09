@@ -26,6 +26,8 @@ import { DrizzleChecklistsRepository } from "./repositories/checklists.repositor
 import { DrizzleCommentsRepository } from "./repositories/comments.repository";
 import { DrizzleCardAssigneesRepository } from "./repositories/cardAssignees.repository";
 import { DrizzleAttachmentsRepository } from "./repositories/attachments.repository";
+import { DrizzleCardWatchersRepository } from "./repositories/cardWatchers.repository";
+import { DrizzleNotificationsRepository } from "./repositories/notifications.repository";
 import { BoardReadModels } from "./projections/board.read-models";
 
 // ============================================================================
@@ -76,6 +78,8 @@ export const checklistsRepo = new DrizzleChecklistsRepository(db);
 export const commentsRepo = new DrizzleCommentsRepository(db);
 export const cardAssigneesRepo = new DrizzleCardAssigneesRepository(db);
 export const attachmentsRepo = new DrizzleAttachmentsRepository(db);
+export const cardWatchersRepo = new DrizzleCardWatchersRepository(db);
+export const notificationsRepo = new DrizzleNotificationsRepository(db);
 
 // ============================================================================
 // 🌟 4. Export Repository Classes (Type Usage)
@@ -96,6 +100,8 @@ export {
   DrizzleCommentsRepository,
   DrizzleCardAssigneesRepository,
   DrizzleAttachmentsRepository,
+  DrizzleCardWatchersRepository,
+  DrizzleNotificationsRepository,
   BoardReadModels,
 };
 
@@ -107,6 +113,10 @@ export type { SidebarBoardLink } from "./repositories/userBoardMetadata.reposito
 
 // F3a.1 read-side projection types
 export type { WorkspaceListItem, WorkspaceDetail, WorkspaceMemberWithUser } from "./repositories/workspaces.repository";
+
+// F1.2.9 notifications + watchers entity types
+export type { NotificationEntity } from "./repositories/notifications.repository";
+export type { CardWatcherEntity } from "./repositories/cardWatchers.repository";
 
 // ============================================================================
 // 🌟 5. Re-Exports Schemas (برای دسترسی سایر لایه‌ها به تایپ‌ها و جدول‌ها)

@@ -32,7 +32,7 @@ import { eq, and, isNull } from "drizzle-orm";
 
 import { router, boardProtectedProcedure } from "../../trpc";
 
-import { DrizzleCommentsRepository, cards } from "@repo/db";
+import { DrizzleCommentsRepository, DrizzleCardWatchersRepository, cards } from "@repo/db";
 
 import {
   // Use-cases
@@ -266,6 +266,17 @@ export const commentsRouter = router({
             await ctx.repos.outbox.append(
               ctx.infra.db,
               toOutboxEvent(event),
+            );
+
+            // Auto-watch (F1.2.9): the commenter starts watching the card so
+            // they receive notifications for subsequent activity. Idempotent
+            // (ON CONFLICT DO NOTHING) so re-commenting is a no-op.
+            const watchersRepo = new DrizzleCardWatchersRepository(ctx.infra.db);
+            await watchersRepo.watch(
+              input.cardId,
+              ctx.session.user.id,
+              ctx.session.tenantId,
+              ctx.infra.db,
             );
 
             return {

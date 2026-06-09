@@ -10,6 +10,10 @@ import type {
 export { createStorageService, StorageServiceImpl } from "./storage/storageService";
 export type { IStorageService, StorageServiceConfig, PresignedPutOptions, PresignedGetOptions } from "./storage/storageService";
 
+// Phase 1.2 (F1.2.9) — Notification text builder
+export { buildNotificationText } from "./notifications/notificationText";
+export type { NotificationText } from "./notifications/notificationText";
+
 // Re-export auth, cache, audit, ws modules
 export { TokenService, TokenError } from "./auth/tokenService";
 export type { TokenPair, AccessTokenClaims, TokenServiceConfig } from "./auth/tokenService";
