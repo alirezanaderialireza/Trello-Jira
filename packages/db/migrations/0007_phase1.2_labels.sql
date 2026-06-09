@@ -214,7 +214,7 @@ CREATE POLICY labels_tenant_select ON "labels"
       SELECT 1
       FROM "board_members" bm
       WHERE bm.board_id  = labels.board_id
-        AND bm.user_id   = app.current_user_id()
+        AND bm.user_id   = app.current_user_id()::text
         AND bm.tenant_id = current_tenant_id()
         AND bm.removed_at IS NULL
     )
@@ -229,7 +229,7 @@ CREATE POLICY labels_tenant_insert ON "labels"
       SELECT 1
       FROM "board_members" bm
       WHERE bm.board_id  = labels.board_id
-        AND bm.user_id   = app.current_user_id()
+        AND bm.user_id   = app.current_user_id()::text
         AND bm.tenant_id = current_tenant_id()
         AND bm.removed_at IS NULL
     )
@@ -247,7 +247,7 @@ CREATE POLICY labels_tenant_update ON "labels"
       SELECT 1
       FROM "board_members" bm
       WHERE bm.board_id  = labels.board_id
-        AND bm.user_id   = app.current_user_id()
+        AND bm.user_id   = app.current_user_id()::text
         AND bm.tenant_id = current_tenant_id()
         AND bm.removed_at IS NULL
     )
@@ -265,7 +265,7 @@ CREATE POLICY labels_tenant_delete ON "labels"
       SELECT 1
       FROM "board_members" bm
       WHERE bm.board_id  = labels.board_id
-        AND bm.user_id   = app.current_user_id()
+        AND bm.user_id   = app.current_user_id()::text
         AND bm.tenant_id = current_tenant_id()
         AND bm.removed_at IS NULL
     )
