@@ -34,7 +34,7 @@ export default function AppLoading() {
       </aside>
 
       <main className="row-start-2 flex items-center justify-center bg-white">
-        <div className="text-sm text-slate-400">در حال بارگذاری…</div>
+        <div className="text-sm text-slate-500">در حال بارگذاری…</div>
       </main>
     </div>
   );

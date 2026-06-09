@@ -48,7 +48,7 @@ export default function SignupPage() {
             <Link href="/verify-email" className="text-blue-400 hover:text-blue-300 text-sm">
               ارسال مجدد لینک تأیید
             </Link>
-            <Link href="/login" className="text-slate-500 hover:text-slate-300 text-sm">
+            <Link href="/login" className="text-slate-400 hover:text-slate-200 text-sm">
               بازگشت به صفحه ورود
             </Link>
           </div>

@@ -133,7 +133,7 @@ function VerifyEmailInner() {
                 {resendLoading ? "در حال ارسال..." : "ارسال لینک جدید"}
               </button>
             </form>
-            <Link href="/login" className="mt-4 inline-block text-slate-500 hover:text-slate-300 text-sm">
+            <Link href="/login" className="mt-4 inline-block text-slate-400 hover:text-slate-200 text-sm">
               بازگشت به ورود
             </Link>
           </>
@@ -168,7 +168,7 @@ function VerifyEmailInner() {
                 {resendLoading ? "در حال ارسال..." : "ارسال مجدد لینک"}
               </button>
             </form>
-            <Link href="/login" className="mt-4 inline-block text-slate-500 hover:text-slate-300 text-sm">
+            <Link href="/login" className="mt-4 inline-block text-slate-400 hover:text-slate-200 text-sm">
               بازگشت به ورود
             </Link>
           </>
