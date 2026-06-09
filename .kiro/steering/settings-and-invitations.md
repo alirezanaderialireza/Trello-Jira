@@ -405,12 +405,11 @@ better UX than a 403.
   optional `description` input, or add a new
   `boardManagement.updateBoardMetadata` procedure. F1.2 candidate.
 
-- **Naming cleanup** — `boardManagement.deleteBoard` performs a
-  SOFT delete but the procedure name doesn't say so. Rename to
-  `softDeleteBoard` for parity with workspace delete /
-  restore pair. Requires updating consumers (Server Action +
-  any UI test files). Schedule alongside the description editor
-  PR so we touch board-management.ts once.
+- **Naming cleanup** — ✓ **Done (F1.4.1)**. `boardManagement.deleteBoard`
+  (which performs a SOFT delete) was renamed to `softDeleteBoard` for parity
+  with the workspace softDelete / restore pair. All consumers (Server Action
+  `softDeleteBoardAction`, page.tsx, BoardSettingsDropdown) were updated
+  atomically — no alias (monorepo, no external consumers).
 
 - **Sidebar archived board filter** — ✅ **CLOSED in F5c**.
   Added `isNull(boards.archivedAt)` to the WHERE clauses of both

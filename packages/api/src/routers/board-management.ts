@@ -5,7 +5,7 @@
 //
 // F3b changes:
 //   • Three pre-existing procedures (archiveBoard / unarchiveBoard /
-//     deleteBoard) are migrated from the legacy `assertBoardAdmin` helper
+//     softDeleteBoard) are migrated from the legacy `assertBoardAdmin` helper
 //     to the F2 role + lifecycle procedure builders. The pre-F3b
 //     procedures performed the role check inline AND queried `boards` a
 //     second time to resolve the row — the F2 builders fold both checks
@@ -371,13 +371,13 @@ export const boardManagementRouter = router({
       });
     }),
 
-  // ── deleteBoard (refactored — soft delete) ───────────────────────────────
+  // ── softDeleteBoard (soft delete) ────────────────────────────────────────
   //
   // F2 boardAdminWriteProcedure already enforces OWNER/ADMIN role. The
   // pre-F3b implementation additionally required OWNER (not ADMIN) for
   // delete — that rule is preserved here as an explicit role check on
   // ctx.boardMembership.
-  deleteBoard: boardAdminWriteProcedure
+  softDeleteBoard: boardAdminWriteProcedure
     .input(
       z.object({
         boardId: BoardIdSchema,

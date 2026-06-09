@@ -216,7 +216,7 @@ Recorded so the next planner doesn't re-discover them.
 |---|---|---|---|
 | `email_sent_at` column on `workspace_invitations` | F5a | Phase 1.2 | Needs migration + worker change; pairs with the soft-delete email handler PR. |
 | Description editor in board About tab | F5b | Phase 1.2 | `boardManagement.renameBoard` doesn't yet accept `description`; either extend or add `updateBoardMetadata`. |
-| Procedure naming: `boardManagement.deleteBoard` → `softDeleteBoard` | F5b | Phase 1.2 | Renames a public API. Touches consumers in tests + UI; ship alongside the description editor PR so we touch board-management.ts once. |
+| Procedure naming: `boardManagement.deleteBoard` → `softDeleteBoard` | F5b | ✓ Done (F1.4.1) | Renamed; consumers (action + UI) updated atomically. No alias (monorepo). |
 | `app_service` Postgres role for serviceRoleConnection | F5/devops | Phase 1.5 | Infra/ops work; current code uses a single role for both BYPASSRLS and tenant-scoped queries. |
 | IP-based rate-limit on `getByToken` | F3a | Phase 2 (security hardening) | Defence against token-probe attacks; not blocking for MVP. |
 | Workspace.createInvitation legacy procedure removal | F4 | Phase 1.2 | Cleanup task, no functional impact. |
