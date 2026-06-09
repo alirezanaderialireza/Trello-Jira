@@ -197,7 +197,7 @@ CREATE POLICY checklists_tenant_select ON "checklists"
       SELECT 1
       FROM "board_members" bm
       WHERE bm.board_id  = checklists.board_id
-        AND bm.user_id   = app.current_user_id()
+        AND bm.user_id   = app.current_user_id()::text
         AND bm.tenant_id = current_tenant_id()
         AND bm.removed_at IS NULL
     )
@@ -211,7 +211,7 @@ CREATE POLICY checklists_tenant_insert ON "checklists"
       SELECT 1
       FROM "board_members" bm
       WHERE bm.board_id  = checklists.board_id
-        AND bm.user_id   = app.current_user_id()
+        AND bm.user_id   = app.current_user_id()::text
         AND bm.tenant_id = current_tenant_id()
         AND bm.removed_at IS NULL
     )
@@ -225,7 +225,7 @@ CREATE POLICY checklists_tenant_update ON "checklists"
       SELECT 1
       FROM "board_members" bm
       WHERE bm.board_id  = checklists.board_id
-        AND bm.user_id   = app.current_user_id()
+        AND bm.user_id   = app.current_user_id()::text
         AND bm.tenant_id = current_tenant_id()
         AND bm.removed_at IS NULL
     )
@@ -242,7 +242,7 @@ CREATE POLICY checklists_tenant_delete ON "checklists"
       SELECT 1
       FROM "board_members" bm
       WHERE bm.board_id  = checklists.board_id
-        AND bm.user_id   = app.current_user_id()
+        AND bm.user_id   = app.current_user_id()::text
         AND bm.tenant_id = current_tenant_id()
         AND bm.removed_at IS NULL
     )

@@ -1,4 +1,7 @@
--- Migration: 0011_phase1.2_card_assignees.sql
+-- Migration: 0013_phase1.2_card_assignees.sql
+-- (Renamed from 0011 in C-02: the 0011 prefix collided with
+--  0011_phase1.2_attachments.sql, making migration order non-deterministic.
+--  Moved to the free 0013 slot. SQL body unchanged.)
 -- Phase 1.2 (F1.2.5) — Card Assignees junction table.
 --
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -44,7 +47,7 @@
 DO $$
 BEGIN
   RAISE NOTICE
-    '[migration 0011] Phase 1.2 F1.2.5 — creating card_assignees junction table '
+    '[migration 0013] Phase 1.2 F1.2.5 — creating card_assignees junction table '
     'with denormalised tenant_id, assigned_by/at audit columns, composite PK, '
     'reverse-lookup index for "My Cards" (F1.5), and split per-command RLS.';
 END$$;
@@ -54,11 +57,18 @@ END$$;
 -- 1. card_assignees table
 -- ============================================================================
 
+-- NOTE (provisioning fix): user_id / assigned_by are varchar(128) and hold
+-- Auth.js subject IDs. They must NOT carry a FK to users(id) — users.id is a
+-- `uuid`, so a varchar->uuid foreign key is a type mismatch that Postgres
+-- rejects ("incompatible types: character varying and uuid"). This made
+-- `drizzle-kit migrate` fail on a fresh DB (push silently dropped the bad FK,
+-- which is why it was never caught). Same no-FK pattern as board_members,
+-- comments.author_id, card_watchers.user_id and notifications.user_id.
 CREATE TABLE IF NOT EXISTS "card_assignees" (
-  "card_id"     uuid         NOT NULL REFERENCES "cards"("id")  ON DELETE CASCADE,
-  "user_id"     varchar(128) NOT NULL REFERENCES "users"("id")  ON DELETE CASCADE,
+  "card_id"     uuid         NOT NULL REFERENCES "cards"("id") ON DELETE CASCADE,
+  "user_id"     varchar(128) NOT NULL,
   "tenant_id"   uuid         NOT NULL,
-  "assigned_by" varchar(128) NOT NULL REFERENCES "users"("id"),
+  "assigned_by" varchar(128) NOT NULL,
   "assigned_at" timestamp with time zone NOT NULL DEFAULT now(),
 
   PRIMARY KEY ("card_id", "user_id")

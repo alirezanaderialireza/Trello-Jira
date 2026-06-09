@@ -20,9 +20,9 @@ export function BoardMembersPanel({ boardId }: Props) {
   const inviteMutation = trpc.v1.public.boardMembers.inviteMember.useMutation({
     onSuccess: (result) => {
       if (result.alreadyMember) {
-        toast.info("User is already a member.");
+        toast.info("این کاربر از قبل عضو است.");
       } else {
-        toast.success("Member invited successfully.");
+        toast.success("دعوت با موفقیت ارسال شد.");
       }
       setInviteUserId("");
       refetch();
@@ -31,12 +31,12 @@ export function BoardMembersPanel({ boardId }: Props) {
   });
 
   const removeMutation = trpc.v1.public.boardMembers.removeMember.useMutation({
-    onSuccess: () => { toast.success("Member removed."); refetch(); },
+    onSuccess: () => { toast.success("عضو حذف شد."); refetch(); },
     onError: (err) => toast.error(err.message),
   });
 
   const changeRoleMutation = trpc.v1.public.boardMembers.changeRole.useMutation({
-    onSuccess: () => { toast.success("Role updated."); refetch(); },
+    onSuccess: () => { toast.success("نقش به‌روزرسانی شد."); refetch(); },
     onError: (err) => toast.error(err.message),
   });
 
@@ -44,12 +44,12 @@ export function BoardMembersPanel({ boardId }: Props) {
   const isOwner = data?.currentUserRole === "OWNER";
 
   if (isLoading) {
-    return <div className="p-4 text-sm text-slate-400">Loading members...</div>;
+    return <div className="p-4 text-sm text-slate-400">در حال بارگذاری اعضا...</div>;
   }
 
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-800 p-4">
-      <h3 className="text-sm font-semibold text-white">Board Members</h3>
+      <h3 className="text-sm font-semibold text-white">اعضای بورد</h3>
 
       {/* Member list */}
       <ul className="mt-3 space-y-2">
@@ -81,15 +81,15 @@ export function BoardMembersPanel({ boardId }: Props) {
                     }
                     className="rounded border border-slate-600 bg-slate-700 px-1 py-0.5 text-[11px] text-slate-300"
                   >
-                    <option value="MEMBER">Member</option>
-                    <option value="ADMIN">Admin</option>
+                    <option value="MEMBER">عضو</option>
+                    <option value="ADMIN">مدیر</option>
                   </select>
                 )}
 
                 <button
                   onClick={() => setRemoveTarget(member.userId)}
                   className="ms-1 rounded p-1 text-slate-400 hover:bg-red-900/30 hover:text-red-400"
-                  title="Remove member"
+                  title="حذف عضو"
                 >
                   <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -111,7 +111,7 @@ export function BoardMembersPanel({ boardId }: Props) {
           }}
           className="mt-4 border-t border-slate-700 pt-3"
         >
-          <p className="mb-2 text-xs font-medium text-slate-400">Invite a new member</p>
+          <p className="mb-2 text-xs font-medium text-slate-400">دعوت عضو جدید</p>
           <div className="flex gap-2">
             <input
               type="text"
@@ -125,15 +125,15 @@ export function BoardMembersPanel({ boardId }: Props) {
               onChange={(e) => setInviteRole(e.target.value as "MEMBER" | "ADMIN")}
               className="rounded border border-slate-600 bg-slate-700 px-2 py-1.5 text-sm text-slate-300"
             >
-              <option value="MEMBER">Member</option>
-              {isOwner && <option value="ADMIN">Admin</option>}
+              <option value="MEMBER">عضو</option>
+              {isOwner && <option value="ADMIN">مدیر</option>}
             </select>
             <button
               type="submit"
               disabled={!inviteUserId.trim() || inviteMutation.isPending}
               className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
             >
-              {inviteMutation.isPending ? "..." : "Invite"}
+              {inviteMutation.isPending ? "..." : "دعوت"}
             </button>
           </div>
         </form>

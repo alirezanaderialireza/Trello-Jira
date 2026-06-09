@@ -12,7 +12,7 @@
 // Pagination (D9): cursor-based via nextCursor (ISO timestamp).
 //   «نمایش بیشتر» appends next page to allEntries.
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2 }            from "lucide-react";
 
 import { trpc }               from "../../../../utils/trpc";
@@ -37,22 +37,30 @@ export function CardActivity({ cardId, boardId }: Props) {
   // ── tRPC query (initial + paginated loads) ────────────────────────────────
   const query = trpc.v1.public.activity.getByCard.useQuery(
     { boardId, cardId, limit: PAGE_LIMIT, cursor },
-    {
-      staleTime: 30_000,
-      onSuccess: (data: any) => {
-        const incoming = (data.events ?? []) as ActivityEntry[];
-        setAllEntries((prev) => {
-          const seen = new Set(prev.map((e) => e.id));
-          const fresh = incoming.filter((e) => !seen.has(e.id));
-          // Sort all together DESC by timestamp
-          return [...prev, ...fresh].sort(
-            (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-          );
-        });
-        setNextCursor((data.nextCursor as string | null) ?? null);
-      },
-    } as any,
+    { staleTime: 30_000 },
   );
+
+  // ── Accumulate pages (react-query v5) ─────────────────────────────────────
+  // v5 removed the `onSuccess` callback from useQuery, so the previous
+  // accumulation logic (cast away with `as any`) was dead code: allEntries
+  // never filled and the timeline only showed live ws events. Accumulate in
+  // an effect keyed on the query result instead. Dedup by id makes re-runs
+  // (e.g. a refetch returning the same page) idempotent.
+  useEffect(() => {
+    const data = query.data as
+      | { events?: ActivityEntry[]; nextCursor?: string | null }
+      | undefined;
+    if (!data) return;
+    const incoming = (data.events ?? []) as ActivityEntry[];
+    setAllEntries((prev) => {
+      const seen = new Set(prev.map((e) => e.id));
+      const fresh = incoming.filter((e) => !seen.has(e.id));
+      return [...prev, ...fresh].sort(
+        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      );
+    });
+    setNextCursor(data.nextCursor ?? null);
+  }, [query.data]);
 
   // ── Real-time feed from store (D7) ────────────────────────────────────────
   const realtimeEntries = useBoardStore(
@@ -78,15 +86,9 @@ export function CardActivity({ cardId, boardId }: Props) {
   const boardMembers = useBoardStore((s: any) => s.boardMembers);
 
   // ── Load more ─────────────────────────────────────────────────────────────
-  const [loadingMore, setLoadingMore] = useState(false);
-
   function handleLoadMore() {
-    if (!nextCursor || loadingMore) return;
-    setLoadingMore(true);
+    if (!nextCursor || query.isFetching) return;
     setCursor(nextCursor);
-    // Reset loadingMore once the next query result arrives.
-    // onSuccess above will set allEntries; we clear flag after mount.
-    setTimeout(() => setLoadingMore(false), 3000);
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -122,10 +124,10 @@ export function CardActivity({ cardId, boardId }: Props) {
           <button
             type="button"
             onClick={handleLoadMore}
-            disabled={loadingMore || query.isFetching}
+            disabled={query.isFetching}
             className="inline-flex items-center gap-1.5 rounded-md border border-slate-600 px-3 py-1.5 text-xs text-slate-400 hover:border-slate-500 hover:text-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loadingMore || query.isFetching ? (
+            {query.isFetching ? (
               <>
                 <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
                 <span>در حال بارگذاری...</span>

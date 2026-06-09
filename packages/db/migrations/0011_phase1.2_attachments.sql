@@ -15,7 +15,7 @@
 --   C. Installs split per-command RLS policies on `attachments`.
 --      Pattern: tenant-only (no board_members EXISTS) because attachments
 --      are reachable only through cards which already enforce membership.
---      Same rationale as card_assignees (0011) and checklist_items (0009).
+--      Same rationale as card_assignees (0013) and checklist_items (0009).
 --
 -- ─────────────────────────────────────────────────────────────────────────────
 -- IDEMPOTENCY

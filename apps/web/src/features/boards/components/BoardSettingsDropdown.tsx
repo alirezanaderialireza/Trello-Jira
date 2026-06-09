@@ -21,19 +21,40 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
   const [newTitle, setNewTitle] = useState(board.title);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const isAdmin = board.role === "OWNER" || board.role === "ADMIN";
   const isOwner = board.role === "OWNER";
   const isArchived = !!board.archivedAt;
 
-  // Close dropdown on outside click
+  // Dismissable-layer behaviour (a11y-conventions.md): close on outside click
+  // AND Escape; move focus to the first menu item on open and restore it to
+  // the trigger on close.
   useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
+    const onMouseDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    // Focus the first menu item once the panel is mounted.
+    queueMicrotask(() => {
+      ref.current
+        ?.querySelector<HTMLElement>('[role="menuitem"]')
+        ?.focus();
+    });
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+      // Restore focus to the trigger when the menu closes.
+      triggerRef.current?.focus();
+    };
   }, [open]);
 
   const renameMutation = trpc.v1.public.boardManagement.renameBoard.useMutation({
@@ -61,9 +82,12 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
   return (
     <div ref={ref} className="relative">
       <button
+        ref={triggerRef}
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(!open); }}
         className="rounded p-1 text-slate-400 hover:bg-slate-600 hover:text-white"
         aria-label="تنظیمات بورد"
+        aria-haspopup="menu"
+        aria-expanded={open}
       >
         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01" />
@@ -71,7 +95,7 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
       </button>
 
       {open && (
-        <div dir="rtl" className="absolute end-0 top-8 z-50 w-56 rounded-lg border border-slate-600 bg-slate-800 py-1 text-start shadow-xl">
+        <div role="menu" dir="rtl" className="absolute end-0 top-8 z-50 w-56 rounded-lg border border-slate-600 bg-slate-800 py-1 text-start shadow-xl">
           {/* Rename */}
           {renaming ? (
             <form
@@ -99,6 +123,7 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
             </form>
           ) : (
             <button
+              role="menuitem"
               onClick={() => { setRenaming(true); setNewTitle(board.title); }}
               className="w-full px-3 py-2 text-start text-sm text-slate-300 hover:bg-slate-700"
             >
@@ -109,6 +134,7 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
           {/* Archive / Unarchive */}
           {isArchived ? (
             <button
+              role="menuitem"
               onClick={() => unarchiveMutation.mutate({ boardId: board.id })}
               className="w-full px-3 py-2 text-start text-sm text-slate-300 hover:bg-slate-700"
             >
@@ -116,6 +142,7 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
             </button>
           ) : (
             <button
+              role="menuitem"
               onClick={() => archiveMutation.mutate({ boardId: board.id })}
               className="w-full px-3 py-2 text-start text-sm text-slate-300 hover:bg-slate-700"
             >
@@ -128,6 +155,7 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
             <>
               <div className="mx-3 my-1 border-t border-slate-700" />
               <button
+                role="menuitem"
                 onClick={() => setConfirmDeleteOpen(true)}
                 className="w-full px-3 py-2 text-start text-sm text-red-400 hover:bg-red-900/30"
               >

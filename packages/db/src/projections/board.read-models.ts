@@ -1,4 +1,4 @@
-// packages/api/src/read-models/board-read-models.ts
+// packages/db/src/projections/board.read-models.ts
 import { eq, and, isNull, asc } from "drizzle-orm";
 import { boards, lists, cards } from "../schema";
 

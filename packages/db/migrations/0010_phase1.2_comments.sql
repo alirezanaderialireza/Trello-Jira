@@ -119,7 +119,7 @@ CREATE POLICY comments_tenant_select ON "comments"
       SELECT 1
       FROM "board_members" bm
       WHERE bm.board_id  = comments.board_id
-        AND bm.user_id   = app.current_user_id()
+        AND bm.user_id   = app.current_user_id()::text
         AND bm.tenant_id = current_tenant_id()
         AND bm.removed_at IS NULL
     )
@@ -134,7 +134,7 @@ CREATE POLICY comments_tenant_insert ON "comments"
       SELECT 1
       FROM "board_members" bm
       WHERE bm.board_id  = comments.board_id
-        AND bm.user_id   = app.current_user_id()
+        AND bm.user_id   = app.current_user_id()::text
         AND bm.tenant_id = current_tenant_id()
         AND bm.removed_at IS NULL
     )
@@ -150,7 +150,7 @@ CREATE POLICY comments_tenant_update ON "comments"
       SELECT 1
       FROM "board_members" bm
       WHERE bm.board_id  = comments.board_id
-        AND bm.user_id   = app.current_user_id()
+        AND bm.user_id   = app.current_user_id()::text
         AND bm.tenant_id = current_tenant_id()
         AND bm.removed_at IS NULL
     )
@@ -166,7 +166,7 @@ CREATE POLICY comments_tenant_delete ON "comments"
       SELECT 1
       FROM "board_members" bm
       WHERE bm.board_id  = comments.board_id
-        AND bm.user_id   = app.current_user_id()
+        AND bm.user_id   = app.current_user_id()::text
         AND bm.tenant_id = current_tenant_id()
         AND bm.removed_at IS NULL
     )

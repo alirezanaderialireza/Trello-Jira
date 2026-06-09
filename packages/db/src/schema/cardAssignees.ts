@@ -2,7 +2,7 @@
 //
 // Phase 1.2 (F1.2.5) — card_assignees junction table.
 //
-// Mirrors migration 0011. Composite PK (card_id, user_id) — no synthetic id.
+// Mirrors migration 0013. Composite PK (card_id, user_id) — no synthetic id.
 // tenant_id denormalised for RLS (same pattern as card_labels, checklist_items).
 // assigned_by + assigned_at for audit trail.
 //
@@ -18,7 +18,6 @@ import {
   primaryKey,
 } from "drizzle-orm/pg-core";
 import { cards }  from "./cards";
-import { users }  from "./users";
 
 export const cardAssignees = pgTable(
   "card_assignees",
@@ -26,13 +25,13 @@ export const cardAssignees = pgTable(
     cardId:     uuid("card_id")
                   .references(() => cards.id, { onDelete: "cascade" })
                   .notNull(),
-    userId:     varchar("user_id", { length: 128 })
-                  .references(() => users.id, { onDelete: "cascade" })
-                  .notNull(),
+    // user_id / assigned_by hold Auth.js subject IDs as varchar(128) with NO
+    // FK to users(id): users.id is a uuid, so a varchar->uuid FK is a type
+    // mismatch Postgres rejects (broke `drizzle-kit migrate` on a fresh DB).
+    // Same no-FK pattern as boardMembers, comments.authorId, cardWatchers.
+    userId:     varchar("user_id", { length: 128 }).notNull(),
     tenantId:   uuid("tenant_id").notNull(),
-    assignedBy: varchar("assigned_by", { length: 128 })
-                  .references(() => users.id)
-                  .notNull(),
+    assignedBy: varchar("assigned_by", { length: 128 }).notNull(),
     assignedAt: timestamp("assigned_at", { withTimezone: true })
                   .notNull()
                   .defaultNow(),
