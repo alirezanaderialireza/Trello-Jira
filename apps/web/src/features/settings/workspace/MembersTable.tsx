@@ -29,6 +29,7 @@ import { Crown, ShieldCheck, Trash2, UserRound } from "lucide-react";
 
 import { toJalaliDisplay, utcFromServer } from "@/lib/date";
 import { TransferOwnershipDialog } from "./TransferOwnershipDialog";
+import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -103,6 +104,29 @@ export function MembersTable({
 }: Props) {
   // Transfer ownership dialog state — opens with the targeted member.
   const [transferTarget, setTransferTarget] = useState<MemberRow | null>(null);
+  // Remove-member confirm dialog state — opens with the targeted member.
+  // Lifted to the table (not the row) because a fixed dialog cannot be a
+  // valid child of a <tr>; mirrors the transfer-ownership pattern.
+  const [removeTarget, setRemoveTarget] = useState<MemberRow | null>(null);
+  const [isRemoving, startRemove] = useTransition();
+  const router = useRouter();
+
+  const performRemove = () => {
+    const target = removeTarget;
+    if (!target) return;
+    startRemove(async () => {
+      const result = await onRemove({ workspaceId, userId: target.userId });
+      if (result.ok) {
+        toast.success("عضو حذف شد.");
+        router.refresh();
+      } else {
+        toast.error(result.error ?? "خطا در حذف عضو.");
+      }
+      setRemoveTarget(null);
+    });
+  };
+
+  const removeName = removeTarget?.user?.displayName ?? "این عضو";
 
   return (
     <>
@@ -127,7 +151,8 @@ export function MembersTable({
                 currentUserId={currentUserId}
                 currentUserRole={currentUserRole}
                 onUpdateRole={onUpdateRole}
-                onRemove={onRemove}
+                onOpenRemove={() => setRemoveTarget(member)}
+                removePending={isRemoving && removeTarget?.userId === member.userId}
                 onOpenTransfer={() => setTransferTarget(member)}
               />
             ))}
@@ -149,6 +174,18 @@ export function MembersTable({
         onClose={() => setTransferTarget(null)}
         onConfirm={onTransferOwnership}
       />
+
+      <ConfirmDialog
+        open={removeTarget !== null}
+        title="حذف عضو از فضای کاری"
+        description={`آیا «${removeName}» از فضای کاری حذف شود؟`}
+        confirmLabel="حذف"
+        cancelLabel="انصراف"
+        variant="danger"
+        isPending={isRemoving}
+        onConfirm={performRemove}
+        onCancel={() => setRemoveTarget(null)}
+      />
     </>
   );
 }
@@ -163,7 +200,8 @@ function MemberTableRow({
   currentUserId,
   currentUserRole,
   onUpdateRole,
-  onRemove,
+  onOpenRemove,
+  removePending,
   onOpenTransfer,
 }: {
   workspaceId: string;
@@ -171,7 +209,8 @@ function MemberTableRow({
   currentUserId: string;
   currentUserRole: "OWNER" | "ADMIN";
   onUpdateRole: UpdateRoleAction;
-  onRemove: RemoveMemberAction;
+  onOpenRemove: () => void;
+  removePending: boolean;
   onOpenTransfer: () => void;
 }) {
   const router = useRouter();
@@ -214,21 +253,11 @@ function MemberTableRow({
 
   const handleRemove = () => {
     if (!canRemove) return;
-    const memberName = member.user?.displayName ?? "این عضو";
-    if (!window.confirm(`آیا «${memberName}» از فضای کاری حذف شود؟`)) return;
-    startTransition(async () => {
-      const result = await onRemove({ workspaceId, userId: member.userId });
-      if (result.ok) {
-        toast.success("عضو حذف شد.");
-        router.refresh();
-      } else {
-        toast.error(result.error ?? "خطا در حذف عضو.");
-      }
-    });
+    onOpenRemove();
   };
 
   return (
-    <tr className={isPending ? "opacity-60" : undefined}>
+    <tr className={isPending || removePending ? "opacity-60" : undefined}>
       {/* Member identity */}
       <td className="px-4 py-3">
         <div className="flex items-center gap-3">
@@ -304,7 +333,7 @@ function MemberTableRow({
             <button
               type="button"
               onClick={handleRemove}
-              disabled={isPending}
+              disabled={isPending || removePending}
               className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
               title="حذف از فضای کاری"
             >

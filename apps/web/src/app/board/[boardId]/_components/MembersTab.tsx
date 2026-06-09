@@ -31,6 +31,7 @@ import { Crown, Plus, Trash2, UserRound, X } from "lucide-react";
 import { trpc } from "../../../../utils/trpc";
 import { toJalaliDisplay, utcFromServer } from "@/lib/date";
 import type { ActionResult } from "../_actions/_helpers";
+import { ConfirmDialog } from "../../../../components/ui/ConfirmDialog";
 
 type BoardRole = "OWNER" | "ADMIN" | "MEMBER";
 type AssignableRole = "ADMIN" | "MEMBER";
@@ -200,6 +201,7 @@ function MemberRow({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
 
   const isOwnerRow = member.role === "OWNER";
   // Role change: any moderator (OWNER+ADMIN) can flip a non-OWNER
@@ -229,8 +231,11 @@ function MemberRow({
 
   const handleRemove = () => {
     if (!canRemove) return;
-    const memberName = member.user?.displayName ?? "این عضو";
-    if (!window.confirm(`آیا «${memberName}» از بورد حذف شود؟`)) return;
+    setConfirmRemoveOpen(true);
+  };
+
+  const performRemove = () => {
+    setConfirmRemoveOpen(false);
     startTransition(async () => {
       const result = await onRemoveMember({ boardId, userId: member.userId });
       if (result.ok) {
@@ -243,7 +248,10 @@ function MemberRow({
     });
   };
 
+  const memberName = member.user?.displayName ?? "این عضو";
+
   return (
+    <>
     <div
       className={`flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 ${
         isPending ? "opacity-60" : ""
@@ -307,6 +315,19 @@ function MemberRow({
         )}
       </div>
     </div>
+
+    <ConfirmDialog
+      open={confirmRemoveOpen}
+      title="حذف عضو از بورد"
+      description={`آیا «${memberName}» از بورد حذف شود؟`}
+      confirmLabel="حذف"
+      cancelLabel="انصراف"
+      variant="danger"
+      isPending={isPending}
+      onConfirm={performRemove}
+      onCancel={() => setConfirmRemoveOpen(false)}
+    />
+    </>
   );
 }
 

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { trpc } from "../../../utils/trpc";
 import { toast } from "sonner";
+import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 
 interface Props {
   boardId: string;
@@ -11,6 +12,7 @@ interface Props {
 export function BoardMembersPanel({ boardId }: Props) {
   const [inviteUserId, setInviteUserId] = useState("");
   const [inviteRole, setInviteRole] = useState<"MEMBER" | "ADMIN">("MEMBER");
+  const [removeTarget, setRemoveTarget] = useState<string | null>(null);
 
   const { data, isLoading, refetch } =
     trpc.v1.public.boardMembers.getMembers.useQuery({ boardId });
@@ -85,11 +87,7 @@ export function BoardMembersPanel({ boardId }: Props) {
                 )}
 
                 <button
-                  onClick={() => {
-                    if (confirm(`Remove ${member.userId} from this board?`)) {
-                      removeMutation.mutate({ boardId, userId: member.userId });
-                    }
-                  }}
+                  onClick={() => setRemoveTarget(member.userId)}
                   className="ms-1 rounded p-1 text-slate-400 hover:bg-red-900/30 hover:text-red-400"
                   title="Remove member"
                 >
@@ -140,6 +138,27 @@ export function BoardMembersPanel({ boardId }: Props) {
           </div>
         </form>
       )}
+
+      <ConfirmDialog
+        open={removeTarget !== null}
+        title="حذف عضو از بورد"
+        description={
+          removeTarget !== null
+            ? `آیا «${removeTarget}» از این بورد حذف شود؟`
+            : undefined
+        }
+        confirmLabel="حذف"
+        cancelLabel="انصراف"
+        variant="danger"
+        isPending={removeMutation.isPending}
+        onConfirm={() => {
+          if (removeTarget !== null) {
+            removeMutation.mutate({ boardId, userId: removeTarget });
+          }
+          setRemoveTarget(null);
+        }}
+        onCancel={() => setRemoveTarget(null)}
+      />
     </div>
   );
 }

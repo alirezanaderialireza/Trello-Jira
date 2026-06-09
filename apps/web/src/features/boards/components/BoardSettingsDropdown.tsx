@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { trpc } from "../../../utils/trpc";
 import { toast } from "sonner";
+import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 
 interface Props {
   board: {
@@ -18,6 +19,7 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [newTitle, setNewTitle] = useState(board.title);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   const isAdmin = board.role === "OWNER" || board.role === "ADMIN";
@@ -126,12 +128,7 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
             <>
               <div className="mx-3 my-1 border-t border-slate-700" />
               <button
-                onClick={() => {
-                  // TODO(F1.4.4): replace window.confirm with Radix ConfirmDialog
-                  if (confirm(`حذف «${board.title}»؟ این عمل قابل بازگشت نیست.`)) {
-                    deleteMutation.mutate({ boardId: board.id });
-                  }
-                }}
+                onClick={() => setConfirmDeleteOpen(true)}
                 className="w-full px-3 py-2 text-start text-sm text-red-400 hover:bg-red-900/30"
               >
                 حذف بورد
@@ -140,6 +137,21 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        title="حذف بورد"
+        description={`بورد «${board.title}» حذف می‌شود. این عمل قابل بازگشت نیست.`}
+        confirmLabel="حذف"
+        cancelLabel="انصراف"
+        variant="danger"
+        isPending={deleteMutation.isPending}
+        onConfirm={() => {
+          deleteMutation.mutate({ boardId: board.id });
+          setConfirmDeleteOpen(false);
+        }}
+        onCancel={() => setConfirmDeleteOpen(false)}
+      />
     </div>
   );
 }

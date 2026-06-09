@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 export function CreateCardForm({ onCreate }: { onCreate: (title: string) => Promise<void> }) {
   const [title, setTitle] = useState("");
@@ -20,11 +21,12 @@ export function CreateCardForm({ onCreate }: { onCreate: (title: string) => Prom
       router.refresh(); 
 
     } catch (err: any) {
-      // 👈 استفاده از DomainError
+      // Surface domain/validation errors via a Persian toast (was a raw
+      // window.alert before F1.4.4).
       if (err.name === "TRPCError" && err.message.includes("DomainError")) {
-          alert("Error: " + err.message);
+        toast.error(err.message);
       } else {
-          alert(err.message || "Something went wrong");
+        toast.error(err.message || "خطایی رخ داد. دوباره تلاش کنید.");
       }
     } finally {
       setLoading(false);

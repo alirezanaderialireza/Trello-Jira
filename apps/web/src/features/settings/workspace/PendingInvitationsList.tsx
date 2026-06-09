@@ -6,12 +6,13 @@
 // Shows email, role chip, expiry date, and a "لغو" button on each
 // row. Empty state when there are no pending invitations.
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Mail, X } from "lucide-react";
 
 import { toJalaliDisplay, utcFromServer } from "@/lib/date";
+import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 
 export interface PendingInvitation {
   id: string;
@@ -42,6 +43,32 @@ export function PendingInvitationsList({
   invitations,
   onRevoke,
 }: Props) {
+  const router = useRouter();
+  // Revoke confirm dialog state — lifted to the list (not the row)
+  // because a fixed dialog cannot be a valid child of a <tr>.
+  const [revokeTarget, setRevokeTarget] = useState<PendingInvitation | null>(
+    null,
+  );
+  const [isRevoking, startRevoke] = useTransition();
+
+  const performRevoke = () => {
+    const target = revokeTarget;
+    if (!target) return;
+    startRevoke(async () => {
+      const result = await onRevoke({
+        workspaceId,
+        invitationId: target.id,
+      });
+      if (result.ok) {
+        toast.success("دعوت لغو شد.");
+        router.refresh();
+      } else {
+        toast.error(result.error ?? "خطا در لغو دعوت.");
+      }
+      setRevokeTarget(null);
+    });
+  };
+
   if (invitations.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center">
@@ -60,30 +87,48 @@ export function PendingInvitationsList({
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200">
-      <table className="w-full text-sm">
-        <thead className="bg-slate-50 text-xs text-slate-500">
-          <tr>
-            <th className="px-4 py-2.5 text-start font-medium">ایمیل</th>
-            <th className="px-4 py-2.5 text-start font-medium">نقش</th>
-            <th className="hidden px-4 py-2.5 text-start font-medium md:table-cell">
-              تا تاریخ
-            </th>
-            <th className="px-4 py-2.5 text-end font-medium">عملیات</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {invitations.map((invitation) => (
-            <PendingInvitationRow
-              key={invitation.id}
-              workspaceId={workspaceId}
-              invitation={invitation}
-              onRevoke={onRevoke}
-            />
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      <div className="overflow-hidden rounded-xl border border-slate-200">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-xs text-slate-500">
+            <tr>
+              <th className="px-4 py-2.5 text-start font-medium">ایمیل</th>
+              <th className="px-4 py-2.5 text-start font-medium">نقش</th>
+              <th className="hidden px-4 py-2.5 text-start font-medium md:table-cell">
+                تا تاریخ
+              </th>
+              <th className="px-4 py-2.5 text-end font-medium">عملیات</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {invitations.map((invitation) => (
+              <PendingInvitationRow
+                key={invitation.id}
+                invitation={invitation}
+                onOpenRevoke={() => setRevokeTarget(invitation)}
+                revokePending={isRevoking && revokeTarget?.id === invitation.id}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <ConfirmDialog
+        open={revokeTarget !== null}
+        title="لغو دعوت"
+        description={
+          revokeTarget
+            ? `آیا دعوت ارسال‌شده به «${revokeTarget.invitedEmail}» لغو شود؟`
+            : undefined
+        }
+        confirmLabel="لغو دعوت"
+        cancelLabel="انصراف"
+        variant="danger"
+        isPending={isRevoking}
+        onConfirm={performRevoke}
+        onCancel={() => setRevokeTarget(null)}
+      />
+    </>
   );
 }
 
@@ -92,41 +137,16 @@ export function PendingInvitationsList({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function PendingInvitationRow({
-  workspaceId,
   invitation,
-  onRevoke,
+  onOpenRevoke,
+  revokePending,
 }: {
-  workspaceId: string;
   invitation: PendingInvitation;
-  onRevoke: RevokeInvitationAction;
+  onOpenRevoke: () => void;
+  revokePending: boolean;
 }) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-
-  const handleRevoke = () => {
-    if (
-      !window.confirm(
-        `آیا دعوت ارسال‌شده به «${invitation.invitedEmail}» لغو شود؟`,
-      )
-    ) {
-      return;
-    }
-    startTransition(async () => {
-      const result = await onRevoke({
-        workspaceId,
-        invitationId: invitation.id,
-      });
-      if (result.ok) {
-        toast.success("دعوت لغو شد.");
-        router.refresh();
-      } else {
-        toast.error(result.error ?? "خطا در لغو دعوت.");
-      }
-    });
-  };
-
   return (
-    <tr className={isPending ? "opacity-60" : undefined}>
+    <tr className={revokePending ? "opacity-60" : undefined}>
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
           <Mail
@@ -149,8 +169,8 @@ function PendingInvitationRow({
       <td className="px-4 py-3 text-end">
         <button
           type="button"
-          onClick={handleRevoke}
-          disabled={isPending}
+          onClick={onOpenRevoke}
+          disabled={revokePending}
           className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <X className="h-3.5 w-3.5" aria-hidden="true" />

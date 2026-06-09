@@ -50,8 +50,8 @@ CREATE INDEX IF NOT EXISTS "idx_cards_due_date"
   • **No backfill from `accounting_data`.** The pre-F1.2.2 stub stored
     ISO datetimes in JSONB; truncating those to a DATE would silently
     flip Tehran-tomorrow to Tehran-today. The PR header documents the
-    audit; cleanup of the stale JSONB key is parked for the Phase 1.5
-    janitor.
+    audit; cleanup of the stale JSONB key was done by migration
+    `0015_cleanup_stale_due_date_jsonb.sql` (F1.4.3).
   • **Partial index** for the upcoming overdue/due-today sweeps. The
     predicate uses only `IS NOT NULL` and `IS NULL` (immutable) — no
     `now()` or `CURRENT_DATE` in the predicate (Phase 0 L1 lesson).
@@ -270,8 +270,12 @@ The template captured here for the next featurelet (Phase 1.2.5+):
   • **Activity timeline integration** (Phase 1.2.6) — the v2 event
     payload already carries `oldDueDate` and `updatedBy` so the
     projection has all it needs.
-  • **`accounting_data` JSONB cleanup** of stale `dueDate` keys
-    written by the pre-F1.2.2 stub (Phase 1.5 janitor).
+  • ✅ **Done (F1.4.3)** — **`accounting_data` JSONB cleanup** of stale
+    `dueDate` keys written by the pre-F1.2.2 stub. Migration
+    `0015_cleanup_stale_due_date_jsonb.sql` removes the orphaned root
+    `dueDate` key (guarded by `NOT (accounting_data ? 'module_type')` so
+    real accounting-module data is never touched) and NULLs the object if
+    it becomes empty. (Was parked as the "Phase 1.5 janitor".)
   • **Server-time strict comparison** — currently uses browser clock
     via `nowUIOnly()`. A `system.now` tRPC endpoint + periodic sync
     would make the badge palette server-time-correct, at the cost of

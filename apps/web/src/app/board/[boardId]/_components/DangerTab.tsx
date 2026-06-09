@@ -34,6 +34,7 @@ import { toast } from "sonner";
 import { Archive, ArchiveRestore, AlertTriangle, Trash2, X } from "lucide-react";
 
 import type { ActionResult } from "../_actions/_helpers";
+import { ConfirmDialog } from "../../../../components/ui/ConfirmDialog";
 
 interface Props {
   boardId: string;
@@ -66,15 +67,11 @@ export function DangerTab({
   const [isArchiving, startArchive] = useTransition();
   const [isUnarchiving, startUnarchive] = useTransition();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
 
   // ── Archive ───────────────────────────────────────────────────────────────
-  const handleArchive = () => {
-    if (!canModerate) return;
-    if (
-      !window.confirm(`آیا می‌خواهید بورد «${title}» را بایگانی کنید؟`)
-    ) {
-      return;
-    }
+  const performArchive = () => {
+    setArchiveConfirmOpen(false);
     startArchive(async () => {
       const result = await onArchive({ boardId });
       if (!result.ok) {
@@ -142,7 +139,7 @@ export function DangerTab({
             canModerate && (
               <button
                 type="button"
-                onClick={handleArchive}
+                onClick={() => setArchiveConfirmOpen(true)}
                 disabled={isArchiving}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -216,6 +213,17 @@ export function DangerTab({
         onClose={() => setDeleteDialogOpen(false)}
         onConfirm={onDelete}
         onResult={handleDeleteResult}
+      />
+
+      <ConfirmDialog
+        open={archiveConfirmOpen}
+        title="بایگانی بورد"
+        description={`آیا می‌خواهید بورد «${title}» را بایگانی کنید؟`}
+        confirmLabel="بایگانی"
+        cancelLabel="انصراف"
+        isPending={isArchiving}
+        onConfirm={performArchive}
+        onCancel={() => setArchiveConfirmOpen(false)}
       />
     </div>
   );
