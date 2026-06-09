@@ -25,7 +25,7 @@ engines (sync FSM, positioning, mutation lifecycle) untouched.
 | `useBoardState` | Atomic store selectors + derived ordered lists.                  | F1.3.1 ✅ |
 | `useDragEngine` | dnd-kit lifecycle (start/over/end), intent debounce, sensors.    | F1.3.2 ✅ |
 | `useSyncEngine` | Thin wrapper over the existing `useSyncOrchestrator`.            | F1.3.3 ✅ |
-| `useResilience` | Memory cleanup, virtualization trap, viewport-shift + flush.     | F1.3.4 |
+| `useResilience` | Memory cleanup, virtualization trap, viewport-shift + flush.     | F1.3.4 ✅ |
 
 ## F1.3.1 — Selector conventions (implemented)
 
@@ -97,3 +97,43 @@ Validation note: BoardView integration is exercised by the manual runbook
 test because CI does not run web component tests and the offline sandbox has
 no browser; the pure logic underneath (selectors, intent scheduler, drop
 resolution) is unit-tested.
+
+
+## F1.3.4 — Resilience + mobile (implemented, with one parked item)
+
+- `engine/useResilience.ts` — exposes the module-level `boardDragState`
+  singleton (the virtualization overscan trap flag, read synchronously during
+  scroll math) and a tab-lifecycle (`visibilitychange`/`pagehide`) seam. It is
+  deliberately non-destructive: pending mutations already survive in the store
+  + MutationLifecycleManager + outbox processor, so the hide handler is a
+  documented flush seam, not a state mutation. All its listeners are torn down
+  on unmount.
+- `engine/useViewportShiftGuard.ts` — touch-only (coarse pointer) guard that
+  recenters a focused input after the keyboard opens and marks `data-vp-shift`
+  on `<body>`; desktop is untouched. Fully self-cleaning.
+- Both are wired into `useBoardEngine`.
+
+### PARKED — virtualization activation (D5/T2/T3)
+
+`components/virtualized/VirtualizedBoard.tsx` renders lists/cards with scroll
+virtualization but **does not integrate dnd-kit's `SortableContext`** (no
+sortable items, static "+ Add a card"). Activating it for boards with > 10
+lists would therefore **remove drag-and-drop on large boards — a regression**.
+
+Decision: BoardCanvas keeps the standard render path (the D5 decision point is
+in place and documented). Activating virtualization requires first reworking
+VirtualizedBoard/VirtualizedListColumn to:
+  1. wrap lists/cards in `SortableContext` and use the sortable hooks,
+  2. read `boardDragState.isDragging` to widen overscan during a drag (the trap),
+  3. be validated in a real browser (DOM-node counts, 60fps scroll, no
+     mid-drag unmount).
+This is a focused follow-up that needs runtime validation and is out of scope
+for the offline refactor PRs.
+
+### Validation status (F1.3 overall)
+
+- Unit-tested (run locally via node type-strip; vitest in repo): selectors,
+  intent scheduler, drop resolution.
+- Manual runbook required (no browser / no web component tests in CI): drag
+  behaviour, rollback, click-vs-drag, mobile touch/scroll, viewport shift,
+  multi-tab convergence, memory profile.

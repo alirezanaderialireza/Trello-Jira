@@ -18,6 +18,8 @@
 
 import { useBoardState } from "./useBoardState";
 import { useDragEngine, type DragType, type DragMeta } from "./useDragEngine";
+import { useResilience } from "./useResilience";
+import { useViewportShiftGuard } from "./useViewportShiftGuard";
 import { useSyncOrchestrator } from "../store/sync/useSyncOrchestrator";
 import { usePendingGC } from "../store/mutations/core/usePendingGC";
 import { useBoardPresence } from "../hooks/useBoardPresence";
@@ -48,7 +50,10 @@ export function useBoardEngine(boardId: string, authToken?: string): BoardEngine
   // Presence heartbeat; returns the local userId so we can hide our own avatar.
   const { userId: presenceUserId } = useBoardPresence(boardId);
 
-  // F1.3.4: useResilience(boardId, drag.isDragging) will be added here.
+  // F1.3.4 — resilience: virtualization drag-trap flag + tab-lifecycle seam.
+  useResilience(boardId, drag.isDragging);
+  // F1.3.4 — mobile viewport-shift guard (touch devices only).
+  useViewportShiftGuard();
 
   return {
     listOrder,
