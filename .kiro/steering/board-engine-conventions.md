@@ -24,7 +24,7 @@ engines (sync FSM, positioning, mutation lifecycle) untouched.
 |-----------------|------------------------------------------------------------------|--------|
 | `useBoardState` | Atomic store selectors + derived ordered lists.                  | F1.3.1 ✅ |
 | `useDragEngine` | dnd-kit lifecycle (start/over/end), intent debounce, sensors.    | F1.3.2 ✅ |
-| `useSyncEngine` | Thin wrapper over the existing `useSyncOrchestrator`.            | F1.3.3 |
+| `useSyncEngine` | Thin wrapper over the existing `useSyncOrchestrator`.            | F1.3.3 ✅ |
 | `useResilience` | Memory cleanup, virtualization trap, viewport-shift + flush.     | F1.3.4 |
 
 ## F1.3.1 — Selector conventions (implemented)
@@ -70,3 +70,30 @@ engines (sync FSM, positioning, mutation lifecycle) untouched.
   `useMoveList` (the single move path, D3), `useBoardStore.moveCard` for the
   visual-only over-feedback, and Pointer/Touch/Keyboard sensors (D7/D8).
   Authored additive; BoardView is rewired to consume it in F1.3.3.
+
+
+## F1.3.3 — Facade + thin BoardView (implemented)
+
+- `engine/useBoardEngine.ts` — the single facade the UI consumes. Composes
+  useBoardState + useDragEngine + useSyncOrchestrator (existing) + usePendingGC
+  + useBoardPresence. Returns `{ listOrder, initBoard, dndProps, activeId,
+  activeType, dragMeta, isDragging, triggerManualReconnect, presenceUserId }`.
+- `hooks/useHydrateBoard.ts` — extracted hydration effect (versionHash +
+  enrichedLists → initBoard) + SSR mount guard.
+- `hooks/useDeleteCardWithUndo.ts` — extracted delete-with-undo (separate
+  concern from move rollback).
+- `components/BoardCanvas.tsx` — SortableContext rail + CreateListForm; owns
+  the virtualization decision point (D5, wired in F1.3.4).
+- `components/BoardDragOverlay.tsx` — overlay clone sized to the captured
+  rect for cards (D6).
+- `components/BoardView.tsx` — rewritten ~700 → ~120 lines, purely
+  presentational. The parallel `moveCardAction`/`moveListAction` path and the
+  manual `setState`/`structuredClone` rollback are gone; all moves go through
+  the drag engine's unified useMoveCard/useMoveList (D3, D10).
+- Deleted the deprecated `features/board/pages/BoardPage.tsx` stub (D6/T6).
+
+Validation note: BoardView integration is exercised by the manual runbook
+(drag, rollback, click-vs-drag, list move). It is not covered by an automated
+test because CI does not run web component tests and the offline sandbox has
+no browser; the pure logic underneath (selectors, intent scheduler, drop
+resolution) is unit-tested.
