@@ -53,7 +53,7 @@ export const VirtualizedListColumn = memo(function VirtualizedListColumn({ listI
           })}
         </div>
       </div>
-      <div className="px-3 py-2 border-t border-slate-700"><button className="w-full text-left text-xs text-slate-400 hover:text-slate-200">+ Add a card</button></div>
+      <div className="px-3 py-2 border-t border-slate-700"><button className="w-full text-start text-xs text-slate-400 hover:text-slate-200">+ افزودن کارت</button></div>
     </div>
   );
 });

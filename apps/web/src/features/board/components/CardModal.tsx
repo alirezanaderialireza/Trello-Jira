@@ -696,7 +696,7 @@ export default function CardModal() {
       >
         {/* Header */}
         <div className="flex justify-between items-start p-4 border-b">
-          <div className="w-full pr-8">
+          <div className="w-full pe-8">
             <TitleEditor
               cardId={activeCardId}
               initialTitle={title}
@@ -713,7 +713,7 @@ export default function CardModal() {
           <button
             onClick={closeCardModal}
             aria-label="بستن"
-            className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="absolute top-4 end-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <X size={20} aria-hidden="true" />
           </button>

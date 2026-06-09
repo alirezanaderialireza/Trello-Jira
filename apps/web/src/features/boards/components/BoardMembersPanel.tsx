@@ -90,7 +90,7 @@ export function BoardMembersPanel({ boardId }: Props) {
                       removeMutation.mutate({ boardId, userId: member.userId });
                     }
                   }}
-                  className="ml-1 rounded p-1 text-slate-400 hover:bg-red-900/30 hover:text-red-400"
+                  className="ms-1 rounded p-1 text-slate-400 hover:bg-red-900/30 hover:text-red-400"
                   title="Remove member"
                 >
                   <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

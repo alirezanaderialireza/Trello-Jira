@@ -146,7 +146,7 @@ export function ConnectionStatusBanner({ onManualReconnect, className }: Props) 
         <button
           type="button"
           onClick={handleAction}
-          className="ml-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+          className="ms-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
         >
           {visual.action.label}
         </button>

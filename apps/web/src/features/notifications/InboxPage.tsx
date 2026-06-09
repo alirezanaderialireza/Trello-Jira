@@ -91,7 +91,7 @@ export function InboxPage() {
               <button
                 type="button"
                 onClick={() => handleClick(n)}
-                className={`flex w-full items-start gap-3 px-4 py-3 text-right hover:bg-slate-50 ${
+                className={`flex w-full items-start gap-3 px-4 py-3 text-start hover:bg-slate-50 ${
                   n.read ? "" : "bg-blue-50/50"
                 }`}
               >

@@ -69,7 +69,7 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
       </button>
 
       {open && (
-        <div dir="rtl" className="absolute left-0 top-8 z-50 w-56 rounded-lg border border-slate-600 bg-slate-800 py-1 text-right shadow-xl">
+        <div dir="rtl" className="absolute end-0 top-8 z-50 w-56 rounded-lg border border-slate-600 bg-slate-800 py-1 text-start shadow-xl">
           {/* Rename */}
           {renaming ? (
             <form
@@ -98,7 +98,7 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
           ) : (
             <button
               onClick={() => { setRenaming(true); setNewTitle(board.title); }}
-              className="w-full px-3 py-2 text-right text-sm text-slate-300 hover:bg-slate-700"
+              className="w-full px-3 py-2 text-start text-sm text-slate-300 hover:bg-slate-700"
             >
               تغییر نام
             </button>
@@ -108,14 +108,14 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
           {isArchived ? (
             <button
               onClick={() => unarchiveMutation.mutate({ boardId: board.id })}
-              className="w-full px-3 py-2 text-right text-sm text-slate-300 hover:bg-slate-700"
+              className="w-full px-3 py-2 text-start text-sm text-slate-300 hover:bg-slate-700"
             >
               خروج از بایگانی
             </button>
           ) : (
             <button
               onClick={() => archiveMutation.mutate({ boardId: board.id })}
-              className="w-full px-3 py-2 text-right text-sm text-slate-300 hover:bg-slate-700"
+              className="w-full px-3 py-2 text-start text-sm text-slate-300 hover:bg-slate-700"
             >
               بایگانی
             </button>
@@ -132,7 +132,7 @@ export function BoardSettingsDropdown({ board, onMutated }: Props) {
                     deleteMutation.mutate({ boardId: board.id });
                   }
                 }}
-                className="w-full px-3 py-2 text-right text-sm text-red-400 hover:bg-red-900/30"
+                className="w-full px-3 py-2 text-start text-sm text-red-400 hover:bg-red-900/30"
               >
                 حذف بورد
               </button>
