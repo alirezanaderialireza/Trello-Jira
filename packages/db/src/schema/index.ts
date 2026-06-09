@@ -20,7 +20,6 @@ export * from "./userBoardMetadata";
 export * from "./authTables";
 export * from "./sessions";
 
-export * from "./cardAssignees";
 export * from "./attachments";
 export * from "./cardWatchers";
 export * from "./notifications";
