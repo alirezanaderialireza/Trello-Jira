@@ -145,7 +145,7 @@ export default function CreateCardForm({
 
     if (!trimmedTitle) {
       setErrorMessage(
-        "Title cannot be empty."
+        "عنوان نمی‌تواند خالی باشد."
       );
 
       return;
@@ -247,7 +247,7 @@ export default function CreateCardForm({
       if (isActionFailure(result)) {
         throw new Error(
           result.message ||
-            "Failed to create card."
+            "ایجاد کارت ناموفق بود."
         );
       }
 
@@ -276,7 +276,7 @@ export default function CreateCardForm({
       if (!domainResult.success) {
         throw new Error(
           domainResult.message ||
-            "Card creation rejected."
+            "ایجاد کارت رد شد."
         );
       }
 
@@ -306,7 +306,7 @@ export default function CreateCardForm({
         confirmedCard
       );
 
-      toast.success("Card created.");
+      toast.success("کارت ایجاد شد.");
 
     } catch (error) {
       if (
@@ -319,7 +319,7 @@ export default function CreateCardForm({
       const message =
         error instanceof Error
           ? error.message
-          : "Network error.";
+          : "خطای شبکه.";
 
       // rollback optimistic insert
       deleteCardStore(tempId);
@@ -382,8 +382,8 @@ export default function CreateCardForm({
               setErrorMessage(null);
             }
           }}
-          placeholder="Enter a title for this card..."
-          aria-label="Enter card title"
+          placeholder="عنوانی برای این کارت وارد کنید..."
+          aria-label="عنوان کارت"
           aria-invalid={!!errorMessage}
           aria-describedby={
             errorMessage
@@ -430,19 +430,19 @@ export default function CreateCardForm({
             disabled={
               isSubmittingRef.current
             }
-            aria-label="Submit new card"
+            aria-label="افزودن کارت"
             className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-wait text-white px-3 py-1.5 rounded text-sm font-medium transition-colors"
           >
-            Add card
+            افزودن کارت
           </button>
 
           <button
             type="button"
             onClick={handleClose}
-            aria-label="Cancel card creation"
+            aria-label="انصراف"
             className="p-1 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded transition-colors"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" aria-hidden="true" />
           </button>
         </div>
       </form>
@@ -456,12 +456,12 @@ export default function CreateCardForm({
   return (
     <button
       onClick={() => setIsEditing(true)}
-      aria-label="Add a new card to this list"
+      aria-label="افزودن کارت جدید به این لیست"
       className="w-full flex items-center gap-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 p-2 rounded-lg text-sm font-medium transition-colors mt-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
     >
-      <Plus className="w-4 h-4" />
+      <Plus className="w-4 h-4" aria-hidden="true" />
 
-      Add a card
+      افزودن کارت
     </button>
   );
 }

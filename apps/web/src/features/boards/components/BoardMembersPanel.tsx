@@ -119,7 +119,7 @@ export function BoardMembersPanel({ boardId }: Props) {
               type="text"
               value={inviteUserId}
               onChange={(e) => setInviteUserId(e.target.value)}
-              placeholder="User ID or email"
+              placeholder="شناسه کاربر یا ایمیل"
               className="flex-1 rounded border border-slate-600 bg-slate-700 px-3 py-1.5 text-sm text-white placeholder-slate-400 focus:border-blue-500 focus:outline-none"
             />
             <select

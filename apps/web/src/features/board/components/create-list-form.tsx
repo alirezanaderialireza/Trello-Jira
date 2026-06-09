@@ -101,7 +101,7 @@ export default function CreateListForm({
 
     if (!trimmedTitle) {
       setErrorMessage(
-        "List title cannot be empty."
+        "عنوان لیست نمی‌تواند خالی باشد."
       );
 
       return;
@@ -195,7 +195,7 @@ export default function CreateListForm({
       if (isActionFailure(result)) {
         throw new Error(
           result.message ||
-            "Failed to create list."
+            "ایجاد لیست ناموفق بود."
         );
       }
 
@@ -221,7 +221,7 @@ export default function CreateListForm({
       if (!domainResult.success) {
         throw new Error(
           domainResult.message ||
-            "List creation rejected."
+            "ایجاد لیست رد شد."
         );
       }
 
@@ -251,7 +251,7 @@ export default function CreateListForm({
         confirmedList
       );
 
-      toast.success("List created.");
+      toast.success("لیست ایجاد شد.");
     } catch (error) {
       if (
         !isMountedRef.current ||
@@ -263,7 +263,7 @@ export default function CreateListForm({
       const message =
         error instanceof Error
           ? error.message
-          : "Network error.";
+          : "خطای شبکه.";
 
       // rollback optimistic update
       removeListStore(tempId);
@@ -321,8 +321,8 @@ export default function CreateListForm({
                 setErrorMessage(null);
               }
             }}
-            placeholder="Enter list title..."
-            aria-label="Enter list title"
+            placeholder="عنوان لیست را وارد کنید..."
+            aria-label="عنوان لیست"
             aria-invalid={!!errorMessage}
             className={`w-full text-sm p-2 rounded-lg border outline-none transition-all font-semibold
               ${
@@ -354,15 +354,16 @@ export default function CreateListForm({
               }
               className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-wait text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
             >
-              Add list
+              افزودن لیست
             </button>
 
             <button
               type="button"
               onClick={handleClose}
+              aria-label="انصراف"
               className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300"
             >
-              <X className="w-5 h-5" />
+              <X className="w-5 h-5" aria-hidden="true" />
             </button>
           </div>
         </form>
@@ -377,12 +378,12 @@ export default function CreateListForm({
   return (
     <button
       onClick={() => setIsEditing(true)}
-      aria-label="Add another list"
+      aria-label="افزودن لیست دیگر"
       className="w-72 shrink-0 flex items-center gap-2 bg-white/50 hover:bg-white/80 backdrop-blur-sm text-gray-700 p-4 rounded-xl text-sm font-semibold transition-all border border-dashed border-gray-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
     >
-      <Plus className="w-5 h-5" />
+      <Plus className="w-5 h-5" aria-hidden="true" />
 
-      Add another list
+      افزودن لیست دیگر
     </button>
   );
 }

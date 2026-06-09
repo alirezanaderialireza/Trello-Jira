@@ -57,8 +57,8 @@ export const ListColumn = memo(function ListColumn({ listId, boardId, onDeleteCa
         {...listeners}
         role="button"
         tabIndex={0}
-        aria-label={`List: ${list.title}, contains ${cardIds.length} cards. Press Space to lift.`}
-        aria-roledescription="sortable list"
+        aria-label={`لیست: ${list.title}، شامل ${cardIds.length} کارت. برای برداشتن، کلید فاصله را فشار دهید.`}
+        aria-roledescription="لیست قابل جابجایی"
         className="p-3 flex items-center justify-between cursor-grab active:cursor-grabbing group outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-t-xl"
       >
         <div className="flex items-center gap-2">
@@ -70,11 +70,11 @@ export const ListColumn = memo(function ListColumn({ listId, boardId, onDeleteCa
           </span>
         </div>
         <button 
-          aria-label="List options"
+          aria-label="گزینه‌های لیست"
           onPointerDown={(e) => e.stopPropagation()} 
           className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300"
         >
-          <MoreHorizontal size={16} />
+          <MoreHorizontal size={16} aria-hidden="true" />
         </button>
       </div>
 

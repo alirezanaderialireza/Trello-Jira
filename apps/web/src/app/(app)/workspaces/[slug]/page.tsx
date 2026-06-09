@@ -166,7 +166,7 @@ export default function WorkspaceDetailPage() {
               <input
                 value={newBoardTitle}
                 onChange={(e) => setNewBoardTitle(e.target.value)}
-                placeholder="Board title..."
+                placeholder="عنوان بورد..."
                 className="flex-1 rounded-lg border border-slate-600 bg-slate-700 px-4 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
               />
               <button
