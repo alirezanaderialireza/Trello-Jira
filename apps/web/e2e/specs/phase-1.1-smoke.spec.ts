@@ -276,45 +276,45 @@ test.describe.skip("Phase 1.1 — workspace lifecycle smoke flow", () => {
 
     // ── 10. User A stars the board ─────────────────────────────────────
     await test.step("10. User A stars the board", async () => {
+      // Selector source: features/board/components/BoardStarButton.tsx
+      // (F1.4.4, reconciled F1.4.6-web). The button sits in the BoardView
+      // header with a Persian aria-label containing "موارد ستاره‌دار":
+      //   • not starred: «افزودن «<title>» به موارد ستاره‌دار»
+      //   • starred:     «حذف «<title>» از موارد ستاره‌دار»
+      // The button now always exists, so this is a HARD assertion (the
+      // previous best-effort soft/count check is removed).
       await userAPage.goto(`/board/${boardId}`);
-      // Star toggle UI: locate by aria-label or title. The exact
-      // affordance lives inside BoardView; the F4 sidebar's
-      // starred section reads userBoardMetadata.isStarred. If the
-      // UI doesn't expose a star toggle yet, this step is best-
-      // effort — wrapped in a soft assertion.
-      const starButton = userAPage.getByRole("button", {
-        name: /(ستاره|star|bookmark)/i,
-      });
-      const starCount = await starButton.count();
-      if (starCount > 0) {
-        await starButton.first().click();
-        // Refresh sidebar bootstrap.
-        await userAPage.goto("/workspaces");
-        await expect(userAPage.getByText(BOARD_TITLE)).toBeVisible();
-      } else {
-        test.info().annotations.push({
-          type: "skipped",
-          description:
-            "Star toggle not surfaced in current UI; tracked as polish followup.",
-        });
-      }
+      const starButton = userAPage.getByRole("button", { name: /موارد ستاره‌دار/ });
+      await expect(starButton).toBeVisible({ timeout: 10_000 });
+      await starButton.click();
+      // The starred board appears in the sidebar's Starred section, which
+      // the (app) layout renders on /workspaces.
+      await userAPage.goto("/workspaces");
+      await expect(userAPage.getByText(BOARD_TITLE).first()).toBeVisible({ timeout: 10_000 });
     });
 
     // ── 11. User A transfers ownership to User B ────────────────────────
     await test.step("11. User A transfers workspace ownership to User B", async () => {
+      // Selector source: features/settings/workspace/MembersTable.tsx +
+      // TransferOwnershipDialog.tsx (reconciled F1.4.6-web):
+      //   • row action (OWNER viewer, non-OWNER row): <button>ارتقاء به مالک</button>
+      //   • dialog (role="dialog"): confirm <button>تأیید انتقال مالکیت</button>
       await userAPage.goto(`/workspaces/${workspaceSlug}/settings/members`);
-      // The "ارتقاء به مالک" button shows on User B's row only when
-      // the current viewer is OWNER and the target is not OWNER.
-      await userAPage.getByRole("button", { name: /ارتقاء به مالک/i }).first().click();
-      // Confirmation dialog — click "تأیید انتقال مالکیت".
-      await userAPage.getByRole("button", { name: /تأیید انتقال مالکیت/i }).click();
-      // After success, User A's role chip should switch to ADMIN.
-      // The role chip lives in the sidebar header AND on the
-      // settings layout breadcrumb. Either is acceptable here.
+      await userAPage.getByRole("button", { name: /ارتقاء به مالک/ }).first().click();
+      await userAPage.getByRole("button", { name: /تأیید انتقال مالکیت/ }).click();
+      // After the transfer, User A is ADMIN (no longer OWNER), so the
+      // owner-only "ارتقاء به مالک" controls disappear for every row.
+      //
+      // NOTE (F1.4.6-web fix): the previous assertion looked for a role
+      // <combobox> on User A's own row, which is INCORRECT — MembersTable
+      // never renders a role <select> for the current user's own row
+      // (canChangeRole = !isOwnerRow && !isSelf), and after the transfer
+      // there are zero comboboxes. We assert the owner-only transfer
+      // button is gone instead, which correctly proves the demotion.
       await userAPage.goto(`/workspaces/${workspaceSlug}/settings/members`);
-      // The role select for User A's row should now appear (since
-      // they are no longer OWNER).
-      await expect(userAPage.getByRole("combobox").first()).toBeVisible();
+      await expect(
+        userAPage.getByRole("button", { name: /ارتقاء به مالک/ }),
+      ).toHaveCount(0);
     });
 
     // ── 12. User A leaves the workspace ─────────────────────────────────
