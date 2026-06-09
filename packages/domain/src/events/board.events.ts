@@ -25,6 +25,18 @@ export interface BoardRenamedPayload {
 }
 export interface BoardRenamedEvent extends DomainEvent<"board.renamed", BoardRenamedPayload> {}
 
+// ── Description (F1.4.2) ────────────────────────────────────────────────────
+// Emitted only when the description actually changes. Carries old + new so
+// audit / activity subscribers don't have to diff against a prior projection.
+export interface BoardDescriptionUpdatedPayload {
+  readonly boardId: string;
+  readonly oldDescription: string | null;
+  readonly newDescription: string | null;
+  readonly updatedBy: string;
+}
+export interface BoardDescriptionUpdatedEvent
+  extends DomainEvent<"board.description_updated", BoardDescriptionUpdatedPayload> {}
+
 export interface BoardArchivedPayload {
   readonly boardId: string;
   readonly archivedBy: string;
@@ -126,6 +138,7 @@ export type BoardEvent =
   | BoardArchivedEvent
   | BoardUnarchivedEvent
   | BoardVisibilityChangedEvent
+  | BoardDescriptionUpdatedEvent
   | BoardSoftDeletedEvent
   | BoardRestoredEvent
   | BoardBackgroundChangedEvent

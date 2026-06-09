@@ -270,6 +270,9 @@ export const boardManagementRouter = router({
     }),
 
   // ── renameBoard (legacy — F3c will refactor + add outbox) ────────────────
+  // @deprecated — use updateBoardMetadata (F1.4.2). Kept as-is because other
+  // call sites (renameBoardAction, the title form) still depend on it; it is
+  // intentionally NOT removed in F1.4.2 (only description was migrated).
   renameBoard: protectedProcedure
     .input(z.object({ boardId: BoardIdSchema, title: TitleSchema }))
     .mutation(async ({ input, ctx }) => {
@@ -298,10 +301,100 @@ export const boardManagementRouter = router({
       return { success: true };
     }),
 
-  // ════════════════════════════════════════════════════════════════════════
-  // F3b — refactored existing procedures (archive / unarchive / delete)
-  //       + new procedures (restore / setBackground / updateVisibility)
-  // ════════════════════════════════════════════════════════════════════════
+  // ── updateBoardMetadata (F1.4.2) ─────────────────────────────────────────
+  //
+  // Single source of truth for editing board metadata (title and/or
+  // description). Accepts either field; refine guarantees at least one is
+  // present. Emits board.renamed when the title changes and
+  // board.description_updated when the description changes — only when the
+  // value actually differs (noOp guard: no DB write, no outbox otherwise).
+  //
+  // In F1.4.2 only the description editor is wired to this procedure; the
+  // title form still uses the legacy renameBoard (low-risk migration deferred).
+  updateBoardMetadata: boardAdminWriteProcedure
+    .input(
+      z
+        .object({
+          boardId: BoardIdSchema,
+          title: z.string().trim().min(1).max(128).optional(),
+          description: z.string().max(5000).nullable().optional(),
+          idempotencyKey: IdempotencyKeySchema,
+        })
+        .refine((v) => v.title !== undefined || v.description !== undefined, {
+          message: "هیچ تغییری برای ذخیره وجود ندارد.",
+        }),
+    )
+    .mutation(async ({ input, ctx }) => {
+      return withIdempotency(ctx, input.idempotencyKey, "v1", async () => {
+        const board = await ctx.infra.db.query.boards.findFirst({
+          where: and(eq(boards.id, input.boardId), isNull(boards.deletedAt)),
+        });
+        if (!board) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "بورد یافت نشد." });
+        }
+
+        const titleChanged =
+          input.title !== undefined && input.title !== board.title;
+        const newDescription = input.description ?? null;
+        const descChanged =
+          input.description !== undefined &&
+          newDescription !== (board.description ?? null);
+
+        // noOp guard — nothing actually changed.
+        if (!titleChanged && !descChanged) {
+          return { success: true, noOp: true, boardId: input.boardId };
+        }
+
+        const patch: {
+          title?: string;
+          description?: string | null;
+          updatedAt: Date;
+        } = { updatedAt: new Date() };
+        if (titleChanged) patch.title = input.title;
+        if (descChanged) patch.description = newDescription;
+
+        await ctx.infra.db
+          .update(boards)
+          .set(patch)
+          .where(eq(boards.id, input.boardId));
+
+        if (titleChanged) {
+          // titleChanged guarantees input.title is defined; assert for the
+          // JSON payload (a bare boolean doesn't narrow the union).
+          const nextTitle = input.title as string;
+          await ctx.repos.outbox.append(ctx.infra.db, {
+            eventId: crypto.randomUUID(),
+            eventVersion: "v1",
+            aggregateId: input.boardId,
+            aggregateType: "board",
+            type: "board.renamed",
+            occurredAt: new Date(),
+            correlationId: input.idempotencyKey ?? undefined,
+            payload: { boardId: input.boardId, title: nextTitle },
+          });
+        }
+
+        if (descChanged) {
+          await ctx.repos.outbox.append(ctx.infra.db, {
+            eventId: crypto.randomUUID(),
+            eventVersion: "v1",
+            aggregateId: input.boardId,
+            aggregateType: "board",
+            type: "board.description_updated",
+            occurredAt: new Date(),
+            correlationId: input.idempotencyKey ?? undefined,
+            payload: {
+              boardId: input.boardId,
+              oldDescription: board.description ?? null,
+              newDescription,
+              updatedBy: ctx.session.user.id,
+            },
+          });
+        }
+
+        return { success: true, noOp: false, boardId: input.boardId };
+      });
+    }),
 
   // ── archiveBoard (refactored) ────────────────────────────────────────────
   //

@@ -26,6 +26,7 @@ import { softDeleteBoardAction } from "./_actions/softDeleteBoard";
 import { inviteBoardMemberAction } from "./_actions/inviteBoardMember";
 import { removeBoardMemberAction } from "./_actions/removeBoardMember";
 import { renameBoardAction } from "./_actions/renameBoard";
+import { updateBoardDescriptionAction } from "./_actions/updateBoardDescription";
 import { restoreBoardAction } from "./_actions/restoreBoard";
 import { setBackgroundAction } from "./_actions/setBackground";
 import { unarchiveBoardAction } from "./_actions/unarchiveBoard";
@@ -42,6 +43,7 @@ interface BoardPageProps {
 
 const BOARD_SETTINGS_ACTIONS = {
   onRename: renameBoardAction,
+  onUpdateDescription: updateBoardDescriptionAction,
   onArchive: archiveBoardAction,
   onUnarchive: unarchiveBoardAction,
   onDelete: softDeleteBoardAction,
