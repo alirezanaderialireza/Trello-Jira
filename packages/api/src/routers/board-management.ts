@@ -359,6 +359,9 @@ export const boardManagementRouter = router({
           .where(eq(boards.id, input.boardId));
 
         if (titleChanged) {
+          // titleChanged guarantees input.title is defined; assert for the
+          // JSON payload (a bare boolean doesn't narrow the union).
+          const nextTitle = input.title as string;
           await ctx.repos.outbox.append(ctx.infra.db, {
             eventId: crypto.randomUUID(),
             eventVersion: "v1",
@@ -367,7 +370,7 @@ export const boardManagementRouter = router({
             type: "board.renamed",
             occurredAt: new Date(),
             correlationId: input.idempotencyKey ?? undefined,
-            payload: { boardId: input.boardId, title: input.title },
+            payload: { boardId: input.boardId, title: nextTitle },
           });
         }
 
