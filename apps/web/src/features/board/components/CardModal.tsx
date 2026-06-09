@@ -648,6 +648,22 @@ export default function CardModal() {
   }, [activeCardId, closeCardModal]);
 
   // ========================================================================
+  // Focus restore — return focus to whatever opened the modal (the card)
+  // once it closes, so keyboard users are not dropped at the top of the DOM.
+  // ========================================================================
+
+  useEffect(() => {
+    if (!activeCardId) return;
+    const trigger =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    return () => {
+      trigger?.focus();
+    };
+  }, [activeCardId]);
+
+  // ========================================================================
   // Empty State
   // ========================================================================
 
