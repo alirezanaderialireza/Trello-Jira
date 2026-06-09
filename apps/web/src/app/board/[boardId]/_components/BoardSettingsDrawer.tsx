@@ -56,6 +56,10 @@ export type BoardSettingsTab = (typeof VALID_BOARD_SETTINGS_TABS)[number];
 
 export interface BoardSettingsActions {
   onRename: (input: { boardId: string; title: string }) => Promise<ActionResult>;
+  onUpdateDescription: (input: {
+    boardId: string;
+    description: string | null;
+  }) => Promise<ActionResult>;
   onArchive: (input: { boardId: string }) => Promise<ActionResult>;
   onUnarchive: (input: { boardId: string }) => Promise<ActionResult>;
   onDelete: (input: { boardId: string }) => Promise<ActionResult>;
@@ -268,6 +272,7 @@ function ActiveTabContent({
           description={settings.description}
           role={settings.role}
           onRename={actions.onRename}
+          onUpdateDescription={actions.onUpdateDescription}
         />
       );
     case "members":
