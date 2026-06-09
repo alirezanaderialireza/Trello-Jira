@@ -54,6 +54,14 @@ jobs:
       # F1.4.6-LOCAL (needs `pnpm --filter web typecheck` output, which the
       # web sandbox cannot run). See apps/web/e2e/LOCAL_RUNBOOK.md steps 10-11.
       - run: pnpm turbo typecheck --filter=@repo/db --filter=@repo/domain --filter=@repo/auth --filter=@repo/api --filter=@repo/infrastructure --filter=@repo/ws-server --filter=@repo/outbox-worker
+      # H-05 tracking (REPORT-ONLY, non-blocking). Prints apps/web's tsc errors
+      # into the CI log so they're visible without a local machine. Stays
+      # continue-on-error until the apps/web type-safety pass (H-01 -> H-05)
+      # drives the count to zero; then it folds into the matrix above and the
+      # next.config ignoreBuildErrors + tsconfig strict-off are removed.
+      - name: web typecheck (report-only, H-05)
+        run: pnpm --filter web typecheck
+        continue-on-error: true
       # Tests — domain + date engine (pre-existing chaos/property tests excluded)
       - name: Domain tests
         run: pnpm --filter @repo/domain test
