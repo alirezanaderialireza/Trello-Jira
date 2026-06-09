@@ -16,6 +16,7 @@ import { DndContext, DragOverlay } from "@dnd-kit/core";
 import CardModal from "./CardModal";
 import { BoardCanvas } from "./BoardCanvas";
 import { BoardDragOverlay } from "./BoardDragOverlay";
+import { BoardStarButton } from "./BoardStarButton";
 import { ConnectionStatusBanner } from "./realtime/ConnectionStatusBanner";
 import { PresenceAvatars } from "./realtime/PresenceAvatars";
 
@@ -81,7 +82,10 @@ export default function BoardView({
         show other users on this board (local user filtered out).
       */}
       <div className="flex items-center justify-between gap-3 px-4 pt-3 pb-1">
-        <ConnectionStatusBanner onManualReconnect={engine.triggerManualReconnect} />
+        <div className="flex items-center gap-2">
+          <BoardStarButton boardId={boardId} boardTitle={data.title} />
+          <ConnectionStatusBanner onManualReconnect={engine.triggerManualReconnect} />
+        </div>
         <PresenceAvatars currentUserId={engine.presenceUserId} />
       </div>
 
